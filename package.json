@@ -1,0 +1,29 @@
+{
+  "name": "csv-parser",
+  "version": "1.0.0",
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "tsc": "bunx --bun tsc --noEmit",
+    "lint:biome": "bunx --bun @biomejs/biome check",
+    "lint:oxlint": "bunx --bun oxlint --type-aware",
+    "lint": "bun tsc && bun lint:biome && bun lint:oxlint",
+    "fmt": "bunx --bun dprint fmt"
+  },
+  "dependencies": {
+    "@drizzle-team/brocli": "^0.12.0"
+  },
+  "peerDependencies": {
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.1",
+    "@types/bun": "1.3.14",
+    "dprint": "^0.55.1",
+    "mitata": "^1.0.34",
+    "oxlint": "^1.72.0"
+  },
+  "engines": {
+    "bun": "^1.3.14"
+  }
+}
