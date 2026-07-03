@@ -10,6 +10,13 @@
 #include <utility>
 #include <vector>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+
 #if defined(_WIN32)
 #define CSV_EXPORT extern "C" __declspec(dllexport)
 #else
@@ -77,6 +84,37 @@ struct CsvGroupByCountBatch {
 };
 
 constexpr size_t kNpos = std::numeric_limits<size_t>::max();
+
+uint64_t count_trusted_newlines(const uint8_t* data, size_t len) {
+  if (data == nullptr || len == 0) {
+    return 0;
+  }
+
+  uint64_t rows = 0;
+  size_t i = 0;
+#if defined(__AVX2__)
+  const __m256i newline = _mm256_set1_epi8('\n');
+  for (; i + 32 <= len; i += 32) {
+    const __m256i bytes = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data + i));
+    const __m256i matches = _mm256_cmpeq_epi8(bytes, newline);
+    rows += static_cast<uint64_t>(__builtin_popcount(static_cast<unsigned>(_mm256_movemask_epi8(matches))));
+  }
+#elif defined(__ARM_NEON)
+  const uint8x16_t newline = vdupq_n_u8('\n');
+  for (; i + 16 <= len; i += 16) {
+    const uint8x16_t bytes = vld1q_u8(data + i);
+    const uint8x16_t matches = vceqq_u8(bytes, newline);
+    rows += static_cast<uint64_t>(vaddvq_u8(vcntq_u8(matches)) >> 3);
+  }
+#endif
+  for (; i < len; ++i) {
+    rows += data[i] == '\n' ? 1 : 0;
+  }
+  if (data[len - 1] != '\n' && data[len - 1] != '\r') {
+    ++rows;
+  }
+  return rows;
+}
 
 void append_latin1_scalar(std::string& out, const uint8_t* data, size_t len) {
   for (size_t i = 0; i < len; ++i) {
@@ -326,9 +364,26 @@ class CsvParser {
     selected_columns_len_ = selected_columns_len;
     projection_enabled_ = selected_columns != nullptr;
     filter_ = filter;
+    selected_column_counts_.clear();
+    selected_column_outputs_.clear();
 
     if (projection_enabled_ && projected_fields_.size() != selected_columns_len_) {
       projected_fields_.assign(selected_columns_len_, std::string{});
+    }
+    if (projection_enabled_) {
+      uint32_t max_column = 0;
+      for (size_t i = 0; i < selected_columns_len_; ++i) {
+        if (selected_columns_[i] > max_column) {
+          max_column = selected_columns_[i];
+        }
+      }
+      selected_column_counts_.assign(static_cast<size_t>(max_column) + 1, 0);
+      selected_column_outputs_.assign(static_cast<size_t>(max_column) + 1, std::vector<uint32_t>{});
+      for (size_t i = 0; i < selected_columns_len_; ++i) {
+        const uint32_t column = selected_columns_[i];
+        ++selected_column_counts_[column];
+        selected_column_outputs_[column].push_back(checked_u32(i));
+      }
     }
   }
 
@@ -709,13 +764,7 @@ class CsvParser {
   }
 
   size_t selected_output_count(uint32_t column) const {
-    size_t count = 0;
-    for (size_t i = 0; i < selected_columns_len_; ++i) {
-      if (selected_columns_[i] == column) {
-        ++count;
-      }
-    }
-    return count;
+    return column < selected_column_counts_.size() ? selected_column_counts_[column] : 0;
   }
 
   void FinishDeferredField() {
@@ -733,10 +782,12 @@ class CsvParser {
       return;
     }
 
-    for (size_t i = 0; i < selected_columns_len_; ++i) {
-      if (selected_columns_[i] == current_column_) {
-        projected_fields_[i] = field_;
-      }
+    if (current_column_ >= selected_column_outputs_.size()) {
+      return;
+    }
+
+    for (const uint32_t output_index : selected_column_outputs_[current_column_]) {
+      projected_fields_[output_index] = field_;
     }
   }
 
@@ -990,6 +1041,8 @@ class CsvParser {
   std::unique_ptr<CsvGroupByCountBatch> group_by_count_batch_owner_;
   const uint32_t* selected_columns_ = nullptr;
   size_t selected_columns_len_ = 0;
+  std::vector<uint8_t> selected_column_counts_;
+  std::vector<std::vector<uint32_t>> selected_column_outputs_;
   bool projection_enabled_ = false;
   EqualsFilter filter_;
   std::string field_;
@@ -1372,6 +1425,14 @@ CSV_EXPORT uint64_t csv_parser_write_count(void* parser, const uint8_t* data, ui
   }
 
   return csv_native::checked_parser(parser)->WriteCount(data, static_cast<size_t>(len), final);
+}
+
+CSV_EXPORT uint64_t csv_parser_count_trusted_newlines(const uint8_t* data, uint64_t len) {
+  if (len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return 0;
+  }
+
+  return csv_native::count_trusted_newlines(data, static_cast<size_t>(len));
 }
 
 CSV_EXPORT uint64_t csv_parser_finish_count(void* parser) {

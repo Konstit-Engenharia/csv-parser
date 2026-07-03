@@ -204,6 +204,10 @@ const CSV_SYMBOLS = {
     args: ['ptr', 'buffer', 'u64', 'bool'],
     returns: 'u64',
   },
+  csv_parser_count_trusted_newlines: {
+    args: ['buffer', 'u64'],
+    returns: 'u64',
+  },
   csv_parser_finish_count: {
     args: ['ptr'],
     returns: 'u64',
@@ -969,6 +973,14 @@ export function parseCsvBuffer(buffer: NodeJS.TypedArray | DataView, options: Cs
   } finally {
     parser.close();
   }
+}
+
+export function countTrustedNewlineRows(buffer: NodeJS.TypedArray | DataView): number {
+  if (buffer.byteLength === 0) {
+    return 0;
+  }
+  const input = normalizeChunk(buffer);
+  return Number(native.symbols.csv_parser_count_trusted_newlines(input, BigInt(input.byteLength)));
 }
 
 export async function* parseCsvFile(path: string, options: CsvFileOptions = {}): AsyncGenerator<CsvRow[], void> {

@@ -31,6 +31,7 @@ void* csv_parser_write_dictionary_batch(void* parser, const uint8_t* data, uint6
 uint64_t csv_parser_write_group_by_count(void* parser, const uint8_t* data, uint64_t len, uint32_t column);
 void* csv_parser_finish_group_by_count(void* parser, uint32_t column);
 uint64_t csv_parser_write_count(void* parser, const uint8_t* data, uint64_t len, bool final);
+uint64_t csv_parser_count_trusted_newlines(const uint8_t* data, uint64_t len);
 uint64_t csv_parser_write_count_where_equals(
   void* parser,
   const uint8_t* data,
@@ -135,6 +136,14 @@ void bench_count() {
   consume(rows);
 }
 
+void bench_trusted_count() {
+  const uint64_t rows = csv_parser_count_trusted_newlines(g_input.data(), g_input.size());
+  if (rows == 0) {
+    fail("trusted count returned 0 rows");
+  }
+  consume(rows);
+}
+
 void bench_filter_count() {
   void* parser = new_parser();
   const uint64_t rows = csv_parser_write_count_where_equals(
@@ -228,6 +237,7 @@ int main() {
   mitata::runner runner;
   auto* count = runner.bench("native count", bench_count);
   count->baseline();
+  runner.bench("native trusted count", bench_trusted_count);
   runner.bench("native filter count", bench_filter_count);
   runner.bench("native binary batch", bench_binary_batch);
   runner.bench("native dictionary column", bench_dictionary);

@@ -9,6 +9,7 @@ import {
   CsvStringCache,
   NativeCsvParser,
   countCsvFileWhereEquals,
+  countTrustedNewlineRows,
   parseCsvBuffer,
   parseCsvFileDictionary,
   parseCsvFileGroupByCount,
@@ -60,6 +61,12 @@ describe('NativeCsvParser', () => {
     } finally {
       parser.close();
     }
+  });
+
+  test('counts trusted newline-delimited rows without CSV quote parsing', () => {
+    expect(countTrustedNewlineRows(Buffer.from('a,b\n1,2\n3,4'))).toBe(3);
+    expect(countTrustedNewlineRows(Buffer.from('a,b\r\n1,2\r\n'))).toBe(2);
+    expect(countTrustedNewlineRows(Buffer.alloc(0))).toBe(0);
   });
 
   test('does not emit an extra row when stream ends after newline', () => {
