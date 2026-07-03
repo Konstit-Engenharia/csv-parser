@@ -4,14 +4,23 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
+    "build:native": "cmake --preset release && cmake --build --preset release",
+    "test": "bun test",
+    "bench": "bun run build:native && bun bench/csv.bench.ts",
+    "bench:example": "bun run build:native && bun bench/example-file.bench.ts",
+    "profile:cpu": "bun run build:native && mkdir -p profiles && bun --cpu-prof-md --cpu-prof-dir profiles bench/profile-runtime.ts",
+    "profile:heap": "bun run build:native && mkdir -p profiles && bun --heap-prof-md --heap-prof-dir profiles bench/profile-runtime.ts",
+    "profile:native-memory": "bun run build:native && MIMALLOC_SHOW_STATS=1 bun bench/profile-runtime.ts",
     "tsc": "bunx --bun tsc --noEmit",
     "lint:biome": "bunx --bun @biomejs/biome check",
     "lint:oxlint": "bunx --bun oxlint --type-aware",
-    "lint": "bun tsc && bun lint:biome && bun lint:oxlint",
+    "lint": "bun run tsc && bun run lint:biome && bun run lint:oxlint",
     "fmt": "bunx --bun dprint fmt"
   },
   "dependencies": {
-    "@drizzle-team/brocli": "^0.12.0"
+    "@drizzle-team/brocli": "^0.12.0",
+    "csv-parser": "^3.2.1",
+    "iconv-lite": "^0.7.2"
   },
   "peerDependencies": {
     "typescript": "5.9.3"
