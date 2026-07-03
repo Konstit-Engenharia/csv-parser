@@ -309,6 +309,7 @@ class CsvParser {
     group_by_row_seen_ = false;
     emitted_rows_ = 0;
     field_in_arena_ = false;
+    complete_quoted_field_has_escape_ = false;
   }
 
   const char* LastError() const {
@@ -333,6 +334,11 @@ class CsvParser {
 
   void Parse(const uint8_t* data, size_t len) {
     if (data == nullptr || len == 0) {
+      return;
+    }
+
+    if (mode_ == OutputMode::kCount && !filter_.enabled) {
+      ParseCountOnly(data, len);
       return;
     }
 
@@ -422,12 +428,84 @@ class CsvParser {
     }
   }
 
+  void ParseCountOnly(const uint8_t* data, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+      if (in_quotes_) {
+        if (pending_quote_) {
+          if (data[i] == '"') {
+            pending_quote_ = false;
+            saw_row_data_ = true;
+            at_field_start_ = false;
+            ++i;
+            continue;
+          }
+          pending_quote_ = false;
+          in_quotes_ = false;
+          continue;
+        }
+
+        const size_t quote = find_byte_simd(data + i, len - i, '"');
+        saw_row_data_ = true;
+        at_field_start_ = false;
+        if (quote == kNpos) {
+          return;
+        }
+        i += quote + 1;
+        pending_quote_ = true;
+        continue;
+      }
+
+      const uint8_t byte = data[i];
+      if (previous_was_cr_ && byte == '\n') {
+        previous_was_cr_ = false;
+        ++i;
+        continue;
+      }
+      previous_was_cr_ = false;
+
+      if (byte == '"' && at_field_start_) {
+        in_quotes_ = true;
+        pending_quote_ = false;
+        saw_row_data_ = true;
+        at_field_start_ = false;
+        ++i;
+        continue;
+      }
+
+      if (byte == '\n' || byte == '\r') {
+        if (saw_row_data_) {
+          ++emitted_rows_;
+        }
+        previous_was_cr_ = byte == '\r';
+        saw_row_data_ = false;
+        at_field_start_ = true;
+        current_column_ = 0;
+        ++i;
+        continue;
+      }
+
+      if (byte == delimiter_) {
+        saw_row_data_ = true;
+        at_field_start_ = true;
+        ++i;
+        continue;
+      }
+
+      const size_t span = FindPlainSpan(data + i, len - i);
+      saw_row_data_ = true;
+      at_field_start_ = false;
+      i += span;
+    }
+  }
+
   size_t FindPlainSpan(const uint8_t* data, size_t len) const {
     const size_t found = find_plain_special_simd(data, len, delimiter_);
     return found == kNpos ? len : found;
   }
 
   size_t FindCompleteQuotedFieldClose(const uint8_t* data, size_t len) const {
+    complete_quoted_field_has_escape_ = false;
     size_t i = 1;
     while (i < len) {
       const size_t quote = find_byte_simd(data + i, len - i, '"');
@@ -442,6 +520,7 @@ class CsvParser {
 
       const uint8_t next = data[i + 1];
       if (next == '"') {
+        complete_quoted_field_has_escape_ = true;
         i += 2;
         continue;
       }
@@ -518,6 +597,11 @@ class CsvParser {
 
   void AppendQuotedFieldToArena(const uint8_t* data, size_t close_quote) {
     field_in_arena_ = true;
+    if (!complete_quoted_field_has_escape_) {
+      batch_->data.append(reinterpret_cast<const char*>(data + 1), close_quote - 1);
+      return;
+    }
+
     size_t segment_start = 1;
     for (size_t i = 1; i < close_quote; ++i) {
       if (data[i] == '"' && i + 1 < close_quote && data[i + 1] == '"') {
@@ -531,6 +615,11 @@ class CsvParser {
   }
 
   void AppendQuotedFieldToFieldBuffer(const uint8_t* data, size_t close_quote) {
+    if (!complete_quoted_field_has_escape_) {
+      AppendDecodedSpan(data + 1, close_quote - 1);
+      return;
+    }
+
     size_t segment_start = 1;
     for (size_t i = 1; i < close_quote; ++i) {
       if (data[i] == '"' && i + 1 < close_quote && data[i + 1] == '"') {
@@ -926,6 +1015,7 @@ class CsvParser {
   uint32_t group_by_row_id_ = 0;
   bool group_by_row_seen_ = false;
   bool field_in_arena_ = false;
+  mutable bool complete_quoted_field_has_escape_ = false;
   uint64_t emitted_rows_ = 0;
 };
 
