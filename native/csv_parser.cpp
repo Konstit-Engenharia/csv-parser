@@ -391,7 +391,21 @@ class CsvParser {
         const size_t close_quote = FindCompleteQuotedFieldClose(data + i, len - i);
         if (close_quote != kNpos) {
           AppendCompleteQuotedField(data + i, close_quote);
-          i += close_quote + 1;
+          const size_t terminator_index = i + close_quote + 1;
+          const uint8_t terminator = data[terminator_index];
+          if (terminator == delimiter_) {
+            FinishField();
+            saw_row_data_ = true;
+            i = terminator_index + 1;
+            continue;
+          }
+          if (terminator == '\n' || terminator == '\r') {
+            FinishRow();
+            previous_was_cr_ = terminator == '\r';
+            i = terminator_index + 1;
+            continue;
+          }
+          i = terminator_index;
           continue;
         }
 
