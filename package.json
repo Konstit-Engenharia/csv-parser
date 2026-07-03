@@ -6,6 +6,7 @@
   "scripts": {
     "build:native": "cmake --preset release && cmake --build --preset release",
     "test": "bun test",
+    "test:native": "bun run build:native && ctest --test-dir build --output-on-failure",
     "bench": "bun run build:native && bun bench/csv.bench.ts",
     "bench:example": "bun run build:native && bun bench/example-file.bench.ts",
     "bench:native": "bun run build:native && ./build/csv_native_bench",

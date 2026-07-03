@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.25)
 
 project(bun_csv_parser LANGUAGES CXX)
 
+include(CTest)
+
+find_package(Catch2 CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
 
 add_library(csv_native SHARED
@@ -48,3 +51,12 @@ target_link_libraries(csv_native_bench PRIVATE csv_native)
 set_target_properties(csv_native_bench PROPERTIES
   INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
 )
+
+add_executable(csv_native_tests
+  test/native_csv_cxx_test.cpp
+)
+
+target_compile_features(csv_native_tests PRIVATE cxx_std_20)
+target_link_libraries(csv_native_tests PRIVATE csv_native Catch2::Catch2WithMain)
+
+add_test(NAME csv_native_tests COMMAND csv_native_tests)
