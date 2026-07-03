@@ -6,11 +6,13 @@ import {
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  type CsvGroupByCountEntry,
   CsvStringCache,
   NativeCsvParser,
   countCsvFileWhereEquals,
   countTrustedNewlineRows,
   parseCsvBuffer,
+  parseCsvFileColumnStats,
   parseCsvFileDictionary,
   parseCsvFileGroupByCount,
 } from '../src/index.ts';
@@ -182,6 +184,42 @@ describe('NativeCsvParser', () => {
     }
   });
 
+  test('collects selected column ids and counts in one native pass', () => {
+    const parser = new NativeCsvParser({ delimiter: ';' });
+    try {
+      expect(parser.writeColumnStats(Buffer.from('"1";"SP"\n"2";"'), 1)).toBe(1);
+      expect(parser.writeColumnStats(Buffer.from('SP"\n"3";"RJ"\n"4"\n'), 1)).toBe(3);
+      const batch = parser.endColumnStats(1);
+      try {
+        expect(batch.rowCount).toBe(4);
+        expect(batch.dictionaryStrings()).toEqual(['SP', 'RJ', '']);
+        expect(batch.dictionaryString(1)).toBe('RJ');
+        expect([...batch.ids()]).toEqual([0, 0, 1, 2]);
+        expect(batch.countsNumbers()).toEqual([2, 1, 1]);
+        expect(batch.countNumberAt(0)).toBe(2);
+        expect(batch.entries()).toEqual([
+          { value: 'SP', count: 2 },
+          { value: 'RJ', count: 1 },
+          { value: '', count: 1 },
+        ]);
+        const entries: CsvGroupByCountEntry[] = [];
+        batch.forEachEntry((value, count) => {
+          entries.push({ value, count });
+        });
+        expect(entries).toEqual([
+          { value: 'SP', count: 2 },
+          { value: 'RJ', count: 1 },
+          { value: '', count: 1 },
+        ]);
+        expect(batch.dictionaryDataView().byteLength).toBe(batch.dictionaryData().byteLength);
+      } finally {
+        batch.close();
+      }
+    } finally {
+      parser.close();
+    }
+  });
+
   test('parseCsvBuffer materializes selected columns', () => {
     expect(parseCsvBuffer(Buffer.from('"id";"name";"uf"\n"1";"Ana";"SP"\n'), {
       delimiter: ';',
@@ -274,6 +312,44 @@ describe('NativeCsvParser', () => {
           { value: 'SP', count: 2 },
           { value: 'RJ', count: 1 },
         ]);
+      } finally {
+        batch.close();
+      }
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test('streams native column stats from a file', async () => {
+    const path = join(import.meta.dir, 'tmp-column-stats.csv');
+    await Bun.write(path, '"id";"uf"\n"1";"SP"\n"2";"SP"\n"3";"RJ"\n');
+    try {
+      const batch = await parseCsvFileColumnStats(path, 1, { delimiter: ';', chunkSize: 12 });
+      try {
+        expect(batch.rowCount).toBe(4);
+        expect([...batch.ids()]).toEqual([0, 1, 1, 2]);
+        expect(batch.entries()).toEqual([
+          { value: 'uf', count: 1 },
+          { value: 'SP', count: 2 },
+          { value: 'RJ', count: 1 },
+        ]);
+      } finally {
+        batch.close();
+      }
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test('returns empty native column stats for an empty file', async () => {
+    const path = join(import.meta.dir, 'tmp-column-stats-empty.csv');
+    await Bun.write(path, '');
+    try {
+      const batch = await parseCsvFileColumnStats(path, 1, { delimiter: ';', chunkSize: 12 });
+      try {
+        expect(batch.rowCount).toBe(0);
+        expect([...batch.ids()]).toEqual([]);
+        expect(batch.entries()).toEqual([]);
       } finally {
         batch.close();
       }
