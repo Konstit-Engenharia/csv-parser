@@ -9,6 +9,7 @@ import {
   countCsvFileWhereEquals,
   parseCsvFile,
   parseCsvFileDictionary,
+  parseCsvFileGroupByCount,
   parseCsvFileProjected,
 } from '../src/index.ts';
 
@@ -27,6 +28,7 @@ const STRING_CACHE_COLUMNS = (Bun.env['CSV_STRING_CACHE_COLUMNS'] ?? '19')
 const FILTER_COLUMN = Number(Bun.env['CSV_BENCH_FILTER_COLUMN'] ?? 19);
 const FILTER_VALUE = Bun.env['CSV_BENCH_FILTER_VALUE'] ?? 'SP';
 const DICTIONARY_COLUMN = Number(Bun.env['CSV_BENCH_DICTIONARY_COLUMN'] ?? 19);
+const GROUP_BY_COLUMN = Number(Bun.env['CSV_BENCH_GROUPBY_COLUMN'] ?? 19);
 const bytes = statSync(FILE).size;
 
 const cases = [
@@ -36,6 +38,7 @@ const cases = [
   ['native materialize selected columns', () => countNativeSelectedRows()],
   ['native materialize selected columns(cached strings)', () => countNativeSelectedRowsCached()],
   ['native dictionary column ids', () => countNativeDictionaryColumn()],
+  ['native groupby count', () => countNativeGroupByCount()],
   ['native projected columns', () => countNativeProjectedRows()],
   ['native count', () => countCsvFile(FILE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER })],
   ['native filter equals', () => countCsvFileWhereEquals(FILE, FILTER_COLUMN, FILTER_VALUE, {
@@ -57,6 +60,7 @@ console.log(JSON.stringify({
   filterColumn: FILTER_COLUMN,
   filterValue: FILTER_VALUE,
   dictionaryColumn: DICTIONARY_COLUMN,
+  groupByColumn: GROUP_BY_COLUMN,
 }));
 
 for (const [name, fn] of cases) {
@@ -138,6 +142,24 @@ async function countNativeDictionaryColumn(): Promise<number> {
     throw new Error('native dictionary column ids: no dictionary values');
   }
   return rows;
+}
+
+async function countNativeGroupByCount(): Promise<number> {
+  const batch = await parseCsvFileGroupByCount(FILE, GROUP_BY_COLUMN, {
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+  });
+  try {
+    batch.counts();
+    batch.dictionaryOffsets();
+    batch.dictionaryData();
+    if (batch.dictionaryCount === 0) {
+      throw new Error('native groupby count: no dictionary values');
+    }
+    return batch.rowCount;
+  } finally {
+    batch.close();
+  }
 }
 
 async function countNativeSelectedRowsCached(): Promise<number> {

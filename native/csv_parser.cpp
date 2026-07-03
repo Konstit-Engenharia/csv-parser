@@ -28,6 +28,7 @@ enum class OutputMode {
   kBatch,
   kCount,
   kDictionary,
+  kGroupByCount,
 };
 
 struct EqualsFilter {
@@ -58,6 +59,17 @@ struct CsvDictionaryBatch {
   uint64_t row_count() const {
     return ids.size();
   }
+
+  uint64_t dict_count() const {
+    return dict_offsets.empty() ? 0 : dict_offsets.size() - 1;
+  }
+};
+
+struct CsvGroupByCountBatch {
+  std::vector<uint64_t> counts;
+  std::vector<uint32_t> dict_offsets{0};
+  std::string dict_data;
+  uint64_t row_count = 0;
 
   uint64_t dict_count() const {
     return dict_offsets.empty() ? 0 : dict_offsets.size() - 1;
@@ -201,6 +213,47 @@ class CsvParser {
     return WriteDictionaryBatch(nullptr, 0, true, column);
   }
 
+  uint64_t WriteGroupByCount(const uint8_t* data, size_t len, uint32_t column) {
+    if (group_by_count_batch_owner_ == nullptr) {
+      group_by_count_batch_owner_ = std::make_unique<CsvGroupByCountBatch>();
+      group_by_hash_ids_.clear();
+      group_by_hash_ids_.reserve(128);
+      group_by_hash_collisions_.clear();
+      group_by_column_ = column;
+    } else if (group_by_column_ != column) {
+      SetError("groupBy count column changed during stream");
+      return 0;
+    }
+
+    mode_ = OutputMode::kGroupByCount;
+    group_by_count_batch_ = group_by_count_batch_owner_.get();
+    emitted_rows_ = 0;
+    Parse(data, len);
+    return emitted_rows_;
+  }
+
+  CsvGroupByCountBatch* FinishGroupByCount(uint32_t column) {
+    if (group_by_count_batch_owner_ == nullptr) {
+      group_by_count_batch_owner_ = std::make_unique<CsvGroupByCountBatch>();
+      group_by_hash_ids_.clear();
+      group_by_hash_ids_.reserve(128);
+      group_by_hash_collisions_.clear();
+      group_by_column_ = column;
+    } else if (group_by_column_ != column) {
+      SetError("groupBy count column changed during stream");
+      return nullptr;
+    }
+
+    mode_ = OutputMode::kGroupByCount;
+    group_by_count_batch_ = group_by_count_batch_owner_.get();
+    emitted_rows_ = 0;
+    FinishStream();
+    group_by_count_batch_ = nullptr;
+    group_by_hash_ids_.clear();
+    group_by_hash_collisions_.clear();
+    return group_by_count_batch_owner_.release();
+  }
+
   uint64_t WriteCount(const uint8_t* data, size_t len, bool final) {
     return WriteCountWhereEquals(data, len, final, EqualsFilter{});
   }
@@ -231,8 +284,12 @@ class CsvParser {
     error_.clear();
     batch_ = nullptr;
     dictionary_batch_ = nullptr;
+    group_by_count_batch_ = nullptr;
+    group_by_count_batch_owner_.reset();
     dictionary_hash_ids_.clear();
     dictionary_hash_collisions_.clear();
+    group_by_hash_ids_.clear();
+    group_by_hash_collisions_.clear();
     selected_columns_ = nullptr;
     selected_columns_len_ = 0;
     projection_enabled_ = false;
@@ -247,6 +304,9 @@ class CsvParser {
     row_filter_matched_ = false;
     dictionary_column_ = 0;
     dictionary_row_seen_ = false;
+    group_by_column_ = 0;
+    group_by_row_id_ = 0;
+    group_by_row_seen_ = false;
     emitted_rows_ = 0;
     field_in_arena_ = false;
   }
@@ -474,6 +534,8 @@ class CsvParser {
       FinishDeferredField();
     } else if (mode_ == OutputMode::kDictionary) {
       FinishDictionaryField();
+    } else if (mode_ == OutputMode::kGroupByCount) {
+      FinishGroupByCountField();
     } else if (mode_ == OutputMode::kBatch && batch_ != nullptr) {
       if (!field_in_arena_) {
         batch_->data.append(field_);
@@ -504,6 +566,9 @@ class CsvParser {
     if (mode_ == OutputMode::kDictionary) {
       FinishDictionaryRow();
     }
+    if (mode_ == OutputMode::kGroupByCount) {
+      FinishGroupByCountRow();
+    }
     if (emit_row) {
       ++emitted_rows_;
     }
@@ -523,6 +588,10 @@ class CsvParser {
 
     if (mode_ == OutputMode::kDictionary) {
       return current_column_ == dictionary_column_;
+    }
+
+    if (mode_ == OutputMode::kGroupByCount) {
+      return current_column_ == group_by_column_;
     }
 
     if (!UseDeferredRows()) {
@@ -607,6 +676,36 @@ class CsvParser {
     dictionary_batch_->ids.push_back(dictionary_row_id_);
   }
 
+  void FinishGroupByCountField() {
+    if (group_by_count_batch_ != nullptr && current_column_ == group_by_column_) {
+      group_by_row_seen_ = true;
+      group_by_row_id_ = InternGroupByCountValue(
+        *group_by_count_batch_,
+        group_by_hash_ids_,
+        group_by_hash_collisions_,
+        field_.data(),
+        field_.size()
+      );
+    }
+  }
+
+  void FinishGroupByCountRow() {
+    if (group_by_count_batch_ == nullptr) {
+      return;
+    }
+    if (!group_by_row_seen_) {
+      group_by_row_id_ = InternGroupByCountValue(
+        *group_by_count_batch_,
+        group_by_hash_ids_,
+        group_by_hash_collisions_,
+        nullptr,
+        0
+      );
+    }
+    ++group_by_count_batch_->counts[group_by_row_id_];
+    ++group_by_count_batch_->row_count;
+  }
+
   void CommitDeferredBatchRow() {
     if (batch_ == nullptr) {
       return;
@@ -636,6 +735,7 @@ class CsvParser {
     row_filter_seen_ = false;
     row_filter_matched_ = false;
     dictionary_row_seen_ = false;
+    group_by_row_seen_ = false;
     row_fields_.clear();
     for (auto& field : projected_fields_) {
       field.clear();
@@ -717,6 +817,54 @@ class CsvParser {
     return BytesEqual(dictionary.dict_data.data() + start, end - start, value, value_len);
   }
 
+  static uint32_t InternGroupByCountValue(
+    CsvGroupByCountBatch& dictionary,
+    std::unordered_map<uint64_t, uint32_t>& hash_ids,
+    std::unordered_map<uint64_t, std::vector<uint32_t>>& hash_collisions,
+    const char* value,
+    size_t value_len
+  ) {
+    const char* actual = value == nullptr ? "" : value;
+    const uint64_t hash = HashBytes(actual, value_len);
+    const auto found = hash_ids.find(hash);
+    if (found != hash_ids.end()) {
+      if (GroupByCountValueEquals(dictionary, found->second, actual, value_len)) {
+        return found->second;
+      }
+
+      const auto collisions = hash_collisions.find(hash);
+      if (collisions != hash_collisions.end()) {
+        for (const uint32_t id : collisions->second) {
+          if (GroupByCountValueEquals(dictionary, id, actual, value_len)) {
+            return id;
+          }
+        }
+      }
+
+      const uint32_t id = AppendGroupByCountValue(dictionary, actual, value_len);
+      hash_collisions[hash].push_back(id);
+      return id;
+    }
+
+    const uint32_t id = AppendGroupByCountValue(dictionary, actual, value_len);
+    hash_ids.emplace(hash, id);
+    return id;
+  }
+
+  static uint32_t AppendGroupByCountValue(CsvGroupByCountBatch& dictionary, const char* value, size_t value_len) {
+    const uint32_t id = checked_u32(dictionary.dict_offsets.size() - 1);
+    dictionary.dict_data.append(value, value_len);
+    dictionary.dict_offsets.push_back(checked_u32(dictionary.dict_data.size()));
+    dictionary.counts.push_back(0);
+    return id;
+  }
+
+  static bool GroupByCountValueEquals(const CsvGroupByCountBatch& dictionary, uint32_t id, const char* value, size_t value_len) {
+    const size_t start = dictionary.dict_offsets[id];
+    const size_t end = dictionary.dict_offsets[id + 1];
+    return BytesEqual(dictionary.dict_data.data() + start, end - start, value, value_len);
+  }
+
   static uint64_t HashBytes(const char* data, size_t len) {
     uint64_t hash = 1469598103934665603ull;
     for (size_t index = 0; index < len; ++index) {
@@ -735,6 +883,8 @@ class CsvParser {
   OutputMode mode_ = OutputMode::kBatch;
   CsvBatch* batch_ = nullptr;
   CsvDictionaryBatch* dictionary_batch_ = nullptr;
+  CsvGroupByCountBatch* group_by_count_batch_ = nullptr;
+  std::unique_ptr<CsvGroupByCountBatch> group_by_count_batch_owner_;
   const uint32_t* selected_columns_ = nullptr;
   size_t selected_columns_len_ = 0;
   bool projection_enabled_ = false;
@@ -744,6 +894,8 @@ class CsvParser {
   std::vector<std::string> projected_fields_;
   std::unordered_map<uint64_t, uint32_t> dictionary_hash_ids_;
   std::unordered_map<uint64_t, std::vector<uint32_t>> dictionary_hash_collisions_;
+  std::unordered_map<uint64_t, uint32_t> group_by_hash_ids_;
+  std::unordered_map<uint64_t, std::vector<uint32_t>> group_by_hash_collisions_;
   std::string error_;
   bool in_quotes_ = false;
   bool pending_quote_ = false;
@@ -756,6 +908,9 @@ class CsvParser {
   uint32_t dictionary_column_ = 0;
   uint32_t dictionary_row_id_ = 0;
   bool dictionary_row_seen_ = false;
+  uint32_t group_by_column_ = 0;
+  uint32_t group_by_row_id_ = 0;
+  bool group_by_row_seen_ = false;
   bool field_in_arena_ = false;
   uint64_t emitted_rows_ = 0;
 };
@@ -770,6 +925,10 @@ CsvBatch* checked_batch(void* batch) {
 
 CsvDictionaryBatch* checked_dictionary_batch(void* batch) {
   return static_cast<CsvDictionaryBatch*>(batch);
+}
+
+CsvGroupByCountBatch* checked_group_by_count_batch(void* batch) {
+  return static_cast<CsvGroupByCountBatch*>(batch);
 }
 
 }  // namespace csv_native
@@ -907,12 +1066,41 @@ CSV_EXPORT void* csv_parser_finish_dictionary_batch(void* parser, uint32_t colum
   return csv_native::checked_parser(parser)->FinishDictionaryBatch(column);
 }
 
+CSV_EXPORT uint64_t csv_parser_write_group_by_count(
+  void* parser,
+  const uint8_t* data,
+  uint64_t len,
+  uint32_t column
+) {
+  if (parser == nullptr || len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return 0;
+  }
+
+  return csv_native::checked_parser(parser)->WriteGroupByCount(
+    data,
+    static_cast<size_t>(len),
+    column
+  );
+}
+
+CSV_EXPORT void* csv_parser_finish_group_by_count(void* parser, uint32_t column) {
+  if (parser == nullptr) {
+    return nullptr;
+  }
+
+  return csv_native::checked_parser(parser)->FinishGroupByCount(column);
+}
+
 CSV_EXPORT void csv_batch_destroy(void* batch) {
   delete static_cast<csv_native::CsvBatch*>(batch);
 }
 
 CSV_EXPORT void csv_dictionary_batch_destroy(void* batch) {
   delete static_cast<csv_native::CsvDictionaryBatch*>(batch);
+}
+
+CSV_EXPORT void csv_group_by_count_batch_destroy(void* batch) {
+  delete static_cast<csv_native::CsvGroupByCountBatch*>(batch);
 }
 
 CSV_EXPORT uint64_t csv_dictionary_batch_row_count(void* batch) {
@@ -955,6 +1143,49 @@ CSV_EXPORT const uint8_t* csv_dictionary_batch_data_ptr(void* batch) {
     return nullptr;
   }
   const auto* typed = csv_native::checked_dictionary_batch(batch);
+  return reinterpret_cast<const uint8_t*>(typed->dict_data.data());
+}
+
+CSV_EXPORT uint64_t csv_group_by_count_batch_row_count(void* batch) {
+  if (batch == nullptr) {
+    return 0;
+  }
+  return csv_native::checked_group_by_count_batch(batch)->row_count;
+}
+
+CSV_EXPORT uint64_t csv_group_by_count_batch_dict_count(void* batch) {
+  if (batch == nullptr) {
+    return 0;
+  }
+  return csv_native::checked_group_by_count_batch(batch)->dict_count();
+}
+
+CSV_EXPORT const uint64_t* csv_group_by_count_batch_counts_ptr(void* batch) {
+  if (batch == nullptr) {
+    return nullptr;
+  }
+  return csv_native::checked_group_by_count_batch(batch)->counts.data();
+}
+
+CSV_EXPORT const uint32_t* csv_group_by_count_batch_offsets_ptr(void* batch) {
+  if (batch == nullptr) {
+    return nullptr;
+  }
+  return csv_native::checked_group_by_count_batch(batch)->dict_offsets.data();
+}
+
+CSV_EXPORT uint64_t csv_group_by_count_batch_data_len(void* batch) {
+  if (batch == nullptr) {
+    return 0;
+  }
+  return csv_native::checked_group_by_count_batch(batch)->dict_data.size();
+}
+
+CSV_EXPORT const uint8_t* csv_group_by_count_batch_data_ptr(void* batch) {
+  if (batch == nullptr) {
+    return nullptr;
+  }
+  const auto* typed = csv_native::checked_group_by_count_batch(batch);
   return reinterpret_cast<const uint8_t*>(typed->dict_data.data());
 }
 

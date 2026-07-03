@@ -29,3 +29,22 @@ set_target_properties(csv_native PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
 )
+
+add_executable(csv_native_bench
+  bench/native/native_bench.cpp
+)
+
+target_compile_features(csv_native_bench PRIVATE cxx_std_20)
+target_include_directories(csv_native_bench SYSTEM PRIVATE
+  bench/native
+)
+target_compile_options(csv_native_bench PRIVATE
+  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3 -DNDEBUG -fno-exceptions -fno-rtti -fomit-frame-pointer -funroll-loops ${CSV_NATIVE_CPU_FLAGS} -Wall -Wextra -Wpedantic>
+)
+target_link_options(csv_native_bench PRIVATE
+  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-exceptions -fno-rtti>
+)
+target_link_libraries(csv_native_bench PRIVATE csv_native)
+set_target_properties(csv_native_bench PROPERTIES
+  INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
+)

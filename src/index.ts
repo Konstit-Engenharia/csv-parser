@@ -59,6 +59,11 @@ export interface CsvStringCacheColumnStats {
   full: boolean;
 }
 
+export interface CsvGroupByCountEntry {
+  value: string;
+  count: number;
+}
+
 const EMPTY_BUFFER = new Uint8Array(1);
 const EMPTY_U32 = new Uint32Array(1);
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
@@ -99,11 +104,23 @@ const CSV_SYMBOLS = {
     args: ['ptr', 'u32'],
     returns: 'ptr',
   },
+  csv_parser_write_group_by_count: {
+    args: ['ptr', 'buffer', 'u64', 'u32'],
+    returns: 'u64',
+  },
+  csv_parser_finish_group_by_count: {
+    args: ['ptr', 'u32'],
+    returns: 'ptr',
+  },
   csv_batch_destroy: {
     args: ['ptr'],
     returns: 'void',
   },
   csv_dictionary_batch_destroy: {
+    args: ['ptr'],
+    returns: 'void',
+  },
+  csv_group_by_count_batch_destroy: {
     args: ['ptr'],
     returns: 'void',
   },
@@ -128,6 +145,30 @@ const CSV_SYMBOLS = {
     returns: 'u64',
   },
   csv_dictionary_batch_data_ptr: {
+    args: ['ptr'],
+    returns: 'ptr',
+  },
+  csv_group_by_count_batch_row_count: {
+    args: ['ptr'],
+    returns: 'u64',
+  },
+  csv_group_by_count_batch_dict_count: {
+    args: ['ptr'],
+    returns: 'u64',
+  },
+  csv_group_by_count_batch_counts_ptr: {
+    args: ['ptr'],
+    returns: 'ptr',
+  },
+  csv_group_by_count_batch_offsets_ptr: {
+    args: ['ptr'],
+    returns: 'ptr',
+  },
+  csv_group_by_count_batch_data_len: {
+    args: ['ptr'],
+    returns: 'u64',
+  },
+  csv_group_by_count_batch_data_ptr: {
     args: ['ptr'],
     returns: 'ptr',
   },
@@ -562,6 +603,117 @@ export class NativeCsvDictionaryBatch {
   }
 }
 
+export class NativeCsvGroupByCountBatch {
+  #handle: Pointer | null;
+  #counts: BigUint64Array | undefined;
+  #dictionaryOffsets: Uint32Array | undefined;
+  #dictionaryData: Buffer | undefined;
+
+  constructor(handle: Pointer) {
+    this.#handle = handle;
+  }
+
+  get rowCount(): number {
+    return Number(native.symbols.csv_group_by_count_batch_row_count(this.#requireHandle()));
+  }
+
+  get dictionaryCount(): number {
+    return Number(native.symbols.csv_group_by_count_batch_dict_count(this.#requireHandle()));
+  }
+
+  counts(): BigUint64Array {
+    if (this.#counts !== undefined) {
+      return this.#counts;
+    }
+    const dictCount = this.dictionaryCount;
+    if (dictCount === 0) {
+      this.#counts = new BigUint64Array(0);
+      return this.#counts;
+    }
+    const ptr = native.symbols.csv_group_by_count_batch_counts_ptr(this.#requireHandle());
+    if (ptr === null) {
+      throw new Error('native CSV groupBy count counts are null');
+    }
+    this.#counts = new BigUint64Array(toArrayBuffer(ptr, 0, dictCount * 8));
+    return this.#counts;
+  }
+
+  countsNumbers(): number[] {
+    return [...this.counts()].map((value) => {
+      if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new RangeError(`groupBy count exceeds Number.MAX_SAFE_INTEGER: ${value}`);
+      }
+      return Number(value);
+    });
+  }
+
+  dictionaryOffsets(): Uint32Array {
+    if (this.#dictionaryOffsets !== undefined) {
+      return this.#dictionaryOffsets;
+    }
+    const dictCount = this.dictionaryCount;
+    const ptr = native.symbols.csv_group_by_count_batch_offsets_ptr(this.#requireHandle());
+    if (ptr === null) {
+      throw new Error('native CSV groupBy count offsets are null');
+    }
+    this.#dictionaryOffsets = new Uint32Array(toArrayBuffer(ptr, 0, (dictCount + 1) * 4));
+    return this.#dictionaryOffsets;
+  }
+
+  dictionaryData(): Buffer {
+    if (this.#dictionaryData !== undefined) {
+      return this.#dictionaryData;
+    }
+    const handle = this.#requireHandle();
+    const dataLen = Number(native.symbols.csv_group_by_count_batch_data_len(handle));
+    const dataPtr = native.symbols.csv_group_by_count_batch_data_ptr(handle);
+    this.#dictionaryData = dataLen === 0 ? Buffer.allocUnsafe(0) : Buffer.from(toArrayBuffer(requirePtr(dataPtr), 0, dataLen));
+    return this.#dictionaryData;
+  }
+
+  dictionaryStrings(): string[] {
+    const offsets = this.dictionaryOffsets();
+    const data = this.dictionaryData();
+    const values: string[] = [];
+    for (let index = 0; index < this.dictionaryCount; ++index) {
+      const start = offsets[index] ?? 0;
+      const end = offsets[index + 1] ?? start;
+      values.push(data.toString('utf8', start, end));
+    }
+    return values;
+  }
+
+  entries(): CsvGroupByCountEntry[] {
+    const values = this.dictionaryStrings();
+    const counts = this.countsNumbers();
+    return values.map((value, index) => ({
+      value,
+      count: counts[index] ?? 0,
+    }));
+  }
+
+  close(): void {
+    if (this.#handle !== null) {
+      native.symbols.csv_group_by_count_batch_destroy(this.#handle);
+      this.#handle = null;
+      this.#counts = undefined;
+      this.#dictionaryOffsets = undefined;
+      this.#dictionaryData = undefined;
+    }
+  }
+
+  [Symbol.dispose](): void {
+    this.close();
+  }
+
+  #requireHandle(): Pointer {
+    if (this.#handle === null) {
+      throw new Error('native CSV groupBy count batch is closed');
+    }
+    return this.#handle;
+  }
+}
+
 export class NativeCsvParser {
   #handle: Pointer | null;
 
@@ -655,6 +807,24 @@ export class NativeCsvParser {
     return new NativeCsvDictionaryBatch(batch);
   }
 
+  writeGroupByCount(chunk: NodeJS.TypedArray | DataView, column: number): number {
+    if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
+      throw new RangeError(`groupBy count column out of range: ${column}`);
+    }
+    if (chunk.byteLength === 0) {
+      return 0;
+    }
+
+    const handle = this.#requireHandle();
+    const input = normalizeChunk(chunk);
+    return Number(native.symbols.csv_parser_write_group_by_count(
+      handle,
+      input,
+      BigInt(input.byteLength),
+      column,
+    ));
+  }
+
   end(): CsvRow[] {
     const batch = this.endBatch();
     try {
@@ -700,6 +870,17 @@ export class NativeCsvParser {
       throw new Error(`native CSV parser failed: ${this.#lastError()}`);
     }
     return new NativeCsvDictionaryBatch(batch);
+  }
+
+  endGroupByCount(column: number): NativeCsvGroupByCountBatch {
+    if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
+      throw new RangeError(`groupBy count column out of range: ${column}`);
+    }
+    const batch = native.symbols.csv_parser_finish_group_by_count(this.#requireHandle(), column);
+    if (batch === null) {
+      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
+    }
+    return new NativeCsvGroupByCountBatch(batch);
   }
 
   writeCount(chunk: NodeJS.TypedArray | DataView, final = false): number {
@@ -877,6 +1058,22 @@ export async function* parseCsvFileDictionary(
     } else {
       batch.close();
     }
+  } finally {
+    parser.close();
+  }
+}
+
+export async function parseCsvFileGroupByCount(
+  path: string,
+  columnIndex: number,
+  options: CsvFileOptions = {},
+): Promise<NativeCsvGroupByCountBatch> {
+  const parser = new NativeCsvParser(options);
+  try {
+    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+      parser.writeGroupByCount(chunk as Buffer, columnIndex);
+    }
+    return parser.endGroupByCount(columnIndex);
   } finally {
     parser.close();
   }

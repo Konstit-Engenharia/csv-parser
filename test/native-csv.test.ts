@@ -11,6 +11,7 @@ import {
   countCsvFileWhereEquals,
   parseCsvBuffer,
   parseCsvFileDictionary,
+  parseCsvFileGroupByCount,
 } from '../src/index.ts';
 
 describe('NativeCsvParser', () => {
@@ -151,6 +152,29 @@ describe('NativeCsvParser', () => {
     }
   });
 
+  test('counts one selected column as native groupBy dictionary', () => {
+    const parser = new NativeCsvParser({ delimiter: ';' });
+    try {
+      expect(parser.writeGroupByCount(Buffer.from('"1";"SP"\n"2";"'), 1)).toBe(1);
+      expect(parser.writeGroupByCount(Buffer.from('SP"\n"3";"RJ"\n"4"\n'), 1)).toBe(3);
+      const batch = parser.endGroupByCount(1);
+      try {
+        expect(batch.rowCount).toBe(4);
+        expect(batch.dictionaryStrings()).toEqual(['SP', 'RJ', '']);
+        expect(batch.countsNumbers()).toEqual([2, 1, 1]);
+        expect(batch.entries()).toEqual([
+          { value: 'SP', count: 2 },
+          { value: 'RJ', count: 1 },
+          { value: '', count: 1 },
+        ]);
+      } finally {
+        batch.close();
+      }
+    } finally {
+      parser.close();
+    }
+  });
+
   test('parseCsvBuffer materializes selected columns', () => {
     expect(parseCsvBuffer(Buffer.from('"id";"name";"uf"\n"1";"Ana";"SP"\n'), {
       delimiter: ';',
@@ -226,6 +250,26 @@ describe('NativeCsvParser', () => {
       }
       expect(rows).toBe(4);
       expect(dictionaries.flat()).toContain('SP');
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test('streams native groupBy count from a file', async () => {
+    const path = join(import.meta.dir, 'tmp-groupby-count.csv');
+    await Bun.write(path, '"id";"uf"\n"1";"SP"\n"2";"SP"\n"3";"RJ"\n');
+    try {
+      const batch = await parseCsvFileGroupByCount(path, 1, { delimiter: ';', chunkSize: 12 });
+      try {
+        expect(batch.rowCount).toBe(4);
+        expect(batch.entries()).toEqual([
+          { value: 'uf', count: 1 },
+          { value: 'SP', count: 2 },
+          { value: 'RJ', count: 1 },
+        ]);
+      } finally {
+        batch.close();
+      }
     } finally {
       rmSync(path, { force: true });
     }

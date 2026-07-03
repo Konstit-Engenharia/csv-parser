@@ -9,6 +9,7 @@ import {
   countCsvFileWhereEquals,
   parseCsvFile,
   parseCsvFileDictionary,
+  parseCsvFileGroupByCount,
   parseCsvFileProjected,
 } from '../src/index.ts';
 
@@ -20,6 +21,7 @@ type ProfileMode =
   | 'materialize-selected-cache'
   | 'materialize-selected-native'
   | 'dictionary-column'
+  | 'groupby-count'
   | 'count'
   | 'filter-equals'
   | 'project-filter-equals-native'
@@ -42,6 +44,7 @@ const STRING_CACHE_COLUMNS = (Bun.env['CSV_STRING_CACHE_COLUMNS'] ?? '19')
 const FILTER_COLUMN = Number(Bun.env['CSV_BENCH_FILTER_COLUMN'] ?? 19);
 const FILTER_VALUE = Bun.env['CSV_BENCH_FILTER_VALUE'] ?? 'SP';
 const DICTIONARY_COLUMN = Number(Bun.env['CSV_BENCH_DICTIONARY_COLUMN'] ?? 19);
+const GROUP_BY_COLUMN = Number(Bun.env['CSV_BENCH_GROUPBY_COLUMN'] ?? 19);
 const bytes = statSync(FILE).size;
 
 Bun.gc(true);
@@ -63,6 +66,7 @@ console.log(JSON.stringify({
   filterColumn: FILTER_COLUMN,
   filterValue: FILTER_VALUE,
   dictionaryColumn: DICTIONARY_COLUMN,
+  groupByColumn: GROUP_BY_COLUMN,
   stringCacheColumns: STRING_CACHE_COLUMNS,
   rows,
   seconds,
@@ -87,6 +91,8 @@ async function runMode(mode: ProfileMode): Promise<number> {
       return countNativeProjectedRows();
     case 'dictionary-column':
       return countNativeDictionaryColumn();
+    case 'groupby-count':
+      return countNativeGroupByCount();
     case 'count':
       return countCsvFile(FILE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER });
     case 'filter-equals':
@@ -97,6 +103,24 @@ async function runMode(mode: ProfileMode): Promise<number> {
       return countWithCsvParser();
     case 'iconv-csv-parser':
       return countWithCsvParser('latin1');
+  }
+}
+
+async function countNativeGroupByCount(): Promise<number> {
+  const batch = await parseCsvFileGroupByCount(FILE, GROUP_BY_COLUMN, {
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+  });
+  try {
+    batch.counts();
+    batch.dictionaryOffsets();
+    batch.dictionaryData();
+    if (batch.dictionaryCount === 0) {
+      throw new Error('groupby-count produced no dictionary values');
+    }
+    return batch.rowCount;
+  } finally {
+    batch.close();
   }
 }
 

@@ -8,6 +8,7 @@
     "test": "bun test",
     "bench": "bun run build:native && bun bench/csv.bench.ts",
     "bench:example": "bun run build:native && bun bench/example-file.bench.ts",
+    "bench:native": "bun run build:native && ./build/csv_native_bench",
     "profile:cpu": "bun run build:native && mkdir -p profiles && bun --cpu-prof-md --cpu-prof-dir profiles bench/profile-runtime.ts",
     "profile:heap": "bun run build:native && mkdir -p profiles && bun --heap-prof-md --heap-prof-dir profiles bench/profile-runtime.ts",
     "profile:native-memory": "bun run build:native && MIMALLOC_SHOW_STATS=1 bun bench/profile-runtime.ts",
