@@ -17,7 +17,8 @@
     "lint:biome": "bunx --bun @biomejs/biome check",
     "lint:oxlint": "bunx --bun oxlint --type-aware",
     "lint": "bun run tsc && bun run lint:biome && bun run lint:oxlint",
-    "fmt": "bunx --bun dprint fmt"
+    "fmt": "bunx --bun dprint fmt",
+    "fmt:native": "find native bench test -type f -name '*.cpp' -print0 | xargs -0 clang-format -i"
   },
   "dependencies": {
     "@drizzle-team/brocli": "^0.12.0",
