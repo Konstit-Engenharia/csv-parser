@@ -6,6 +6,7 @@ include(CTest)
 
 find_package(Catch2 CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
+find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 
 add_library(csv_native SHARED
   native/csv_parser.cpp
@@ -42,12 +43,15 @@ target_include_directories(csv_native_bench SYSTEM PRIVATE
   bench/native
 )
 target_compile_options(csv_native_bench PRIVATE
-  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3 -DNDEBUG -fno-exceptions -fno-rtti -fomit-frame-pointer -funroll-loops ${CSV_NATIVE_CPU_FLAGS} -Wall -Wextra -Wpedantic>
+  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3 -DNDEBUG -fno-rtti -fomit-frame-pointer -funroll-loops ${CSV_NATIVE_CPU_FLAGS} -Wall -Wextra -Wpedantic>
 )
 target_link_options(csv_native_bench PRIVATE
-  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-exceptions -fno-rtti>
+  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-rtti>
 )
-target_link_libraries(csv_native_bench PRIVATE csv_native)
+target_link_libraries(csv_native_bench PRIVATE
+  csv_native
+  unofficial::vincentlaucsb-csv-parser::csv
+)
 set_target_properties(csv_native_bench PROPERTIES
   INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
 )

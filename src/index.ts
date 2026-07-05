@@ -30,15 +30,32 @@ export interface CsvParserOptions {
   encoding?: CsvEncoding;
   delimiter?: string;
   selectedColumns?: CsvColumns;
+  fixedColumns?: number;
+  trusted?: CsvTrustedParserOptions;
 }
 
 export interface CsvFileOptions extends CsvParserOptions {
   chunkSize?: number;
 }
 
+export interface CsvTrustedParserOptions {
+  fixedColumns: number;
+  noNewlinesInQuotes: true;
+}
+
 export interface CsvEqualsFilter {
   column: number;
   value: CsvFieldValue;
+}
+
+export interface CsvInFilter {
+  column: number;
+  values: readonly CsvFieldValue[];
+}
+
+export interface CsvStartsWithFilter {
+  column: number;
+  prefix: CsvFieldValue;
 }
 
 export interface CsvNativeProjectionOptions {
@@ -64,6 +81,8 @@ export interface CsvGroupByCountEntry {
   count: number;
 }
 
+export type NativeCsvRowCallback = (row: NativeCsvRowView, rowIndex: number) => void;
+
 const EMPTY_BUFFER = new Uint8Array(1);
 const EMPTY_U32 = new Uint32Array(1);
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
@@ -86,6 +105,22 @@ const CSV_SYMBOLS = {
   },
   csv_parser_finish_batch: {
     args: ['ptr'],
+    returns: 'ptr',
+  },
+  csv_parser_write_fixed_batch: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
+    returns: 'ptr',
+  },
+  csv_parser_finish_fixed_batch: {
+    args: ['ptr', 'u32'],
+    returns: 'ptr',
+  },
+  csv_parser_write_trusted_fixed_batch: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
+    returns: 'ptr',
+  },
+  csv_parser_finish_trusted_fixed_batch: {
+    args: ['ptr', 'u32'],
     returns: 'ptr',
   },
   csv_parser_write_projected_batch: {
@@ -120,6 +155,14 @@ const CSV_SYMBOLS = {
     args: ['ptr', 'u32'],
     returns: 'ptr',
   },
+  csv_parser_write_multi_column_stats: {
+    args: ['ptr', 'buffer', 'u64', 'buffer', 'u64'],
+    returns: 'u64',
+  },
+  csv_parser_finish_multi_column_stats: {
+    args: ['ptr', 'buffer', 'u64'],
+    returns: 'ptr',
+  },
   csv_batch_destroy: {
     args: ['ptr'],
     returns: 'void',
@@ -133,6 +176,10 @@ const CSV_SYMBOLS = {
     returns: 'void',
   },
   csv_column_stats_batch_destroy: {
+    args: ['ptr'],
+    returns: 'void',
+  },
+  csv_multi_column_stats_batch_destroy: {
     args: ['ptr'],
     returns: 'void',
   },
@@ -212,6 +259,18 @@ const CSV_SYMBOLS = {
     args: ['ptr'],
     returns: 'ptr',
   },
+  csv_multi_column_stats_batch_column_count: {
+    args: ['ptr'],
+    returns: 'u64',
+  },
+  csv_multi_column_stats_batch_column_at: {
+    args: ['ptr', 'u64'],
+    returns: 'u32',
+  },
+  csv_multi_column_stats_batch_take_column_batch: {
+    args: ['ptr', 'u64'],
+    returns: 'ptr',
+  },
   csv_batch_row_count: {
     args: ['ptr'],
     returns: 'u64',
@@ -257,6 +316,22 @@ const CSV_SYMBOLS = {
     returns: 'u64',
   },
   csv_parser_finish_count_where_equals: {
+    args: ['ptr', 'u32', 'buffer', 'u64'],
+    returns: 'u64',
+  },
+  csv_parser_write_count_where_in: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'u64', 'buffer', 'u64'],
+    returns: 'u64',
+  },
+  csv_parser_finish_count_where_in: {
+    args: ['ptr', 'u32', 'buffer', 'u64', 'buffer', 'u64'],
+    returns: 'u64',
+  },
+  csv_parser_write_count_where_starts_with: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'u64'],
+    returns: 'u64',
+  },
+  csv_parser_finish_count_where_starts_with: {
     args: ['ptr', 'u32', 'buffer', 'u64'],
     returns: 'u64',
   },
@@ -332,7 +407,7 @@ export class CsvStringCache {
   stats(): CsvStringCacheColumnStats[] {
     return [...this.#caches.entries()]
       .sort((left, right) => left[0] - right[0])
-      .map(([column, cache]) => ({
+      .map(([column, cache,]) => ({
         column,
         entries: cache.entries,
         hits: cache.hits,
@@ -363,9 +438,89 @@ export class CsvStringCache {
   }
 }
 
+export class NativeCsvRowView {
+  #data: Buffer;
+  #rowOffsets: Uint32Array;
+  #fieldOffsets: Uint32Array;
+  #rowIndex: number;
+
+  constructor(data: Buffer, rowOffsets: Uint32Array, fieldOffsets: Uint32Array, rowIndex = 0) {
+    this.#data = data;
+    this.#rowOffsets = rowOffsets;
+    this.#fieldOffsets = fieldOffsets;
+    this.#rowIndex = rowIndex;
+  }
+
+  get rowIndex(): number {
+    return this.#rowIndex;
+  }
+
+  get fieldCount(): number {
+    const rowStart = this.#rowOffsets[this.#rowIndex];
+    const rowEnd = this.#rowOffsets[this.#rowIndex + 1];
+    if (rowStart === undefined || rowEnd === undefined) {
+      throw new RangeError(`row index out of range: ${this.#rowIndex}`);
+    }
+    return rowEnd - rowStart;
+  }
+
+  moveTo(rowIndex: number): this {
+    const rowStart = this.#rowOffsets[rowIndex];
+    const rowEnd = this.#rowOffsets[rowIndex + 1];
+    if (rowStart === undefined || rowEnd === undefined) {
+      throw new RangeError(`row index out of range: ${rowIndex}`);
+    }
+    this.#rowIndex = rowIndex;
+    return this;
+  }
+
+  fieldRange(columnIndex: number): CsvFieldRange | null {
+    const rowStart = this.#rowOffsets[this.#rowIndex];
+    const rowEnd = this.#rowOffsets[this.#rowIndex + 1];
+    if (rowStart === undefined || rowEnd === undefined) {
+      throw new RangeError(`row index out of range: ${this.#rowIndex}`);
+    }
+
+    const fieldIndex = rowStart + columnIndex;
+    if (fieldIndex < rowStart || fieldIndex >= rowEnd) {
+      return null;
+    }
+
+    return {
+      start: this.#fieldOffsets[fieldIndex] ?? 0,
+      end: this.#fieldOffsets[fieldIndex + 1] ?? 0,
+    };
+  }
+
+  fieldBytes(columnIndex: number): Uint8Array | null {
+    const range = this.fieldRange(columnIndex);
+    if (range === null) {
+      return null;
+    }
+    return this.#data.subarray(range.start, range.end);
+  }
+
+  fieldBuffer(columnIndex: number): Buffer | null {
+    const range = this.fieldRange(columnIndex);
+    if (range === null) {
+      return null;
+    }
+    return this.#data.subarray(range.start, range.end);
+  }
+
+  fieldString(columnIndex: number): string | null {
+    const range = this.fieldRange(columnIndex);
+    if (range === null) {
+      return null;
+    }
+    return this.#data.toString('utf8', range.start, range.end);
+  }
+}
+
 export class NativeCsvBatch {
   #handle: Pointer | null;
   #data: Buffer | undefined;
+  #dataView: Uint8Array | undefined;
   #rowOffsets: Uint32Array | undefined;
   #fieldOffsets: Uint32Array | undefined;
 
@@ -383,6 +538,14 @@ export class NativeCsvBatch {
 
   rows(): CsvRow[] {
     return this.rowsInto([]);
+  }
+
+  forEachRow(callback: NativeCsvRowCallback): void {
+    const rowCount = this.rowCount;
+    const rowView = new NativeCsvRowView(this.data(), this.rowOffsets(), this.fieldOffsets());
+    for (let rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
+      callback(rowView.moveTo(rowIndex), rowIndex);
+    }
   }
 
   rowsInto(target: CsvRow[], columns?: CsvColumns, stringCache?: CsvStringCache): CsvRow[] {
@@ -445,11 +608,21 @@ export class NativeCsvBatch {
       return this.#data;
     }
 
+    const view = this.dataView();
+    this.#data = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+    return this.#data;
+  }
+
+  dataView(): Uint8Array {
+    if (this.#dataView !== undefined) {
+      return this.#dataView;
+    }
+
     const handle = this.#requireHandle();
     const dataLen = Number(native.symbols.csv_batch_data_len(handle));
     const dataPtr = native.symbols.csv_batch_data_ptr(handle);
-    this.#data = dataLen === 0 ? Buffer.allocUnsafe(0) : Buffer.from(toArrayBuffer(requirePtr(dataPtr), 0, dataLen));
-    return this.#data;
+    this.#dataView = dataLen === 0 ? new Uint8Array(0) : new Uint8Array(toArrayBuffer(requirePtr(dataPtr), 0, dataLen));
+    return this.#dataView;
   }
 
   rowOffsets(): Uint32Array {
@@ -511,11 +684,19 @@ export class NativeCsvBatch {
   }
 
   fieldBuffer(rowIndex: number, columnIndex: number): Buffer | null {
+    const bytes = this.fieldBytes(rowIndex, columnIndex);
+    if (bytes === null) {
+      return null;
+    }
+    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+
+  fieldBytes(rowIndex: number, columnIndex: number): Uint8Array | null {
     const range = this.fieldRange(rowIndex, columnIndex);
     if (range === null) {
       return null;
     }
-    return this.data().subarray(range.start, range.end);
+    return this.dataView().subarray(range.start, range.end);
   }
 
   fieldString(rowIndex: number, columnIndex: number): string | null {
@@ -541,6 +722,7 @@ export class NativeCsvBatch {
       native.symbols.csv_batch_destroy(this.#handle);
       this.#handle = null;
       this.#data = undefined;
+      this.#dataView = undefined;
       this.#rowOffsets = undefined;
       this.#fieldOffsets = undefined;
     }
@@ -760,14 +942,16 @@ export class NativeCsvGroupByCountBatch {
 
 export class NativeCsvColumnStatsBatch {
   #handle: Pointer | null;
+  readonly column: number | undefined;
   #ids: Uint32Array | undefined;
   #counts: BigUint64Array | undefined;
   #dictionaryOffsets: Uint32Array | undefined;
   #dictionaryDataView: Uint8Array | undefined;
   #dictionaryData: Buffer | undefined;
 
-  constructor(handle: Pointer) {
+  constructor(handle: Pointer, column?: number) {
     this.#handle = handle;
+    this.column = column;
   }
 
   get rowCount(): number {
@@ -937,6 +1121,25 @@ export class NativeCsvColumnStatsBatch {
   }
 }
 
+function takeMultiColumnStatsBatches(handle: Pointer): NativeCsvColumnStatsBatch[] {
+  try {
+    const columnCount = Number(native.symbols.csv_multi_column_stats_batch_column_count(handle));
+    const batches: NativeCsvColumnStatsBatch[] = [];
+    batches.length = columnCount;
+    for (let index = 0; index < columnCount; ++index) {
+      const column = native.symbols.csv_multi_column_stats_batch_column_at(handle, BigInt(index));
+      const batch = native.symbols.csv_multi_column_stats_batch_take_column_batch(handle, BigInt(index));
+      if (batch === null) {
+        throw new Error(`native CSV multi-column stats batch ${index} is null`);
+      }
+      batches[index] = new NativeCsvColumnStatsBatch(batch, column);
+    }
+    return batches;
+  } finally {
+    native.symbols.csv_multi_column_stats_batch_destroy(handle);
+  }
+}
+
 function columnStatsCountToNumber(value: bigint): number {
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new RangeError(`column stats count exceeds Number.MAX_SAFE_INTEGER: ${value}`);
@@ -946,11 +1149,18 @@ function columnStatsCountToNumber(value: bigint): number {
 
 export class NativeCsvParser {
   #handle: Pointer | null;
+  readonly #fixedColumns: number | undefined;
+  readonly #trustedFixedColumns: number | undefined;
 
   constructor(options: CsvParserOptions = {}) {
     const delimiter = options.delimiter ?? ',';
     if (delimiter.length !== 1) {
       throw new Error('delimiter must be one character');
+    }
+    this.#fixedColumns = normalizeFixedColumnsCount(options.fixedColumns, 'fixed column count');
+    this.#trustedFixedColumns = normalizeTrustedFixedColumns(options.trusted);
+    if (this.#fixedColumns !== undefined && this.#trustedFixedColumns !== undefined) {
+      throw new Error('use fixedColumns or trusted.fixedColumns, not both');
     }
 
     this.#handle = native.symbols.csv_parser_create(encodingCode(options.encoding), delimiter.charCodeAt(0));
@@ -975,7 +1185,23 @@ export class NativeCsvParser {
 
     const handle = this.#requireHandle();
     const input = normalizeChunk(chunk);
-    const batch = native.symbols.csv_parser_write_batch(handle, input, BigInt(input.byteLength), final);
+    const batch = this.#trustedFixedColumns !== undefined
+      ? native.symbols.csv_parser_write_trusted_fixed_batch(
+        handle,
+        input,
+        BigInt(input.byteLength),
+        final,
+        this.#trustedFixedColumns,
+      )
+      : this.#fixedColumns !== undefined
+        ? native.symbols.csv_parser_write_fixed_batch(
+          handle,
+          input,
+          BigInt(input.byteLength),
+          final,
+          this.#fixedColumns,
+        )
+        : native.symbols.csv_parser_write_batch(handle, input, BigInt(input.byteLength), final);
     if (batch === null) {
       throw new Error(`native CSV parser failed: ${this.#lastError()}`);
     }
@@ -1073,6 +1299,23 @@ export class NativeCsvParser {
     ));
   }
 
+  writeMultiColumnStats(chunk: NodeJS.TypedArray | DataView, columns: CsvColumns): number {
+    if (chunk.byteLength === 0 || columns.length === 0) {
+      return 0;
+    }
+
+    const handle = this.#requireHandle();
+    const input = normalizeChunk(chunk);
+    const normalizedColumns = normalizeColumnStatsColumns(columns);
+    return Number(native.symbols.csv_parser_write_multi_column_stats(
+      handle,
+      input,
+      BigInt(input.byteLength),
+      normalizedColumns,
+      BigInt(normalizedColumns.length),
+    ));
+  }
+
   end(): CsvRow[] {
     const batch = this.endBatch();
     try {
@@ -1083,7 +1326,11 @@ export class NativeCsvParser {
   }
 
   endBatch(): NativeCsvBatch {
-    const batch = native.symbols.csv_parser_finish_batch(this.#requireHandle());
+    const batch = this.#trustedFixedColumns !== undefined
+      ? native.symbols.csv_parser_finish_trusted_fixed_batch(this.#requireHandle(), this.#trustedFixedColumns)
+      : this.#fixedColumns !== undefined
+        ? native.symbols.csv_parser_finish_fixed_batch(this.#requireHandle(), this.#fixedColumns)
+        : native.symbols.csv_parser_finish_batch(this.#requireHandle());
     if (batch === null) {
       throw new Error(`native CSV parser failed: ${this.#lastError()}`);
     }
@@ -1142,6 +1389,23 @@ export class NativeCsvParser {
     return new NativeCsvColumnStatsBatch(batch);
   }
 
+  endMultiColumnStats(columns: CsvColumns): NativeCsvColumnStatsBatch[] {
+    if (columns.length === 0) {
+      return [];
+    }
+
+    const normalizedColumns = normalizeColumnStatsColumns(columns);
+    const batch = native.symbols.csv_parser_finish_multi_column_stats(
+      this.#requireHandle(),
+      normalizedColumns,
+      BigInt(normalizedColumns.length),
+    );
+    if (batch === null) {
+      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
+    }
+    return takeMultiColumnStatsBatches(batch);
+  }
+
   writeCount(chunk: NodeJS.TypedArray | DataView, final = false): number {
     if (chunk.byteLength === 0 && final) {
       return this.endCount();
@@ -1178,6 +1442,68 @@ export class NativeCsvParser {
   endCountWhereEquals(filter: CsvEqualsFilter): number {
     const normalized = normalizeEqualsFilter(filter);
     return Number(native.symbols.csv_parser_finish_count_where_equals(
+      this.#requireHandle(),
+      normalized.column,
+      normalized.value,
+      BigInt(normalized.valueLength),
+    ));
+  }
+
+  writeCountWhereIn(chunk: NodeJS.TypedArray | DataView, filter: CsvInFilter, final = false): number {
+    if (chunk.byteLength === 0 && final) {
+      return this.endCountWhereIn(filter);
+    }
+
+    const normalized = normalizeInFilter(filter);
+    const handle = this.#requireHandle();
+    const input = normalizeChunk(chunk);
+    return Number(native.symbols.csv_parser_write_count_where_in(
+      handle,
+      input,
+      BigInt(input.byteLength),
+      final,
+      normalized.column,
+      normalized.valuesData,
+      BigInt(normalized.valuesDataLength),
+      normalized.offsets,
+      BigInt(normalized.valueCount),
+    ));
+  }
+
+  endCountWhereIn(filter: CsvInFilter): number {
+    const normalized = normalizeInFilter(filter);
+    return Number(native.symbols.csv_parser_finish_count_where_in(
+      this.#requireHandle(),
+      normalized.column,
+      normalized.valuesData,
+      BigInt(normalized.valuesDataLength),
+      normalized.offsets,
+      BigInt(normalized.valueCount),
+    ));
+  }
+
+  writeCountWhereStartsWith(chunk: NodeJS.TypedArray | DataView, filter: CsvStartsWithFilter, final = false): number {
+    if (chunk.byteLength === 0 && final) {
+      return this.endCountWhereStartsWith(filter);
+    }
+
+    const normalized = normalizeStartsWithFilter(filter);
+    const handle = this.#requireHandle();
+    const input = normalizeChunk(chunk);
+    return Number(native.symbols.csv_parser_write_count_where_starts_with(
+      handle,
+      input,
+      BigInt(input.byteLength),
+      final,
+      normalized.column,
+      normalized.value,
+      BigInt(normalized.valueLength),
+    ));
+  }
+
+  endCountWhereStartsWith(filter: CsvStartsWithFilter): number {
+    const normalized = normalizeStartsWithFilter(filter);
+    return Number(native.symbols.csv_parser_finish_count_where_starts_with(
       this.#requireHandle(),
       normalized.column,
       normalized.value,
@@ -1362,6 +1688,26 @@ export async function parseCsvFileColumnStats(
   }
 }
 
+export async function parseCsvFileMultiColumnStats(
+  path: string,
+  columns: CsvColumns,
+  options: CsvFileOptions = {},
+): Promise<NativeCsvColumnStatsBatch[]> {
+  if (columns.length === 0) {
+    return [];
+  }
+
+  const parser = new NativeCsvParser(options);
+  try {
+    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+      parser.writeMultiColumnStats(chunk as Buffer, columns);
+    }
+    return parser.endMultiColumnStats(columns);
+  } finally {
+    parser.close();
+  }
+}
+
 export async function countCsvFile(path: string, options: CsvFileOptions = {}): Promise<number> {
   const parser = new NativeCsvParser(options);
   let rows = 0;
@@ -1390,6 +1736,50 @@ export async function countCsvFileWhereEquals(
       rows += parser.writeCountWhereEquals(chunk as Buffer, filter);
     }
     rows += parser.endCountWhereEquals(filter);
+    return rows;
+  } finally {
+    parser.close();
+  }
+}
+
+export async function countCsvFileWhereIn(
+  path: string,
+  columnIndex: number,
+  values: readonly CsvFieldValue[],
+  options: CsvFileOptions = {},
+): Promise<number> {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const parser = new NativeCsvParser(options);
+  const filter = { column: columnIndex, values };
+  let rows = 0;
+  try {
+    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+      rows += parser.writeCountWhereIn(chunk as Buffer, filter);
+    }
+    rows += parser.endCountWhereIn(filter);
+    return rows;
+  } finally {
+    parser.close();
+  }
+}
+
+export async function countCsvFileWhereStartsWith(
+  path: string,
+  columnIndex: number,
+  prefix: CsvFieldValue,
+  options: CsvFileOptions = {},
+): Promise<number> {
+  const parser = new NativeCsvParser(options);
+  const filter = { column: columnIndex, prefix };
+  let rows = 0;
+  try {
+    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+      rows += parser.writeCountWhereStartsWith(chunk as Buffer, filter);
+    }
+    rows += parser.endCountWhereStartsWith(filter);
     return rows;
   } finally {
     parser.close();
@@ -1426,6 +1816,26 @@ function normalizeChunk(chunk: NodeJS.TypedArray | DataView): NodeJS.TypedArray 
   return chunk.byteLength === 0 ? EMPTY_BUFFER : chunk;
 }
 
+function normalizeTrustedFixedColumns(trusted: CsvTrustedParserOptions | undefined): number | undefined {
+  if (trusted === undefined) {
+    return undefined;
+  }
+  if (trusted.noNewlinesInQuotes !== true) {
+    throw new Error('trusted.noNewlinesInQuotes must be true');
+  }
+  return normalizeFixedColumnsCount(trusted.fixedColumns, 'trusted fixed column count');
+}
+
+function normalizeFixedColumnsCount(value: number | undefined, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || value <= 0 || value > 0xffff_ffff) {
+    throw new RangeError(`${label} out of range: ${value}`);
+  }
+  return value;
+}
+
 function normalizeColumns(columns: CsvColumns | undefined): Uint32Array {
   if (columns === undefined) {
     return EMPTY_U32;
@@ -1440,6 +1850,18 @@ function normalizeColumns(columns: CsvColumns | undefined): Uint32Array {
     normalized[index] = column;
   }
   return normalized.length === 0 ? EMPTY_U32 : normalized;
+}
+
+function normalizeColumnStatsColumns(columns: CsvColumns): Uint32Array {
+  const normalized = normalizeColumns(columns);
+  const seen = new Set<number>();
+  for (const column of normalized) {
+    if (seen.has(column)) {
+      throw new RangeError(`multi-column stats column repeated: ${column}`);
+    }
+    seen.add(column);
+  }
+  return normalized;
 }
 
 function normalizeEqualsFilter(filter: CsvEqualsFilter | undefined): {
@@ -1465,6 +1887,72 @@ function normalizeEqualsFilter(filter: CsvEqualsFilter | undefined): {
   return {
     enabled: true,
     column: filter.column,
+    value: value.byteLength === 0 ? EMPTY_BUFFER : value,
+    valueLength: value.byteLength,
+  };
+}
+
+function normalizeFilterColumn(column: number): number {
+  if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
+    throw new RangeError(`filter column out of range: ${column}`);
+  }
+  return column;
+}
+
+function normalizeFilterValue(value: CsvFieldValue): Uint8Array {
+  return typeof value === 'string' ? Buffer.from(value) : value;
+}
+
+function normalizeInFilter(filter: CsvInFilter): {
+  column: number;
+  valuesData: Uint8Array;
+  valuesDataLength: number;
+  offsets: Uint32Array;
+  valueCount: number;
+} {
+  const column = normalizeFilterColumn(filter.column);
+  if (filter.values.length === 0) {
+    throw new RangeError('filter values must not be empty');
+  }
+
+  const values = filter.values.map((value) => normalizeFilterValue(value));
+  let valuesDataLength = 0;
+  for (const value of values) {
+    valuesDataLength += value.byteLength;
+    if (valuesDataLength > 0xffff_ffff) {
+      throw new RangeError('filter values exceed native offset range');
+    }
+  }
+
+  const valuesData = valuesDataLength === 0 ? EMPTY_BUFFER : new Uint8Array(valuesDataLength);
+  const offsets = new Uint32Array(values.length + 1);
+  let offset = 0;
+  for (let index = 0; index < values.length; ++index) {
+    const value = values[index] ?? EMPTY_BUFFER;
+    offsets[index] = offset;
+    valuesData.set(value, offset);
+    offset += value.byteLength;
+  }
+  offsets[values.length] = offset;
+
+  return {
+    column,
+    valuesData,
+    valuesDataLength,
+    offsets,
+    valueCount: values.length,
+  };
+}
+
+function normalizeStartsWithFilter(filter: CsvStartsWithFilter): {
+  column: number;
+  value: Uint8Array;
+  valueLength: number;
+} {
+  const column = normalizeFilterColumn(filter.column);
+  const value = normalizeFilterValue(filter.prefix);
+  return {
+    column,
     value: value.byteLength === 0 ? EMPTY_BUFFER : value,
     valueLength: value.byteLength,
   };
