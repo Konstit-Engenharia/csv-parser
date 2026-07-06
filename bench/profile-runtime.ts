@@ -1,12 +1,13 @@
-import csvParser from 'csv-parser';
-import iconv from 'iconv-lite';
 import { heapStats } from 'bun:jsc';
-import { createReadStream, statSync } from 'node:fs';
 import {
-  CsvStringCache,
-  NativeCsvParser,
+  createReadStream,
+  statSync,
+} from 'node:fs';
+import {
   countCsvFile,
   countCsvFileWhereEquals,
+  CsvStringCache,
+  NativeCsvParser,
   parseCsvFile,
   parseCsvFileDictionary,
   parseCsvFileGroupByCount,
@@ -24,9 +25,7 @@ type ProfileMode =
   | 'groupby-count'
   | 'count'
   | 'filter-equals'
-  | 'project-filter-equals-native'
-  | 'csv-parser'
-  | 'iconv-csv-parser';
+  | 'project-filter-equals-native';
 
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
@@ -56,24 +55,28 @@ const endedAt = performance.now();
 const after = heapStats();
 const seconds = (endedAt - startedAt) / 1000;
 
-console.log(JSON.stringify({
-  mode: MODE,
-  file: FILE,
-  bytes,
-  chunkSize: CHUNK_SIZE,
-  delimiter: DELIMITER,
-  selectedColumns: SELECTED_COLUMNS,
-  filterColumn: FILTER_COLUMN,
-  filterValue: FILTER_VALUE,
-  dictionaryColumn: DICTIONARY_COLUMN,
-  groupByColumn: GROUP_BY_COLUMN,
-  stringCacheColumns: STRING_CACHE_COLUMNS,
-  rows,
-  seconds,
-  mibPerSecond: bytes / 1024 / 1024 / seconds,
-  heapBefore: summarizeHeap(before),
-  heapAfter: summarizeHeap(after),
-}, null, 2));
+console.log(JSON.stringify(
+  {
+    mode: MODE,
+    file: FILE,
+    bytes,
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+    selectedColumns: SELECTED_COLUMNS,
+    filterColumn: FILTER_COLUMN,
+    filterValue: FILTER_VALUE,
+    dictionaryColumn: DICTIONARY_COLUMN,
+    groupByColumn: GROUP_BY_COLUMN,
+    stringCacheColumns: STRING_CACHE_COLUMNS,
+    rows,
+    seconds,
+    mibPerSecond: bytes / 1024 / 1024 / seconds,
+    heapBefore: summarizeHeap(before),
+    heapAfter: summarizeHeap(after),
+  },
+  null,
+  2,
+));
 
 async function runMode(mode: ProfileMode): Promise<number> {
   switch (mode) {
@@ -99,10 +102,6 @@ async function runMode(mode: ProfileMode): Promise<number> {
       return countCsvFileWhereEquals(FILE, FILTER_COLUMN, FILTER_VALUE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER });
     case 'project-filter-equals-native':
       return countNativeProjectedFilteredRows();
-    case 'csv-parser':
-      return countWithCsvParser();
-    case 'iconv-csv-parser':
-      return countWithCsvParser('latin1');
   }
 }
 
@@ -127,10 +126,12 @@ async function countNativeGroupByCount(): Promise<number> {
 async function countNativeDictionaryColumn(): Promise<number> {
   let rows = 0;
   let dictionaryValues = 0;
-  for await (const batch of parseCsvFileDictionary(FILE, DICTIONARY_COLUMN, {
-    chunkSize: CHUNK_SIZE,
-    delimiter: DELIMITER,
-  })) {
+  for await (
+    const batch of parseCsvFileDictionary(FILE, DICTIONARY_COLUMN, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+    })
+  ) {
     try {
       rows += batch.rowCount;
       batch.ids();
@@ -175,11 +176,13 @@ async function countNativeSelectedRowsCached(): Promise<number> {
 
 async function countNativeProjectedRows(): Promise<number> {
   let rows = 0;
-  for await (const batch of parseCsvFileProjected(FILE, {
-    chunkSize: CHUNK_SIZE,
-    delimiter: DELIMITER,
-    selectedColumns: SELECTED_COLUMNS,
-  })) {
+  for await (
+    const batch of parseCsvFileProjected(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      selectedColumns: SELECTED_COLUMNS,
+    })
+  ) {
     rows += batch.length;
   }
   return rows;
@@ -187,15 +190,17 @@ async function countNativeProjectedRows(): Promise<number> {
 
 async function countNativeProjectedFilteredRows(): Promise<number> {
   let rows = 0;
-  for await (const batch of parseCsvFileProjected(FILE, {
-    chunkSize: CHUNK_SIZE,
-    delimiter: DELIMITER,
-    selectedColumns: SELECTED_COLUMNS,
-    equalsFilter: {
-      column: FILTER_COLUMN,
-      value: FILTER_VALUE,
-    },
-  })) {
+  for await (
+    const batch of parseCsvFileProjected(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      selectedColumns: SELECTED_COLUMNS,
+      equalsFilter: {
+        column: FILTER_COLUMN,
+        value: FILTER_VALUE,
+      },
+    })
+  ) {
     rows += batch.length;
   }
   return rows;
@@ -281,27 +286,6 @@ async function countNativeBatchRows(): Promise<number> {
   } finally {
     parser.close();
   }
-}
-
-function countWithCsvParser(encoding?: 'latin1'): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let rows = 0;
-    let stream = createReadStream(FILE, { highWaterMark: CHUNK_SIZE });
-
-    if (encoding !== undefined) {
-      stream = stream.pipe(iconv.decodeStream(encoding)) as unknown as typeof stream;
-    }
-
-    stream
-      .pipe(csvParser({ headers: false, separator: DELIMITER }))
-      .on('data', () => {
-        ++rows;
-      })
-      .on('error', reject)
-      .on('end', () => {
-        resolve(rows);
-      });
-  });
 }
 
 function summarizeHeap(stats: ReturnType<typeof heapStats>) {
