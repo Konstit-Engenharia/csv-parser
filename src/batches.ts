@@ -129,6 +129,10 @@ export class NativeCsvBatch {
     this.#handle = handle;
   }
 
+  get closed(): boolean {
+    return this.#handle === null;
+  }
+
   get rowCount(): number {
     return Number(native.symbols.csv_batch_row_count(this.#requireHandle()));
   }
@@ -329,6 +333,10 @@ export class NativeCsvBatch {
     }
   }
 
+  dispose(): void {
+    this.close();
+  }
+
   [Symbol.dispose](): void {
     this.close();
   }
@@ -349,6 +357,10 @@ export class NativeCsvDictionaryBatch {
 
   constructor(handle: Pointer) {
     this.#handle = handle;
+  }
+
+  get closed(): boolean {
+    return this.#handle === null;
   }
 
   get rowCount(): number {
@@ -418,6 +430,10 @@ export class NativeCsvDictionaryBatch {
     }
   }
 
+  dispose(): void {
+    this.close();
+  }
+
   [Symbol.dispose](): void {
     this.close();
   }
@@ -438,6 +454,10 @@ export class NativeCsvGroupByCountBatch {
 
   constructor(handle: Pointer) {
     this.#handle = handle;
+  }
+
+  get closed(): boolean {
+    return this.#handle === null;
   }
 
   get rowCount(): number {
@@ -529,6 +549,10 @@ export class NativeCsvGroupByCountBatch {
     }
   }
 
+  dispose(): void {
+    this.close();
+  }
+
   [Symbol.dispose](): void {
     this.close();
   }
@@ -553,6 +577,10 @@ export class NativeCsvColumnStatsBatch {
   constructor(handle: Pointer, column?: number) {
     this.#handle = handle;
     this.column = column;
+  }
+
+  get closed(): boolean {
+    return this.#handle === null;
   }
 
   get rowCount(): number {
@@ -708,6 +736,10 @@ export class NativeCsvColumnStatsBatch {
       this.#dictionaryDataView = undefined;
       this.#dictionaryData = undefined;
     }
+  }
+
+  dispose(): void {
+    this.close();
   }
 
   [Symbol.dispose](): void {

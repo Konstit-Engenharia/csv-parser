@@ -199,6 +199,15 @@ try {
 
 Always close parser-owned batches and the parser. `NativeCsvParser` supports row batches, projected batches, dictionary batches, group-by counts, column stats, multi-column stats, and direct count filters.
 
+Resource objects expose `close()`, `dispose()`, `closed`, and `Symbol.dispose`, so explicit-resource-management syntax works
+in Bun:
+
+```ts
+using parser = new NativeCsvParser({ delimiter: ';' });
+using batch = parser.writeBatch(Buffer.from('1;Ana\n'), true);
+console.log(batch.rows());
+```
+
 ## Examples
 
 ```sh

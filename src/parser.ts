@@ -52,6 +52,10 @@ export class NativeCsvParser {
     }
   }
 
+  get closed(): boolean {
+    return this.#handle === null;
+  }
+
   write(chunk: NodeJS.TypedArray | DataView, final = false): CsvRow[] {
     const batch = this.writeBatch(chunk, final);
     try {
@@ -445,6 +449,10 @@ export class NativeCsvParser {
       native.symbols.csv_parser_destroy(this.#handle);
       this.#handle = null;
     }
+  }
+
+  dispose(): void {
+    this.close();
   }
 
   [Symbol.dispose](): void {
