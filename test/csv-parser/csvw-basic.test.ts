@@ -17,8 +17,9 @@ interface CsvwCase {
   mode?: 'rows' | 'header' | 'generated-columns';
 }
 
-// Parser-level subset from https://github.com/w3c/csvw/tree/gh-pages/tests.
-// Metadata transforms, comments, skipRows, datatypes and null handling are CSVW processor tests, not raw parser tests.
+// Corpus: W3C CSVW tests (https://github.com/w3c/csvw/tree/gh-pages/tests).
+// Scope: raw parser subset only. Metadata transforms, comments, skipRows, datatypes and null handling are CSVW
+// processor tests, not raw parser tests.
 const cases: CsvwCase[] = [
   {
     name: 'test001 basic header rows',

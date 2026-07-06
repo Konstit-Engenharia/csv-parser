@@ -26,6 +26,9 @@ interface SpectrumCase {
 
 const require = createRequire(import.meta.url);
 const spectrumRoot = dirname(require.resolve('csv-spectrum/package.json'));
+
+// Corpus: csv-spectrum (https://github.com/maxogden/csv-spectrum), installed from npm.
+// Scope: parser compatibility fixtures with CSV input and expected JSON output.
 const cases = loadSpectrumCases();
 
 describe('csv-spectrum compatibility', () => {
