@@ -938,9 +938,7 @@ private:
       }
 
       if (byte == '\n' || byte == '\r') {
-        if (saw_row_data_) {
-          ++emitted_rows_;
-        }
+        ++emitted_rows_;
         previous_was_cr_ = byte == '\r';
         saw_row_data_ = false;
         at_field_start_ = true;
@@ -1323,7 +1321,6 @@ private:
   void finish_row() {
     if (!saw_row_data_) {
       at_field_start_ = true;
-      return;
     }
 
     finish_field();

@@ -13,10 +13,10 @@ import {
   join,
 } from 'node:path';
 import {
-  type CsvRow,
-  NativeCsvParser,
-  parseCsvBuffer,
-} from '../../src/index.ts';
+  parseChunkedRows,
+  parseRows,
+  rowsToObjects,
+} from './helpers.ts';
 
 interface SpectrumCase {
   name: string;
@@ -31,12 +31,12 @@ const cases = loadSpectrumCases();
 describe('csv-spectrum compatibility', () => {
   for (const fixture of cases) {
     test(`${fixture.name} matches expected JSON`, () => {
-      expect(rowsToObjects(parseCsvBuffer(fixture.csv))).toEqual(fixture.expected);
+      expect(rowsToObjects(parseRows(fixture.csv))).toEqual(fixture.expected);
     });
 
     for (const chunkSize of [1, 2, 7, 64]) {
       test(`${fixture.name} matches expected JSON with ${chunkSize}-byte chunks`, () => {
-        expect(rowsToObjects(parseChunked(fixture.csv, chunkSize))).toEqual(fixture.expected);
+        expect(rowsToObjects(parseChunkedRows(fixture.csv, chunkSize))).toEqual(fixture.expected);
       });
     }
   }
@@ -81,44 +81,4 @@ function singleObject(value: Array<Record<string, string>> | Record<string, stri
     return first;
   }
   return value;
-}
-
-function parseChunked(input: Buffer, chunkSize: number): CsvRow[] {
-  const parser = new NativeCsvParser();
-  const rows: CsvRow[] = [];
-  try {
-    for (let offset = 0; offset < input.byteLength; offset += chunkSize) {
-      const batch = parser.writeBatch(input.subarray(offset, offset + chunkSize));
-      try {
-        rows.push(...batch.rows());
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endBatch();
-    try {
-      rows.push(...batch.rows());
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
-  }
-}
-
-function rowsToObjects(rows: CsvRow[]): Array<Record<string, string>> {
-  const [headers, ...records] = rows;
-  if (headers === undefined) {
-    return [];
-  }
-
-  return records.map((row) => {
-    const object: Record<string, string> = {};
-    for (let index = 0; index < headers.length; ++index) {
-      object[headers[index] ?? ''] = row[index] ?? '';
-    }
-    return object;
-  });
 }

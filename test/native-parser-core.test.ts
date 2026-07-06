@@ -63,6 +63,21 @@ describe('NativeCsvParser core parsing', () => {
     expect(countTrustedNewlineRows(Buffer.alloc(0))).toBe(0);
   });
 
+  test('parses empty physical lines as empty records', () => {
+    expect(parseCsvBuffer(Buffer.from('\n\n'))).toEqual([[''], ['']]);
+    expect(parseCsvBuffer(Buffer.from('a\n\n'))).toEqual([['a'], ['']]);
+
+    const parser = new NativeCsvParser();
+    try {
+      let count = 0;
+      count += parser.writeCount(Buffer.from('\n\n'));
+      count += parser.endCount();
+      expect(count).toBe(2);
+    } finally {
+      parser.close();
+    }
+  });
+
   test('does not emit an extra row when stream ends after newline', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
