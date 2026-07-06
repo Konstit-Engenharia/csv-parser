@@ -63,5 +63,8 @@ jobs:
       - name: Test native C++
         run: bun scripts/test-native.ts
 
+      - name: Native sanitizer fuzz
+        run: bun run test:native:sanitize
+
       - name: Benchmark regression smoke
         run: bun bench/regression-smoke.ts

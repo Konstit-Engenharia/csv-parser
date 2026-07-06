@@ -1,0 +1,12 @@
+{
+  "rows": 25000,
+  "samples": 3,
+  "maxMilliseconds": {
+    "materialize buffer": 250,
+    "strict materialize buffer": 300,
+    "count file": 150,
+    "count where equals": 250,
+    "stream materialize file": 300,
+    "projected filter file": 250
+  }
+}

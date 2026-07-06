@@ -14,11 +14,17 @@ import {
   parseCsvFileProjected,
 } from '../src/index.ts';
 
-const ROWS = 25_000;
+interface RegressionBaseline {
+  rows: number;
+  samples: number;
+  maxMilliseconds: Record<string, number>;
+}
+
+const baseline = await Bun.file(new URL('./regression-baselines.json', import.meta.url)).json() as RegressionBaseline;
+const guardMultiplier = Number(process.env['CSV_BENCH_GUARD_MULTIPLIER'] ?? '1');
+const ROWS = baseline.rows;
 const EXPECTED_ROWS = ROWS + 1;
-const MAX_COUNT_MS = 3_000;
-const MAX_MATERIALIZE_MS = 6_000;
-const MAX_STREAM_MS = 6_000;
+const HOT_ROWS = ROWS / 10;
 
 function makeCsv(rows: number): Buffer {
   const lines = ['id,nome,cidade,status,valor'];
@@ -35,19 +41,34 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
   }
 }
 
-function assertUnder(milliseconds: number, maxMilliseconds: number, label: string): void {
-  if (milliseconds > maxMilliseconds) {
-    throw new Error(`${label}: ${milliseconds.toFixed(1)}ms > ${maxMilliseconds}ms`);
+function maxMilliseconds(label: string): number {
+  const value = baseline.maxMilliseconds[label];
+  if (value === undefined) {
+    throw new Error(`missing regression baseline for ${label}`);
+  }
+  return value * guardMultiplier;
+}
+
+function assertUnder(milliseconds: number, max: number, label: string): void {
+  if (milliseconds > max) {
+    throw new Error(`${label}: median ${milliseconds.toFixed(1)}ms > ${max.toFixed(1)}ms`);
   }
 }
 
-async function measure<T>(label: string, maxMilliseconds: number, fn: () => Promise<T> | T): Promise<T> {
-  const start = performance.now();
-  const result = await fn();
-  const elapsed = performance.now() - start;
-  assertUnder(elapsed, maxMilliseconds, label);
-  console.log(`${label}: ${elapsed.toFixed(1)}ms`);
-  return result;
+async function measureMedian(label: string, fn: () => Promise<void> | void): Promise<number> {
+  await fn();
+
+  const samples: number[] = [];
+  for (let index = 0; index < baseline.samples; ++index) {
+    const start = performance.now();
+    await fn();
+    samples.push(performance.now() - start);
+  }
+  samples.sort((left, right) => left - right);
+  const median = samples[Math.floor(samples.length / 2)] ?? 0;
+  assertUnder(median, maxMilliseconds(label), label);
+  console.log(`${label}: median ${median.toFixed(1)}ms samples=${samples.map((sample) => sample.toFixed(1)).join(',')}`);
+  return median;
 }
 
 async function collectRows(path: string): Promise<number> {
@@ -79,23 +100,39 @@ const csvPath = join(tempDir, 'smoke.csv');
 try {
   await writeFile(csvPath, csv);
 
-  const rows = await measure('materialize buffer', MAX_MATERIALIZE_MS, () => parseCsvBuffer(csv));
-  assertEqual(rows.length, EXPECTED_ROWS, 'materialized row count');
-  assertEqual(rows[0]?.[0], 'id', 'header first column');
-  assertEqual(rows[1]?.[2], 'Sao Paulo, SP', 'quoted field');
-  assertEqual(rows[ROWS]?.[4], String((ROWS - 1) % 997), 'last value');
+  await measureMedian('materialize buffer', () => {
+    const rows = parseCsvBuffer(csv);
+    assertEqual(rows.length, EXPECTED_ROWS, 'materialized row count');
+    assertEqual(rows[0]?.[0], 'id', 'header first column');
+    assertEqual(rows[1]?.[2], 'Sao Paulo, SP', 'quoted field');
+    assertEqual(rows[ROWS]?.[4], String((ROWS - 1) % 997), 'last value');
+  });
 
-  const count = await measure('count file', MAX_COUNT_MS, () => countCsvFile(csvPath, { chunkSize: 4_096 }));
-  assertEqual(count, EXPECTED_ROWS, 'countCsvFile row count');
+  await measureMedian('strict materialize buffer', () => {
+    const rows = parseCsvBuffer(csv, { strict: true });
+    assertEqual(rows.length, EXPECTED_ROWS, 'strict materialized row count');
+    assertEqual(rows[ROWS]?.[3], (ROWS - 1) % 10 === 0 ? 'hot' : 'cold', 'strict last status');
+  });
 
-  const hotCount = await countCsvFileWhereEquals(csvPath, 3, 'hot', { chunkSize: 4_096 });
-  assertEqual(hotCount, ROWS / 10, 'countCsvFileWhereEquals hot row count');
+  await measureMedian('count file', async () => {
+    const count = await countCsvFile(csvPath, { chunkSize: 4_096 });
+    assertEqual(count, EXPECTED_ROWS, 'countCsvFile row count');
+  });
 
-  const streamedCount = await measure('stream materialize file', MAX_STREAM_MS, () => collectRows(csvPath));
-  assertEqual(streamedCount, EXPECTED_ROWS, 'parseCsvFile row count');
+  await measureMedian('count where equals', async () => {
+    const count = await countCsvFileWhereEquals(csvPath, 3, 'hot', { chunkSize: 4_096 });
+    assertEqual(count, HOT_ROWS, 'countCsvFileWhereEquals hot row count');
+  });
 
-  const projectedHotCount = await collectProjectedHotRows(csvPath);
-  assertEqual(projectedHotCount, ROWS / 10, 'parseCsvFileProjected hot row count');
+  await measureMedian('stream materialize file', async () => {
+    const count = await collectRows(csvPath);
+    assertEqual(count, EXPECTED_ROWS, 'parseCsvFile row count');
+  });
+
+  await measureMedian('projected filter file', async () => {
+    const count = await collectProjectedHotRows(csvPath);
+    assertEqual(count, HOT_ROWS, 'parseCsvFileProjected hot row count');
+  });
 
   console.log(`smoke ok: ${ROWS} synthetic data rows`);
 } finally {

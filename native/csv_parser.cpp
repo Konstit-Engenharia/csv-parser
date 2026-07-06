@@ -755,6 +755,8 @@ public:
     fixed_columns_enabled_ = false;
     fixed_columns_ = 0;
     parse_failed_ = false;
+    strict_expected_columns_ = 0;
+    strict_expected_columns_seen_ = false;
     filter_ = row_filter{};
     in_quotes_ = false;
     pending_quote_ = false;
@@ -1858,6 +1860,20 @@ private:
       }
     }
 
+    if (strict_quote_syntax_ && !fixed_columns_enabled_) {
+      const uint32_t row_start = batch_->row_offsets.back();
+      const size_t row_end = batch_->field_offsets.size() - 1;
+      const uint32_t field_count = checked_u32(row_end - row_start);
+      if (!strict_expected_columns_seen_) {
+        strict_expected_columns_ = field_count;
+        strict_expected_columns_seen_ = true;
+      } else if (field_count != strict_expected_columns_) {
+        set_error("strict CSV row column count mismatch");
+        parse_failed_ = true;
+        return;
+      }
+    }
+
     batch_->row_offsets.push_back(
         checked_u32(batch_->field_offsets.size() - 1));
   }
@@ -2085,6 +2101,8 @@ private:
   bool fixed_columns_enabled_ = false;
   bool strict_quote_syntax_ = false;
   uint32_t fixed_columns_ = 0;
+  uint32_t strict_expected_columns_ = 0;
+  bool strict_expected_columns_seen_ = false;
   bool parse_failed_ = false;
   bool direct_projection_row_started_ = false;
   size_t direct_projection_data_start_ = 0;

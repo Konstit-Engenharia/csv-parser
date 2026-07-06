@@ -69,8 +69,31 @@ describe('strict RFC 4180 quote syntax validation', () => {
     );
   });
 
-  test.todo('strict RFC 4180 mode rejects header-too-few-fields', () => {});
-  test.todo('strict RFC 4180 mode rejects header-too-many-fields', () => {});
-  test.todo('strict RFC 4180 mode rejects header-missing-row', () => {});
-  test.todo('strict RFC 4180 mode rejects header-name-mismatch', () => {});
+  const columnCountCases = [
+    {
+      name: 'header-too-few-fields',
+      csv: 'id,name,total\n1,Ada\n',
+    },
+    {
+      name: 'header-too-many-fields',
+      csv: 'id,name\n1,Ada,extra\n',
+    },
+  ] as const;
+
+  for (const fixture of columnCountCases) {
+    test(`strict RFC 4180 mode rejects ${fixture.name}`, () => {
+      expect(() => parseRows(fixture.csv, { strict: true })).toThrow('strict CSV row column count mismatch');
+    });
+
+    for (const chunkSize of [1, 3, 64]) {
+      test(`strict RFC 4180 mode rejects ${fixture.name} with ${chunkSize}-byte chunks`, () => {
+        expect(() => parseChunkedRows(fixture.csv, chunkSize, { strict: true })).toThrow(
+          'strict CSV row column count mismatch',
+        );
+      });
+    }
+  }
+
+  test.todo('strict RFC 4180 mode rejects header-missing-row with schema metadata', () => {});
+  test.todo('strict RFC 4180 mode rejects header-name-mismatch with schema metadata', () => {});
 });

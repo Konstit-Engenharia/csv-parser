@@ -11,6 +11,7 @@
     "build:native": "bun scripts/build-native.ts",
     "test": "bun test",
     "test:native": "bun run build:native && bun scripts/test-native.ts",
+    "test:native:sanitize": "bun scripts/test-native-sanitizers.ts",
     "bench": "bun run build:native && bun bench/csv.bench.ts",
     "bench:csv-parser:example": "bun run build:native && bun bench/csv-parser/example-file.bench.ts",
     "bench:csv-parser:synthetic:latin1": "bun run build:native && bun bench/csv-parser/synthetic-latin1.bench.ts",

@@ -4,6 +4,9 @@ project(bun_csv_parser LANGUAGES CXX)
 
 include(CTest)
 
+option(CSV_NATIVE_SANITIZERS "Build native targets with sanitizers" OFF)
+set(CSV_NATIVE_SANITIZER_LIST "address,undefined" CACHE STRING "Comma-separated sanitizer list for native sanitizer builds")
+
 find_package(Catch2 CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
@@ -27,8 +30,23 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)")
   set(CSV_NATIVE_CPU_FLAGS -march=native)
 endif()
 
+set(CSV_NATIVE_OPTIMIZED_FLAGS -O3 -DNDEBUG -fomit-frame-pointer -funroll-loops ${CSV_NATIVE_CPU_FLAGS})
+set(CSV_NATIVE_SANITIZER_FLAGS -O1 -g -fno-omit-frame-pointer -fsanitize=${CSV_NATIVE_SANITIZER_LIST} -fno-sanitize-recover=all)
+
+function(csv_native_target_options target)
+  target_compile_options(${target} PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:AppleClang,Clang,GNU>,$<BOOL:${CSV_NATIVE_SANITIZERS}>>:${CSV_NATIVE_SANITIZER_FLAGS}>
+    $<$<AND:$<CXX_COMPILER_ID:AppleClang,Clang,GNU>,$<NOT:$<BOOL:${CSV_NATIVE_SANITIZERS}>>>:${CSV_NATIVE_OPTIMIZED_FLAGS}>
+    $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wall -Wextra -Wpedantic>
+  )
+  target_link_options(${target} PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:AppleClang,Clang,GNU>,$<BOOL:${CSV_NATIVE_SANITIZERS}>>:-fsanitize=${CSV_NATIVE_SANITIZER_LIST}>
+  )
+endfunction()
+
+csv_native_target_options(csv_native)
 target_compile_options(csv_native PRIVATE
-  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3 -DNDEBUG -fno-exceptions -fno-rtti -fomit-frame-pointer -funroll-loops ${CSV_NATIVE_CPU_FLAGS} -Wall -Wextra -Wpedantic>
+  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-exceptions -fno-rtti>
 )
 target_link_options(csv_native PRIVATE
   $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-exceptions -fno-rtti>
@@ -50,8 +68,9 @@ target_compile_features(csv_native_bench PRIVATE cxx_std_20)
 target_include_directories(csv_native_bench SYSTEM PRIVATE
   bench/native
 )
+csv_native_target_options(csv_native_bench)
 target_compile_options(csv_native_bench PRIVATE
-  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3 -DNDEBUG -fno-rtti -fomit-frame-pointer -funroll-loops ${CSV_NATIVE_CPU_FLAGS} -Wall -Wextra -Wpedantic>
+  $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-rtti>
 )
 target_link_options(csv_native_bench PRIVATE
   $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-rtti>
@@ -69,6 +88,17 @@ add_executable(csv_native_tests
 )
 
 target_compile_features(csv_native_tests PRIVATE cxx_std_20)
+csv_native_target_options(csv_native_tests)
 target_link_libraries(csv_native_tests PRIVATE csv_native Catch2::Catch2WithMain)
 
 add_test(NAME csv_native_tests COMMAND csv_native_tests)
+
+add_executable(csv_native_fuzz
+  test/native_csv_fuzz.cpp
+)
+
+target_compile_features(csv_native_fuzz PRIVATE cxx_std_20)
+csv_native_target_options(csv_native_fuzz)
+target_link_libraries(csv_native_fuzz PRIVATE csv_native)
+
+add_test(NAME csv_native_fuzz COMMAND csv_native_fuzz)
