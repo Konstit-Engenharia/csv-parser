@@ -431,11 +431,14 @@ public:
     batch->reserve(len, encoding_);
     mode_ = output_mode::batch;
     batch_ = batch.get();
+    allow_direct_projection_filter_ = final && !saw_row_data_;
     configure(selected_columns, selected_columns_len, filter);
     emitted_rows_ = 0;
     parse(data, len);
     if (final) {
       finish_stream();
+    } else {
+      spill_unfinished_batch_row();
     }
     batch_ = nullptr;
     return batch.release();
@@ -699,6 +702,8 @@ public:
     field_in_arena_ = false;
     complete_quoted_field_has_escape_ = false;
     direct_projection_filter_ = false;
+    allow_direct_projection_filter_ = false;
+    deferred_batch_row_ = false;
     direct_projection_row_started_ = false;
     direct_projection_data_start_ = 0;
     direct_projection_field_offsets_start_ = 0;
@@ -1356,7 +1361,8 @@ private:
   }
 
   bool use_deferred_rows() const {
-    return projection_enabled_ || filter_.enabled || fixed_columns_enabled_;
+    return projection_enabled_ || filter_.enabled || fixed_columns_enabled_ ||
+           deferred_batch_row_;
   }
 
   bool should_capture_current_field() const {
@@ -1394,8 +1400,9 @@ private:
   }
 
   bool can_use_direct_projection_filter() const {
-    if (mode_ != output_mode::batch || !projection_enabled_ ||
-        !filter_.enabled || selected_columns_len_ == 0) {
+    if (!allow_direct_projection_filter_ || mode_ != output_mode::batch ||
+        !projection_enabled_ || !filter_.enabled ||
+        selected_columns_len_ == 0) {
       return false;
     }
 
@@ -1665,9 +1672,44 @@ private:
     for (auto &field : projected_fields_) {
       field.clear();
     }
+    deferred_batch_row_ = false;
     direct_projection_row_started_ = false;
     direct_projection_data_start_ = 0;
     direct_projection_field_offsets_start_ = 0;
+  }
+
+  void spill_unfinished_batch_row() {
+    if (batch_ == nullptr || !saw_row_data_ || projection_enabled_ ||
+        filter_.enabled || fixed_columns_enabled_ || deferred_batch_row_) {
+      return;
+    }
+
+    const size_t row_start = batch_->row_offsets.back();
+    if (row_start >= batch_->field_offsets.size()) {
+      return;
+    }
+
+    const size_t row_data_start = batch_->field_offsets[row_start];
+    const size_t completed_field_count = batch_->field_offsets.size() - 1;
+    row_fields_.clear();
+    row_fields_.reserve(completed_field_count - row_start);
+    for (size_t field_index = row_start; field_index < completed_field_count;
+         ++field_index) {
+      const size_t start = batch_->field_offsets[field_index];
+      const size_t end = batch_->field_offsets[field_index + 1];
+      row_fields_.emplace_back(batch_->data.data() + start, end - start);
+    }
+
+    if (field_in_arena_) {
+      const size_t start = batch_->field_offsets.back();
+      const size_t end = batch_->data.size();
+      field_.assign(batch_->data.data() + start, end - start);
+      field_in_arena_ = false;
+    }
+
+    batch_->data.resize(row_data_start);
+    batch_->field_offsets.resize(row_start + 1);
+    deferred_batch_row_ = true;
   }
 
   void finish_batch_row() {
@@ -1947,6 +1989,8 @@ private:
   bool column_stats_row_seen_ = false;
   bool field_in_arena_ = false;
   mutable bool complete_quoted_field_has_escape_ = false;
+  bool allow_direct_projection_filter_ = false;
+  bool deferred_batch_row_ = false;
   uint64_t emitted_rows_ = 0;
 };
 

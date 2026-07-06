@@ -52,6 +52,38 @@ describe('NativeCsvParser native filters', () => {
     }
   });
 
+  test('projects and filters rows split across tiny chunks', () => {
+    const parser = new NativeCsvParser();
+    const input = Buffer.from('a,b,c\n1,2,3\n4,5,6\n');
+    const rows: string[][] = [];
+    const options = {
+      selectedColumns: [0, 2],
+      equalsFilter: { column: 1, value: '5' },
+    };
+
+    try {
+      for (let offset = 0; offset < input.byteLength; ++offset) {
+        const batch = parser.writeProjectedBatch(input.subarray(offset, offset + 1), options);
+        try {
+          rows.push(...batch.rows());
+        } finally {
+          batch.close();
+        }
+      }
+
+      const batch = parser.endProjectedBatch(options);
+      try {
+        rows.push(...batch.rows());
+      } finally {
+        batch.close();
+      }
+
+      expect(rows).toEqual([['4', '6']]);
+    } finally {
+      parser.close();
+    }
+  });
+
   test('countCsvFileWhereEquals filters natively by column bytes', async () => {
     const path = join(import.meta.dir, 'tmp-filter.csv');
     await Bun.write(path, '"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n');
