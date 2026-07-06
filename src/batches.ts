@@ -68,12 +68,20 @@ export class NativeCsvRowView {
     };
   }
 
+  range(columnIndex: number): CsvFieldRange | null {
+    return this.fieldRange(columnIndex);
+  }
+
   fieldBytes(columnIndex: number): Uint8Array | null {
     const range = this.fieldRange(columnIndex);
     if (range === null) {
       return null;
     }
     return this.#data.subarray(range.start, range.end);
+  }
+
+  bytes(columnIndex: number): Uint8Array | null {
+    return this.fieldBytes(columnIndex);
   }
 
   fieldBuffer(columnIndex: number): Buffer | null {
@@ -84,12 +92,29 @@ export class NativeCsvRowView {
     return this.#data.subarray(range.start, range.end);
   }
 
+  buffer(columnIndex: number): Buffer | null {
+    return this.fieldBuffer(columnIndex);
+  }
+
   fieldString(columnIndex: number): string | null {
     const range = this.fieldRange(columnIndex);
     if (range === null) {
       return null;
     }
     return this.#data.toString('utf8', range.start, range.end);
+  }
+
+  get(columnIndex: number): string | null {
+    return this.fieldString(columnIndex);
+  }
+
+  pick(columns: CsvColumns): string[] {
+    const values: string[] = [];
+    values.length = columns.length;
+    for (let index = 0; index < columns.length; ++index) {
+      values[index] = this.fieldString(columns[index] ?? 0) ?? '';
+    }
+    return values;
   }
 }
 

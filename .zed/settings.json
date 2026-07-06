@@ -7,7 +7,12 @@
       "formatter": {
         "external": {
           "command": "node",
-          "arguments": ["/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs", "fmt", "--stdin", "{buffer_path}"]
+          "arguments": [
+            "/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs",
+            "fmt",
+            "--stdin",
+            "{buffer_path}"
+          ]
         }
       },
       "format_on_save": "on"
@@ -20,7 +25,12 @@
       "formatter": {
         "external": {
           "command": "node",
-          "arguments": ["/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs", "fmt", "--stdin", "{buffer_path}"]
+          "arguments": [
+            "/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs",
+            "fmt",
+            "--stdin",
+            "{buffer_path}"
+          ]
         }
       },
       "format_on_save": "on"
@@ -50,7 +60,12 @@
       "formatter": {
         "external": {
           "command": "node",
-          "arguments": ["/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs", "fmt", "--stdin", "{buffer_path}"]
+          "arguments": [
+            "/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs",
+            "fmt",
+            "--stdin",
+            "{buffer_path}"
+          ]
         }
       },
       "format_on_save": "on"
@@ -59,7 +74,12 @@
       "formatter": {
         "external": {
           "command": "node",
-          "arguments": ["/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs", "fmt", "--stdin", "{buffer_path}"]
+          "arguments": [
+            "/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs",
+            "fmt",
+            "--stdin",
+            "{buffer_path}"
+          ]
         }
       },
       "format_on_save": "on"
@@ -69,7 +89,12 @@
       "formatter": {
         "external": {
           "command": "node",
-          "arguments": ["/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs", "fmt", "--stdin", "{buffer_path}"]
+          "arguments": [
+            "/Users/konstit/Work/edne-correios-loader/node_modules/dprint/bin.cjs",
+            "fmt",
+            "--stdin",
+            "{buffer_path}"
+          ]
         }
       },
       "format_on_save": "on"

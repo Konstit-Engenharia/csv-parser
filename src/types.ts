@@ -27,6 +27,11 @@ export interface CsvTrustedParserOptions {
   noNewlinesInQuotes: true;
 }
 
+export type CsvWhereFilter =
+  | CsvWhereEqualsFilter
+  | CsvWhereInFilter
+  | CsvWhereStartsWithFilter;
+
 export interface CsvEqualsFilter {
   column: number;
   value: CsvFieldValue;
@@ -42,10 +47,35 @@ export interface CsvStartsWithFilter {
   prefix: CsvFieldValue;
 }
 
+export interface CsvWhereEqualsFilter {
+  column: number;
+  equals: CsvFieldValue;
+}
+
+export interface CsvWhereInFilter {
+  column: number;
+  in: readonly CsvFieldValue[];
+}
+
+export interface CsvWhereStartsWithFilter {
+  column: number;
+  startsWith: CsvFieldValue;
+}
+
 export interface CsvNativeProjectionOptions {
   selectedColumns?: CsvColumns;
   equalsFilter?: CsvEqualsFilter;
 }
+
+export interface CsvApiFileOptions extends CsvFileOptions {
+  columns?: CsvColumns;
+  trustedFixedColumns?: number;
+  where?: CsvWhereFilter;
+}
+
+export type CsvProjectedRow<TColumns extends CsvColumns | undefined> = TColumns extends readonly unknown[]
+  ? { -readonly [Index in keyof TColumns]: string; }
+  : CsvRow;
 
 export interface CsvStringCacheOptions {
   columns?: CsvColumns;

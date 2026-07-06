@@ -1,6 +1,12 @@
 import { heapStats } from 'bun:jsc';
-import { createReadStream, statSync } from 'node:fs';
-import { CsvStringCache, NativeCsvParser } from '../src/index.ts';
+import {
+  createReadStream,
+  statSync,
+} from 'node:fs';
+import {
+  CsvStringCache,
+  NativeCsvParser,
+} from '../src/index.ts';
 
 type Mode = 'selected' | 'full' | 'views';
 
@@ -77,30 +83,34 @@ Bun.gc(true);
 const after = summarizeHeap(heapStats());
 const seconds = (performance.now() - startedAt) / 1000;
 
-console.log(JSON.stringify({
-  mode: MODE,
-  file: FILE,
-  bytes,
-  chunkSize: CHUNK_SIZE,
-  chunks,
-  rows,
-  cells,
-  selectedColumns: SELECTED_COLUMNS,
-  cacheColumns: CACHE_COLUMNS,
-  cacheStats: stringCache?.stats() ?? [],
-  seconds,
-  decodeSeconds: decodeMs / 1000,
-  rowsPerSecond: rows / seconds,
-  cellsPerSecond: cells / seconds,
-  heapBefore: before,
-  heapPeak: {
-    heapSize: maxHeapSize,
-    objectCount: maxObjectCount,
-    arrayCount: maxArrayCount,
-    stringCount: maxStringCount,
+console.log(JSON.stringify(
+  {
+    mode: MODE,
+    file: FILE,
+    bytes,
+    chunkSize: CHUNK_SIZE,
+    chunks,
+    rows,
+    cells,
+    selectedColumns: SELECTED_COLUMNS,
+    cacheColumns: CACHE_COLUMNS,
+    cacheStats: stringCache?.stats() ?? [],
+    seconds,
+    decodeSeconds: decodeMs / 1000,
+    rowsPerSecond: rows / seconds,
+    cellsPerSecond: cells / seconds,
+    heapBefore: before,
+    heapPeak: {
+      heapSize: maxHeapSize,
+      objectCount: maxObjectCount,
+      arrayCount: maxArrayCount,
+      stringCount: maxStringCount,
+    },
+    heapAfter: after,
   },
-  heapAfter: after,
-}, null, 2));
+  null,
+  2,
+));
 
 function countCells(rows: string[][]): number {
   let count = 0;

@@ -1,4 +1,5 @@
 export type {
+  CsvApiFileOptions,
   CsvColumns,
   CsvEncoding,
   CsvEqualsFilter,
@@ -9,14 +10,20 @@ export type {
   CsvInFilter,
   CsvNativeProjectionOptions,
   CsvParserOptions,
+  CsvProjectedRow,
   CsvRow,
   CsvStartsWithFilter,
   CsvStringCacheColumnStats,
   CsvStringCacheOptions,
   CsvTrustedParserOptions,
+  CsvWhereEqualsFilter,
+  CsvWhereFilter,
+  CsvWhereInFilter,
+  CsvWhereStartsWithFilter,
   NativeCsvRowCallback,
 } from './types.ts';
 
+export { csv, CsvFileBuilder } from './api.ts';
 export {
   NativeCsvBatch,
   NativeCsvColumnStatsBatch,
