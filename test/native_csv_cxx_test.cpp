@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
@@ -38,6 +39,8 @@ uint64_t csv_parser_write_multi_column_stats(void *parser, const uint8_t *data,
 void *csv_parser_finish_multi_column_stats(void *parser,
                                            const uint32_t *columns,
                                            uint64_t columns_len);
+void *csv_parser_find_split_offsets(const char *path, uint64_t shard_count,
+                                    uint8_t delimiter);
 uint64_t csv_parser_write_count(void *parser, const uint8_t *data, uint64_t len,
                                 bool final);
 uint64_t csv_parser_finish_count(void *parser);
@@ -46,10 +49,13 @@ void csv_dictionary_batch_destroy(void *batch);
 void csv_group_by_count_batch_destroy(void *batch);
 void csv_column_stats_batch_destroy(void *batch);
 void csv_multi_column_stats_batch_destroy(void *batch);
+void csv_split_offsets_batch_destroy(void *batch);
 uint64_t csv_batch_row_count(void *batch);
 uint64_t csv_batch_total_fields(void *batch);
 uint64_t csv_batch_data_len(void *batch);
 const uint8_t *csv_batch_data_ptr(void *batch);
+uint64_t csv_split_offsets_batch_count(void *batch);
+const uint64_t *csv_split_offsets_batch_ptr(void *batch);
 uint64_t csv_dictionary_batch_row_count(void *batch);
 uint64_t csv_dictionary_batch_dict_count(void *batch);
 const uint32_t *csv_dictionary_batch_ids_ptr(void *batch);
@@ -208,6 +214,60 @@ TEST_CASE("native C ABI counts chunked quoted rows") {
   csv_parser_destroy(parser);
 
   REQUIRE(rows == 4);
+}
+
+TEST_CASE("native C ABI finds csv-safe split offsets") {
+  const std::string path = "/tmp/csv-native-split-offsets.csv";
+  {
+    std::FILE *file = std::fopen(path.c_str(), "wb");
+    REQUIRE(file != nullptr);
+    static constexpr char content[] =
+        "id;name;notes\n"
+        "1;ana;\"um;dois\"\n"
+        "2;bob;\"linha\ninterna\"\n"
+        "3;cai;ok\n"
+        "4;dio;fim\n";
+    const size_t written =
+        std::fwrite(content, 1, sizeof(content) - 1, file);
+    REQUIRE(written == sizeof(content) - 1);
+    REQUIRE(std::fclose(file) == 0);
+  }
+
+  void *batch = csv_parser_find_split_offsets(path.c_str(), 3, ';');
+  REQUIRE(batch != nullptr);
+
+  const uint64_t count = csv_split_offsets_batch_count(batch);
+  REQUIRE(count >= 2);
+  const uint64_t *offsets = csv_split_offsets_batch_ptr(batch);
+  REQUIRE(offsets != nullptr);
+  REQUIRE(offsets[0] == 0);
+
+  std::string bytes;
+  {
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    REQUIRE(file != nullptr);
+    REQUIRE(std::fseek(file, 0, SEEK_END) == 0);
+    const long end = std::ftell(file);
+    REQUIRE(end >= 0);
+    REQUIRE(std::fseek(file, 0, SEEK_SET) == 0);
+    bytes.resize(static_cast<size_t>(end));
+    const size_t read = std::fread(bytes.data(), 1, bytes.size(), file);
+    REQUIRE(read == bytes.size());
+    REQUIRE(std::fclose(file) == 0);
+  }
+
+  for (uint64_t index = 1; index < count; ++index) {
+    REQUIRE(offsets[index] >= offsets[index - 1]);
+    if (offsets[index] == static_cast<uint64_t>(bytes.size())) {
+      continue;
+    }
+    REQUIRE(offsets[index] < bytes.size());
+    REQUIRE(bytes[static_cast<size_t>(offsets[index] - 1)] == '\n');
+  }
+
+  REQUIRE(offsets[count - 1] == bytes.size());
+  csv_split_offsets_batch_destroy(batch);
+  REQUIRE(std::remove(path.c_str()) == 0);
 }
 
 TEST_CASE("native C ABI decodes latin1 batches to utf8") {

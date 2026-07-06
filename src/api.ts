@@ -1,4 +1,7 @@
 import { createReadStream } from 'node:fs';
+import {
+  NativeCsvRowView,
+} from './batches.ts';
 import type {
   NativeCsvBatch,
   NativeCsvColumnStatsBatch,
@@ -13,14 +16,34 @@ import {
 } from './strict-schema.ts';
 import type {
   CsvApiFileOptions,
+  CsvColumnarBatchCallback,
+  CsvColumnarBatchView,
   CsvColumns,
   CsvEncoding,
   CsvFieldValue,
   CsvFileOptions,
+  CsvRowView,
+  CsvRowViewCallback,
   CsvParserOptions,
   CsvProjectedRow,
+  CsvShard,
   CsvWhereFilter,
 } from './types.ts';
+import {
+  findCsvSafeShards as findCsvSafeShardsNative,
+  findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
+} from './files.ts';
+import { parallelCount } from './worker-count.ts';
+import {
+  parallelColumnStats,
+  parallelGroupByCount,
+  parallelMultiColumnStats,
+} from './worker-aggregates.ts';
+import {
+  createWorkerPool,
+  CsvWorkerPool,
+} from './worker-pool.ts';
+import { parallelRows } from './worker-rows.ts';
 
 export class CsvFileBuilder {
   readonly #path: string;
@@ -44,6 +67,15 @@ export class CsvFileBuilder {
   chunkSize(chunkSize: number): this {
     this.#options.chunkSize = chunkSize;
     return this;
+  }
+
+  workers(workerCount: number): this {
+    this.#options.workerCount = workerCount;
+    return this;
+  }
+
+  pool(): CsvWorkerPool {
+    return createWorkerPool(this.#path, this.#options);
   }
 
   strict(enabled = true): this {
@@ -118,8 +150,46 @@ export class CsvFileBuilder {
     return withBatches(this.#path, mergeOptions(this.#options, options), callback);
   }
 
+  forEachColumnarBatches(
+    callback: CsvColumnarBatchCallback,
+    options: CsvApiFileOptions = {},
+  ): Promise<void> {
+    return forEachColumnarBatches(this.#path, mergeOptions(this.#options, options), callback);
+  }
+
+  withColumnarBatches(
+    callback: CsvColumnarBatchCallback,
+    options: CsvApiFileOptions = {},
+  ): Promise<void> {
+    return forEachColumnarBatches(this.#path, mergeOptions(this.#options, options), callback);
+  }
+
+  forEachRowViews(
+    callback: CsvRowViewCallback,
+    options: CsvApiFileOptions = {},
+  ): Promise<void> {
+    return forEachRowViews(this.#path, mergeOptions(this.#options, options), callback);
+  }
+
+  withRowViews(
+    callback: CsvRowViewCallback,
+    options: CsvApiFileOptions = {},
+  ): Promise<void> {
+    return forEachRowViews(this.#path, mergeOptions(this.#options, options), callback);
+  }
+
   count(options: CsvApiFileOptions = {}): Promise<number> {
     return count(this.#path, mergeOptions(this.#options, options));
+  }
+
+  splitOffsets(shardCount: number, options: CsvFileOptions = {}): number[] {
+    const merged = mergeOptions(this.#options, options);
+    return findCsvSafeSplitOffsetsNative(this.#path, shardCount, merged.delimiter ?? ',');
+  }
+
+  shards(shardCount: number, options: CsvFileOptions = {}): CsvShard[] {
+    const merged = mergeOptions(this.#options, options);
+    return findCsvSafeShardsNative(this.#path, shardCount, merged.delimiter ?? ',');
   }
 
   dictionary(column: number, options: CsvFileOptions = {}): AsyncGenerator<NativeCsvDictionaryBatch, void> {
@@ -151,7 +221,7 @@ export async function parse<TColumns extends CsvColumns | undefined = undefined>
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
   try {
-    const batch = writeRowsBatch(parser, buffer, options, true);
+    const batch = writeMaterializeBatch(parser, buffer, options, true);
     try {
       validator?.validateBatch(batch);
       validator?.finish();
@@ -168,17 +238,60 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
   path: string,
   options: CsvApiFileOptions & { columns?: TColumns; } = {},
 ): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
-  for await (const batch of batches(path, options)) {
-    try {
-      const values = materializeRows(batch, options);
-      if (values.length > 0) {
-        yield values;
+  if ((options.workerCount ?? 1) > 1) {
+    yield* parallelRows(path, options);
+    return;
+  }
+
+  rejectFilteredStrictSchema(options);
+  const parser = new NativeCsvParser(toParserOptions(options));
+  const validator = strictSchemaValidator(options);
+  try {
+    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+      const batch = writeMaterializeBatch(parser, chunk as Buffer, options);
+      if (batch.rowCount > 0) {
+        try {
+          validator?.validateBatch(batch);
+          const values = materializeRows(batch, options);
+          if (values.length > 0) {
+            yield values;
+          }
+        } finally {
+          batch.close();
+        }
+      } else {
+        batch.close();
       }
-    } finally {
+    }
+
+    const batch = finishMaterializeBatch(parser, options);
+    if (batch.rowCount > 0) {
+      try {
+        validator?.validateBatch(batch);
+        validator?.finish();
+        const values = materializeRows(batch, options);
+        if (values.length > 0) {
+          yield values;
+        }
+      } finally {
+        batch.close();
+      }
+    } else {
+      validator?.finish();
       batch.close();
     }
+  } finally {
+    parser.close();
   }
 }
+
+export { parallelRows };
+export { CsvWorkerPool };
+export {
+  parallelColumnStats,
+  parallelGroupByCount,
+  parallelMultiColumnStats,
+};
 
 export async function* batches(path: string, options: CsvApiFileOptions = {}): AsyncGenerator<NativeCsvBatch, void> {
   ensureRowsWhereSupported(options.where);
@@ -234,7 +347,118 @@ export async function withBatches(
   }
 }
 
+export async function forEachColumnarBatches(
+  path: string,
+  options: CsvApiFileOptions = {},
+  callback: CsvColumnarBatchCallback,
+): Promise<void> {
+  ensureColumnarBatchesSupported(options);
+  const scopedBatch = new ScopedCsvColumnarBatchView(selectedColumns(options));
+  let batchIndex = 0;
+  const parser = new NativeCsvParser(toParserOptions(options));
+  const validator = strictSchemaValidator(options);
+  try {
+    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+      const batch = writeColumnarBatch(parser, chunk as Buffer, options);
+      if (batch.rowCount > 0) {
+        try {
+          validator?.validateBatch(batch);
+          scopedBatch.bind(batch);
+          try {
+            const result = callback(scopedBatch, batchIndex);
+            if (isPromiseLike(result)) {
+              throw new TypeError('columnar batch callback must be synchronous');
+            }
+          } finally {
+            scopedBatch.release();
+          }
+          ++batchIndex;
+        } finally {
+          batch.close();
+        }
+      } else {
+        batch.close();
+      }
+    }
+
+    const batch = finishColumnarBatch(parser, options);
+    if (batch.rowCount > 0) {
+      try {
+        validator?.validateBatch(batch);
+        validator?.finish();
+        scopedBatch.bind(batch);
+        try {
+          const result = callback(scopedBatch, batchIndex);
+          if (isPromiseLike(result)) {
+            throw new TypeError('columnar batch callback must be synchronous');
+          }
+        } finally {
+          scopedBatch.release();
+        }
+      } finally {
+        batch.close();
+      }
+    } else {
+      validator?.finish();
+      batch.close();
+    }
+  } finally {
+    parser.close();
+  }
+}
+
+export function withColumnarBatches(
+  path: string,
+  options: CsvApiFileOptions = {},
+  callback: CsvColumnarBatchCallback,
+): Promise<void> {
+  return forEachColumnarBatches(path, options, callback);
+}
+
+export async function forEachRowViews(
+  path: string,
+  options: CsvApiFileOptions = {},
+  callback: CsvRowViewCallback,
+): Promise<void> {
+  ensureRowViewsSupported(options);
+  const scopedRowView = new ScopedCsvRowView();
+  for await (const batch of batches(path, options)) {
+    try {
+      const rowCount = batch.rowCount;
+      if (rowCount === 0) {
+        continue;
+      }
+      const reusable = new NativeCsvRowView(batch.data(), batch.rowOffsets(), batch.fieldOffsets());
+      for (let rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
+        scopedRowView.bind(reusable.moveTo(rowIndex));
+        try {
+          const result = callback(scopedRowView, rowIndex);
+          if (isPromiseLike(result)) {
+            throw new TypeError('row view callback must be synchronous');
+          }
+        } finally {
+          scopedRowView.release();
+        }
+      }
+    } finally {
+      batch.close();
+    }
+  }
+}
+
+export function withRowViews(
+  path: string,
+  options: CsvApiFileOptions = {},
+  callback: CsvRowViewCallback,
+): Promise<void> {
+  return forEachRowViews(path, options, callback);
+}
+
 export async function count(path: string, options: CsvApiFileOptions = {}): Promise<number> {
+  if ((options.workerCount ?? 1) > 1) {
+    return parallelCount(path, options);
+  }
+
   rejectStrictSchemaUnsupported(options, 'count');
   const parser = new NativeCsvParser(toParserOptions(options));
   let total = 0;
@@ -267,6 +491,16 @@ export async function count(path: string, options: CsvApiFileOptions = {}): Prom
   }
 }
 
+export { parallelCount };
+
+export function findCsvSafeSplitOffsets(path: string, shardCount: number, options: CsvFileOptions = {}): number[] {
+  return findCsvSafeSplitOffsetsNative(path, shardCount, options.delimiter ?? ',');
+}
+
+export function findCsvSafeShards(path: string, shardCount: number, options: CsvFileOptions = {}): CsvShard[] {
+  return findCsvSafeShardsNative(path, shardCount, options.delimiter ?? ',');
+}
+
 export async function* dictionary(
   path: string,
   column: number,
@@ -297,8 +531,11 @@ export async function* dictionary(
 export async function groupByCount(
   path: string,
   column: number,
-  options: CsvFileOptions = {},
+  options: CsvApiFileOptions = {},
 ): Promise<NativeCsvGroupByCountBatch> {
+  if ((options.workerCount ?? 1) > 1) {
+    return parallelGroupByCount(path, column, options);
+  }
   const parser = new NativeCsvParser(toParserOptions(options));
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
@@ -313,8 +550,11 @@ export async function groupByCount(
 export async function columnStats(
   path: string,
   column: number,
-  options: CsvFileOptions = {},
+  options: CsvApiFileOptions = {},
 ): Promise<NativeCsvColumnStatsBatch> {
+  if ((options.workerCount ?? 1) > 1) {
+    return parallelColumnStats(path, column, options);
+  }
   const parser = new NativeCsvParser(toParserOptions(options));
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
@@ -329,8 +569,11 @@ export async function columnStats(
 export async function multiColumnStats(
   path: string,
   columns: CsvColumns,
-  options: CsvFileOptions = {},
+  options: CsvApiFileOptions = {},
 ): Promise<NativeCsvColumnStatsBatch[]> {
+  if ((options.workerCount ?? 1) > 1) {
+    return parallelMultiColumnStats(path, columns, options);
+  }
   if (columns.length === 0) {
     return [];
   }
@@ -351,13 +594,29 @@ export const stats = {
   multi: multiColumnStats,
 };
 
+export function workerPool(path: string, options: CsvApiFileOptions): CsvWorkerPool {
+  return createWorkerPool(path, options);
+}
+
 export const csv = {
   file,
+  workerPool,
   parse,
   rows,
+  parallelCount,
+  parallelGroupByCount,
+  parallelColumnStats,
+  parallelMultiColumnStats,
+  parallelRows,
   batches,
   withBatches,
+  forEachColumnarBatches,
+  withColumnarBatches,
+  forEachRowViews,
+  withRowViews,
   count,
+  findCsvSafeSplitOffsets,
+  findCsvSafeShards,
   dictionary,
   groupByCount,
   columnStats,
@@ -415,7 +674,22 @@ function materializeRows<TColumns extends CsvColumns | undefined>(
   batch: NativeCsvBatch,
   options: CsvApiFileOptions & { columns?: TColumns; },
 ): CsvProjectedRow<TColumns>[] {
-  return batch.rowsInto([], selectedColumns(options)) as CsvProjectedRow<TColumns>[];
+  const columns = selectedColumns(options);
+  if (usesProjectedMaterialization(options)) {
+    return batch.rowsInto([]) as CsvProjectedRow<TColumns>[];
+  }
+  return batch.rowsInto([], columns) as CsvProjectedRow<TColumns>[];
+}
+
+function usesProjectedMaterialization(options: CsvApiFileOptions): boolean {
+  const where = options.where;
+  if (where !== undefined) {
+    if ('equals' in where) {
+      return true;
+    }
+    ensureRowsWhereSupported(where);
+  }
+  return options.strict !== true && selectedColumns(options) !== undefined;
 }
 
 function writeRowsBatch(
@@ -444,6 +718,66 @@ function writeRowsBatch(
   return parser.writeBatch(chunk, final);
 }
 
+function writeMaterializeBatch(
+  parser: NativeCsvParser,
+  chunk: NodeJS.TypedArray | DataView,
+  options: CsvApiFileOptions,
+  final = false,
+): NativeCsvBatch {
+  const columns = selectedColumns(options);
+  const where = options.where;
+  if (where !== undefined) {
+    if ('equals' in where) {
+      return parser.writeProjectedBatch(
+        chunk,
+        {
+          selectedColumns: columns,
+          equalsFilter: {
+            column: where.column,
+            value: where.equals,
+          },
+        },
+        final,
+      );
+    }
+    ensureRowsWhereSupported(where);
+  }
+  if (options.strict !== true && columns !== undefined) {
+    return parser.writeProjectedBatch(chunk, { selectedColumns: columns }, final);
+  }
+  return parser.writeBatch(chunk, final);
+}
+
+function writeColumnarBatch(
+  parser: NativeCsvParser,
+  chunk: NodeJS.TypedArray | DataView,
+  options: CsvApiFileOptions,
+  final = false,
+): NativeCsvBatch {
+  const columns = selectedColumns(options);
+  const where = options.where;
+  if (where !== undefined) {
+    if ('equals' in where) {
+      return parser.writeProjectedBatch(
+        chunk,
+        {
+          selectedColumns: columns,
+          equalsFilter: {
+            column: where.column,
+            value: where.equals,
+          },
+        },
+        final,
+      );
+    }
+    ensureRowsWhereSupported(where);
+  }
+  if (columns !== undefined) {
+    return parser.writeProjectedBatch(chunk, { selectedColumns: columns }, final);
+  }
+  return parser.writeBatch(chunk, final);
+}
+
 function finishRowsBatch(parser: NativeCsvParser, options: CsvApiFileOptions): NativeCsvBatch {
   const where = options.where;
   if (where !== undefined) {
@@ -461,6 +795,48 @@ function finishRowsBatch(parser: NativeCsvParser, options: CsvApiFileOptions): N
   return parser.endBatch();
 }
 
+function finishMaterializeBatch(parser: NativeCsvParser, options: CsvApiFileOptions): NativeCsvBatch {
+  const columns = selectedColumns(options);
+  const where = options.where;
+  if (where !== undefined) {
+    if ('equals' in where) {
+      return parser.endProjectedBatch({
+        selectedColumns: columns,
+        equalsFilter: {
+          column: where.column,
+          value: where.equals,
+        },
+      });
+    }
+    ensureRowsWhereSupported(where);
+  }
+  if (options.strict !== true && columns !== undefined) {
+    return parser.endProjectedBatch({ selectedColumns: columns });
+  }
+  return parser.endBatch();
+}
+
+function finishColumnarBatch(parser: NativeCsvParser, options: CsvApiFileOptions): NativeCsvBatch {
+  const columns = selectedColumns(options);
+  const where = options.where;
+  if (where !== undefined) {
+    if ('equals' in where) {
+      return parser.endProjectedBatch({
+        selectedColumns: columns,
+        equalsFilter: {
+          column: where.column,
+          value: where.equals,
+        },
+      });
+    }
+    ensureRowsWhereSupported(where);
+  }
+  if (columns !== undefined) {
+    return parser.endProjectedBatch({ selectedColumns: columns });
+  }
+  return parser.endBatch();
+}
+
 function ensureRowsWhereSupported(where: CsvWhereFilter | undefined): void {
   if (where === undefined || 'equals' in where) {
     return;
@@ -468,9 +844,175 @@ function ensureRowsWhereSupported(where: CsvWhereFilter | undefined): void {
   throw new Error('rows() supports only where.equals; use count() for where.in or where.startsWith');
 }
 
+function ensureRowViewsSupported(options: CsvApiFileOptions): void {
+  if ((options.workerCount ?? 1) > 1) {
+    throw new Error('row view callbacks do not support workerCount; use rows() or withBatches() instead');
+  }
+}
+
+function ensureColumnarBatchesSupported(options: CsvApiFileOptions): void {
+  ensureRowViewsSupported(options);
+  if (options.strict === true && selectedColumns(options) !== undefined) {
+    throw new Error('columnar batch callbacks do not support strict selectedColumns; use withBatches() instead');
+  }
+}
+
 function rejectFilteredStrictSchema(options: CsvApiFileOptions): void {
   if (options.where !== undefined) {
     rejectStrictSchemaUnsupported(options, 'filtered rows');
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === 'object' && value !== null && 'then' in value && typeof value.then === 'function';
+}
+
+class ScopedCsvRowView implements CsvRowView {
+  #rowView: NativeCsvRowView | null = null;
+
+  bind(rowView: NativeCsvRowView): this {
+    this.#rowView = rowView;
+    return this;
+  }
+
+  release(): void {
+    this.#rowView = null;
+  }
+
+  get rowIndex(): number {
+    return this.#requireRowView().rowIndex;
+  }
+
+  get fieldCount(): number {
+    return this.#requireRowView().fieldCount;
+  }
+
+  fieldRange(columnIndex: number) {
+    return this.#requireRowView().fieldRange(columnIndex);
+  }
+
+  range(columnIndex: number) {
+    return this.#requireRowView().range(columnIndex);
+  }
+
+  fieldBytes(columnIndex: number) {
+    return this.#requireRowView().fieldBytes(columnIndex);
+  }
+
+  bytes(columnIndex: number) {
+    return this.#requireRowView().bytes(columnIndex);
+  }
+
+  fieldBuffer(columnIndex: number) {
+    return this.#requireRowView().fieldBuffer(columnIndex);
+  }
+
+  buffer(columnIndex: number) {
+    return this.#requireRowView().buffer(columnIndex);
+  }
+
+  fieldString(columnIndex: number) {
+    return this.#requireRowView().fieldString(columnIndex);
+  }
+
+  get(columnIndex: number) {
+    return this.#requireRowView().get(columnIndex);
+  }
+
+  pick(columns: CsvColumns): string[] {
+    return this.#requireRowView().pick(columns);
+  }
+
+  #requireRowView(): NativeCsvRowView {
+    if (this.#rowView === null) {
+      throw new Error('row view is only valid during row view callback');
+    }
+    return this.#rowView;
+  }
+}
+
+class ScopedCsvColumnarBatchView implements CsvColumnarBatchView {
+  readonly #selectedColumns: CsvColumns | undefined;
+  #batch: NativeCsvBatch | null = null;
+
+  constructor(selectedColumns: CsvColumns | undefined) {
+    this.#selectedColumns = selectedColumns;
+  }
+
+  bind(batch: NativeCsvBatch): this {
+    this.#batch = batch;
+    return this;
+  }
+
+  release(): void {
+    this.#batch = null;
+  }
+
+  get rowCount(): number {
+    return this.#requireBatch().rowCount;
+  }
+
+  get totalFields(): number {
+    return this.#requireBatch().totalFields;
+  }
+
+  get dataLength(): number {
+    return this.#requireBatch().dataLength;
+  }
+
+  get selectedColumns(): CsvColumns | undefined {
+    return this.#selectedColumns;
+  }
+
+  data(): Buffer {
+    return this.#requireBatch().data();
+  }
+
+  dataView(): Uint8Array {
+    return this.#requireBatch().dataView();
+  }
+
+  rowOffsets(): Uint32Array {
+    return this.#requireBatch().rowOffsets();
+  }
+
+  fieldOffsets(): Uint32Array {
+    return this.#requireBatch().fieldOffsets();
+  }
+
+  rowFieldCount(rowIndex: number): number {
+    return this.#requireBatch().rowFieldCount(rowIndex);
+  }
+
+  fieldRange(rowIndex: number, columnIndex: number) {
+    return this.#requireBatch().fieldRange(rowIndex, columnIndex);
+  }
+
+  fieldBytes(rowIndex: number, columnIndex: number) {
+    return this.#requireBatch().fieldBytes(rowIndex, columnIndex);
+  }
+
+  fieldBuffer(rowIndex: number, columnIndex: number) {
+    return this.#requireBatch().fieldBuffer(rowIndex, columnIndex);
+  }
+
+  forEachColumnRange(columnIndex: number, callback: (rowIndex: number, start: number, end: number) => void, startRow?: number, endRow?: number) {
+    return this.#requireBatch().forEachColumnRange(columnIndex, callback, startRow, endRow);
+  }
+
+  forEachColumnBytes(columnIndex: number, callback: (rowIndex: number, bytes: Uint8Array) => void, startRow?: number, endRow?: number) {
+    return this.#requireBatch().forEachColumnBytes(columnIndex, callback, startRow, endRow);
+  }
+
+  scanColumns(columns: CsvColumns, callback: (rowIndex: number, ranges: Int32Array, data: Buffer) => void, startRow?: number, endRow?: number) {
+    return this.#requireBatch().scanColumns(columns, callback, startRow, endRow);
+  }
+
+  #requireBatch(): NativeCsvBatch {
+    if (this.#batch === null) {
+      throw new Error('columnar batch view is only valid during columnar batch callback');
+    }
+    return this.#batch;
   }
 }
 

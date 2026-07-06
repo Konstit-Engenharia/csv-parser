@@ -43,3 +43,46 @@ export function countFileWithCsvParser(
       });
   });
 }
+
+export interface CsvParserMaterializeStats {
+  cells: number;
+  chars: number;
+  rows: number;
+}
+
+export function materializeFileWithCsvParser(
+  file: string,
+  chunkSize: number,
+  delimiter: string,
+  encoding?: 'latin1',
+): Promise<CsvParserMaterializeStats> {
+  return new Promise((resolve, reject) => {
+    let rows = 0;
+    let cells = 0;
+    let chars = 0;
+    let stream = createReadStream(file, { highWaterMark: chunkSize });
+
+    if (encoding !== undefined) {
+      stream = stream.pipe(iconv.decodeStream(encoding)) as unknown as typeof stream;
+    }
+
+    stream
+      .pipe(csvParser({ headers: false, separator: delimiter }))
+      .on('data', (row: unknown) => {
+        ++rows;
+        const values = Array.isArray(row) ? row : Object.values(row as Record<string, string>);
+        cells += values.length;
+        for (const value of values) {
+          chars += String(value).length;
+        }
+      })
+      .on('error', reject)
+      .on('end', () => {
+        resolve({
+          cells,
+          chars,
+          rows,
+        });
+      });
+  });
+}

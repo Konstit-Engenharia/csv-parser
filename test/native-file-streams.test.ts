@@ -6,6 +6,9 @@ import {
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  csv,
+  findCsvSafeShards,
+  findCsvSafeSplitOffsets,
   parseCsvFileColumnStats,
   parseCsvFileDictionary,
   parseCsvFileGroupByCount,
@@ -118,6 +121,28 @@ describe('NativeCsvParser file streams', () => {
         expect(batch.entries()).toEqual([]);
       } finally {
         batch.close();
+      }
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test('finds csv-safe split offsets and shards through TS API', async () => {
+    const path = join(import.meta.dir, 'tmp-split-offsets.csv');
+    await Bun.write(path, 'id;name;notes\n1;ana;"um;dois"\n2;bob;"linha\ninterna"\n3;cai;ok\n4;dio;fim\n');
+    try {
+      const offsets = findCsvSafeSplitOffsets(path, 3, { delimiter: ';' });
+      const shards = findCsvSafeShards(path, 3, { delimiter: ';' });
+      const builderOffsets = csv.file(path).delimiter(';').splitOffsets(3);
+      const builderShards = csv.file(path).delimiter(';').shards(3);
+
+      expect(offsets[0]).toBe(0);
+      expect(offsets[offsets.length - 1]).toBe((await Bun.file(path).arrayBuffer()).byteLength);
+      expect(offsets).toEqual(builderOffsets);
+      expect(shards).toEqual(builderShards);
+      expect(shards.length).toBeGreaterThan(0);
+      for (const shard of shards) {
+        expect(shard.end).toBeGreaterThanOrEqual(shard.start);
       }
     } finally {
       rmSync(path, { force: true });

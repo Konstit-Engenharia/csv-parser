@@ -20,8 +20,13 @@ import type {
   CsvFileOptions,
   CsvNativeProjectionOptions,
   CsvParserOptions,
+  CsvShard,
   CsvRow,
 } from './types.ts';
+import {
+  requirePtr,
+  toArrayBuffer,
+} from './native.ts';
 
 export function parseCsvBuffer(buffer: NodeJS.TypedArray | DataView, options: CsvParserOptions = {}): CsvRow[] {
   const parser = new NativeCsvParser(options);
@@ -46,6 +51,57 @@ export function countTrustedNewlineRows(buffer: NodeJS.TypedArray | DataView): n
   }
   const input = normalizeChunk(buffer);
   return Number(native.symbols.csv_parser_count_trusted_newlines(input, BigInt(input.byteLength)));
+}
+
+export function findCsvSafeSplitOffsets(path: string, shardCount: number, delimiter = ','): number[] {
+  if (!Number.isInteger(shardCount) || shardCount <= 0) {
+    throw new RangeError(`invalid shard count: ${shardCount}`);
+  }
+  if (delimiter.length !== 1) {
+    throw new Error('delimiter must be one character');
+  }
+
+  const batch = native.symbols.csv_parser_find_split_offsets(
+    Buffer.from(`${path}\0`),
+    BigInt(shardCount),
+    delimiter.charCodeAt(0),
+  );
+  if (batch === null) {
+    throw new Error(`native CSV split offset scan failed: ${path}`);
+  }
+
+  try {
+    const count = Number(native.symbols.csv_split_offsets_batch_count(batch));
+    if (count === 0) {
+      return [];
+    }
+    const ptr = native.symbols.csv_split_offsets_batch_ptr(batch);
+    const offsets = new BigUint64Array(toArrayBuffer(requirePtr(ptr), 0, count * BigUint64Array.BYTES_PER_ELEMENT));
+    const values = new Array<number>(offsets.length);
+    for (let index = 0; index < offsets.length; ++index) {
+      values[index] = Number(offsets[index]);
+    }
+    return values;
+  } finally {
+    native.symbols.csv_split_offsets_batch_destroy(batch);
+  }
+}
+
+export function findCsvSafeShards(path: string, shardCount: number, delimiter = ','): CsvShard[] {
+  const offsets = findCsvSafeSplitOffsets(path, shardCount, delimiter);
+  const shards: CsvShard[] = [];
+  for (let index = 0; index < offsets.length - 1; ++index) {
+    const start = offsets[index] ?? 0;
+    const nextStart = offsets[index + 1] ?? start;
+    if (nextStart <= start) {
+      continue;
+    }
+    shards.push({
+      start,
+      end: nextStart - 1,
+    });
+  }
+  return shards;
 }
 
 export async function* parseCsvFile(path: string, options: CsvFileOptions = {}): AsyncGenerator<CsvRow[], void> {

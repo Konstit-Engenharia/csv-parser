@@ -132,9 +132,17 @@ const CSV_SYMBOLS = {
     args: ['ptr'],
     returns: 'void',
   },
+  csv_group_by_count_batch_create: {
+    args: ['buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64', 'u64'],
+    returns: 'ptr',
+  },
   csv_column_stats_batch_destroy: {
     args: ['ptr'],
     returns: 'void',
+  },
+  csv_column_stats_batch_create: {
+    args: ['buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    returns: 'ptr',
   },
   csv_multi_column_stats_batch_destroy: {
     args: ['ptr'],
@@ -263,6 +271,22 @@ const CSV_SYMBOLS = {
   csv_parser_count_trusted_newlines: {
     args: ['buffer', 'u64'],
     returns: 'u64',
+  },
+  csv_parser_find_split_offsets: {
+    args: ['cstring', 'u64', 'u8'],
+    returns: 'ptr',
+  },
+  csv_split_offsets_batch_destroy: {
+    args: ['ptr'],
+    returns: 'void',
+  },
+  csv_split_offsets_batch_count: {
+    args: ['ptr'],
+    returns: 'u64',
+  },
+  csv_split_offsets_batch_ptr: {
+    args: ['ptr'],
+    returns: 'ptr',
   },
   csv_parser_finish_count: {
     args: ['ptr'],

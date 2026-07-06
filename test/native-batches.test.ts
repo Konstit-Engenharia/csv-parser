@@ -26,6 +26,11 @@ describe('NativeCsvParser batches and materialization', () => {
         expect(fieldBytes?.buffer).toBe(dataView.buffer);
         expect(Buffer.from(fieldBytes ?? []).toString()).toBe('Ana');
         expect(batch.fieldBytes(0, 9)).toBeNull();
+        const ranged: string[] = [];
+        batch.forEachColumnRange(2, (_rowIndex, start, end) => {
+          ranged.push(batch.data().toString('utf8', start, end));
+        });
+        expect(ranged).toEqual(['SP', 'RJ']);
         expect(batch.rowsInto([], [0, 2])).toEqual([
           ['1', 'SP'],
           ['2', 'RJ'],

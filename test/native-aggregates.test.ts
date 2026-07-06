@@ -7,6 +7,10 @@ import {
   type CsvGroupByCountEntry,
   NativeCsvParser,
 } from '../src/index.ts';
+import {
+  createNativeCsvColumnStatsBatch,
+  createNativeCsvGroupByCountBatch,
+} from '../src/batches.ts';
 
 describe('NativeCsvParser native aggregates', () => {
   test('encodes one selected column as native dictionary ids', () => {
@@ -138,6 +142,43 @@ describe('NativeCsvParser native aggregates', () => {
       );
     } finally {
       parser.close();
+    }
+  });
+
+  test('rebuilds native groupBy count batch from merged parts', () => {
+    const batch = createNativeCsvGroupByCountBatch({
+      counts: [2n, 1n, 1n],
+      dictionaryData: Buffer.from('SPRJ'),
+      dictionaryOffsets: [0, 2, 4, 4],
+      rowCount: 4,
+    });
+    try {
+      expect(batch.rowCount).toBe(4);
+      expect(batch.dictionaryStrings()).toEqual(['SP', 'RJ', '']);
+      expect(batch.countsNumbers()).toEqual([2, 1, 1]);
+    } finally {
+      batch.close();
+    }
+  });
+
+  test('rebuilds native column stats batch from merged parts', () => {
+    const batch = createNativeCsvColumnStatsBatch({
+      column: 1,
+      counts: [2n, 1n, 1n],
+      dictionaryData: Buffer.from('SPRJ'),
+      dictionaryOffsets: [0, 2, 4, 4],
+      ids: [0, 0, 1, 2],
+    });
+    try {
+      expect(batch.column).toBe(1);
+      expect([...batch.ids()]).toEqual([0, 0, 1, 2]);
+      expect(batch.entries()).toEqual([
+        { value: 'SP', count: 2 },
+        { value: 'RJ', count: 1 },
+        { value: '', count: 1 },
+      ]);
+    } finally {
+      batch.close();
     }
   });
 });

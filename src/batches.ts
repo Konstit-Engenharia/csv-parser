@@ -8,6 +8,9 @@ import {
 import type { CsvStringCache } from './string-cache.ts';
 import type {
   CsvColumns,
+  CsvColumnBytesCallback,
+  CsvColumnRangeCallback,
+  CsvScanColumnsCallback,
   CsvFieldRange,
   CsvGroupByCountEntry,
   CsvRow,
@@ -139,6 +142,10 @@ export class NativeCsvBatch {
 
   get totalFields(): number {
     return Number(native.symbols.csv_batch_total_fields(this.#requireHandle()));
+  }
+
+  get dataLength(): number {
+    return Number(native.symbols.csv_batch_data_len(this.#requireHandle()));
   }
 
   rows(): CsvRow[] {
@@ -312,6 +319,83 @@ export class NativeCsvBatch {
     return this.data().toString('utf8', range.start, range.end);
   }
 
+  forEachColumnRange(
+    columnIndex: number,
+    callback: CsvColumnRangeCallback,
+    startRow = 0,
+    endRow = this.rowCount,
+  ): void {
+    const rowOffsets = this.rowOffsets();
+    const fieldOffsets = this.fieldOffsets();
+    const resolvedEndRow = this.#resolveEndRow(endRow);
+    this.#validateRowRange(startRow, resolvedEndRow);
+
+    for (let rowIndex = startRow; rowIndex < resolvedEndRow; ++rowIndex) {
+      const rowStart = rowOffsets[rowIndex];
+      const rowEnd = rowOffsets[rowIndex + 1];
+      if (rowStart === undefined || rowEnd === undefined) {
+        throw new RangeError(`row index out of range: ${rowIndex}`);
+      }
+
+      const fieldIndex = rowStart + columnIndex;
+      if (fieldIndex < rowStart || fieldIndex >= rowEnd) {
+        continue;
+      }
+
+      callback(rowIndex, fieldOffsets[fieldIndex] ?? 0, fieldOffsets[fieldIndex + 1] ?? 0);
+    }
+  }
+
+  forEachColumnBytes(
+    columnIndex: number,
+    callback: CsvColumnBytesCallback,
+    startRow = 0,
+    endRow = this.rowCount,
+  ): void {
+    const data = this.data();
+    this.forEachColumnRange(columnIndex, (rowIndex, start, end) => {
+      callback(rowIndex, data.subarray(start, end));
+    }, startRow, endRow);
+  }
+
+  scanColumns(
+    columns: CsvColumns,
+    callback: CsvScanColumnsCallback,
+    startRow = 0,
+    endRow = this.rowCount,
+  ): void {
+    const resolvedEndRow = this.#resolveEndRow(endRow);
+    this.#validateRowRange(startRow, resolvedEndRow);
+    const rowOffsets = this.rowOffsets();
+    const fieldOffsets = this.fieldOffsets();
+    const data = this.data();
+    const ranges = new Int32Array(columns.length * 2);
+
+    for (let rowIndex = startRow; rowIndex < resolvedEndRow; ++rowIndex) {
+      const rowStart = rowOffsets[rowIndex];
+      const rowEnd = rowOffsets[rowIndex + 1];
+      if (rowStart === undefined || rowEnd === undefined) {
+        throw new RangeError(`row index out of range: ${rowIndex}`);
+      }
+
+      for (let columnOffset = 0; columnOffset < columns.length; ++columnOffset) {
+        const columnIndex = columns[columnOffset] ?? 0;
+        const fieldIndex = rowStart + columnIndex;
+        const rangeIndex = columnOffset * 2;
+        if (fieldIndex < rowStart || fieldIndex >= rowEnd) {
+          ranges[rangeIndex] = -1;
+          ranges[rangeIndex + 1] = -1;
+          continue;
+        }
+
+        ranges[rangeIndex] = fieldOffsets[fieldIndex] ?? 0;
+        ranges[rangeIndex + 1] = fieldOffsets[fieldIndex + 1] ?? 0;
+      }
+
+      callback(rowIndex, ranges, data);
+    }
+  }
+
   countWhereEquals(columnIndex: number, value: string | Buffer | Uint8Array): number {
     const encoded = typeof value === 'string' ? Buffer.from(value) : value;
     return Number(native.symbols.csv_batch_count_where_equals(
@@ -346,6 +430,23 @@ export class NativeCsvBatch {
       throw new Error('native CSV batch is closed');
     }
     return this.#handle;
+  }
+
+  #resolveEndRow(endRow: number): number {
+    if (Number.isNaN(endRow)) {
+      throw new RangeError(`row index out of range: ${endRow}`);
+    }
+    return endRow;
+  }
+
+  #validateRowRange(startRow: number, endRow: number): void {
+    const rowCount = this.rowCount;
+    if (!Number.isInteger(startRow) || startRow < 0 || startRow > rowCount) {
+      throw new RangeError(`row index out of range: ${startRow}`);
+    }
+    if (!Number.isInteger(endRow) || endRow < startRow || endRow > rowCount) {
+      throw new RangeError(`row index out of range: ${endRow}`);
+    }
   }
 }
 
@@ -444,6 +545,13 @@ export class NativeCsvDictionaryBatch {
     }
     return this.#handle;
   }
+}
+
+export interface NativeCsvGroupByCountBatchInit {
+  counts: BigUint64Array | bigint[];
+  dictionaryData: Uint8Array;
+  dictionaryOffsets: Uint32Array | number[];
+  rowCount: bigint | number;
 }
 
 export class NativeCsvGroupByCountBatch {
@@ -563,6 +671,34 @@ export class NativeCsvGroupByCountBatch {
     }
     return this.#handle;
   }
+}
+
+export function createNativeCsvGroupByCountBatch(init: NativeCsvGroupByCountBatchInit): NativeCsvGroupByCountBatch {
+  const dictionaryData = asUint8Array(init.dictionaryData);
+  const dictionaryOffsets = asUint32Array(init.dictionaryOffsets);
+  const counts = asBigUint64Array(init.counts);
+  const rowCount = toBigInt(init.rowCount, 'groupBy rowCount');
+  const handle = native.symbols.csv_group_by_count_batch_create(
+    asBuffer(dictionaryData),
+    BigInt(dictionaryData.byteLength),
+    asBuffer(new Uint8Array(dictionaryOffsets.buffer, dictionaryOffsets.byteOffset, dictionaryOffsets.byteLength)),
+    BigInt(dictionaryOffsets.length),
+    asBuffer(new Uint8Array(counts.buffer, counts.byteOffset, counts.byteLength)),
+    BigInt(counts.length),
+    rowCount,
+  );
+  if (handle === null) {
+    throw new Error('failed to create native CSV groupBy count batch');
+  }
+  return new NativeCsvGroupByCountBatch(handle);
+}
+
+export interface NativeCsvColumnStatsBatchInit {
+  column?: number;
+  counts: BigUint64Array | bigint[];
+  dictionaryData: Uint8Array;
+  dictionaryOffsets: Uint32Array | number[];
+  ids: Uint32Array | number[];
 }
 
 export class NativeCsvColumnStatsBatch {
@@ -754,6 +890,27 @@ export class NativeCsvColumnStatsBatch {
   }
 }
 
+export function createNativeCsvColumnStatsBatch(init: NativeCsvColumnStatsBatchInit): NativeCsvColumnStatsBatch {
+  const ids = asUint32Array(init.ids);
+  const counts = asBigUint64Array(init.counts);
+  const dictionaryOffsets = asUint32Array(init.dictionaryOffsets);
+  const dictionaryData = asUint8Array(init.dictionaryData);
+  const handle = native.symbols.csv_column_stats_batch_create(
+    asBuffer(new Uint8Array(ids.buffer, ids.byteOffset, ids.byteLength)),
+    BigInt(ids.length),
+    asBuffer(new Uint8Array(counts.buffer, counts.byteOffset, counts.byteLength)),
+    BigInt(counts.length),
+    asBuffer(new Uint8Array(dictionaryOffsets.buffer, dictionaryOffsets.byteOffset, dictionaryOffsets.byteLength)),
+    BigInt(dictionaryOffsets.length),
+    asBuffer(dictionaryData),
+    BigInt(dictionaryData.byteLength),
+  );
+  if (handle === null) {
+    throw new Error('failed to create native CSV column stats batch');
+  }
+  return new NativeCsvColumnStatsBatch(handle, init.column);
+}
+
 export function takeMultiColumnStatsBatches(handle: Pointer): NativeCsvColumnStatsBatch[] {
   try {
     const columnCount = Number(native.symbols.csv_multi_column_stats_batch_column_count(handle));
@@ -778,4 +935,30 @@ function columnStatsCountToNumber(value: bigint): number {
     throw new RangeError(`column stats count exceeds Number.MAX_SAFE_INTEGER: ${value}`);
   }
   return Number(value);
+}
+
+function asBuffer(value: Uint8Array): Buffer {
+  return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+}
+
+function asUint8Array(value: Uint8Array): Uint8Array {
+  return value;
+}
+
+function asUint32Array(value: Uint32Array | number[]): Uint32Array {
+  return value instanceof Uint32Array ? value : Uint32Array.from(value);
+}
+
+function asBigUint64Array(value: BigUint64Array | bigint[]): BigUint64Array {
+  return value instanceof BigUint64Array ? value : BigUint64Array.from(value);
+}
+
+function toBigInt(value: bigint | number, label: string): bigint {
+  if (typeof value === 'bigint') {
+    return value;
+  }
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`${label} out of range: ${value}`);
+  }
+  return BigInt(value);
 }

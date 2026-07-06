@@ -1,6 +1,7 @@
 #include <hwy/highway.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -136,6 +137,10 @@ struct csv_multi_column_stats_batch {
   uint64_t column_count() const { return batches.size(); }
 };
 
+struct csv_split_offsets_batch {
+  std::vector<uint64_t> offsets;
+};
+
 constexpr size_t npos = std::numeric_limits<size_t>::max();
 
 uint64_t count_trusted_newlines(const uint8_t *data, size_t len) {
@@ -169,6 +174,146 @@ uint64_t count_trusted_newlines(const uint8_t *data, size_t len) {
     ++rows;
   }
   return rows;
+}
+
+std::unique_ptr<csv_split_offsets_batch>
+find_csv_safe_split_offsets(const char *path, size_t shard_count,
+                            uint8_t delimiter) {
+  if (path == nullptr || path[0] == '\0' || shard_count == 0 || delimiter == 0 ||
+      delimiter == '\n' || delimiter == '\r' || delimiter == '"') {
+    return nullptr;
+  }
+
+  std::FILE *file = std::fopen(path, "rb");
+  if (file == nullptr) {
+    return nullptr;
+  }
+
+  if (std::fseek(file, 0, SEEK_END) != 0) {
+    std::fclose(file);
+    return nullptr;
+  }
+  const long size_long = std::ftell(file);
+  if (size_long < 0) {
+    std::fclose(file);
+    return nullptr;
+  }
+  const uint64_t file_size = static_cast<uint64_t>(size_long);
+  if (std::fseek(file, 0, SEEK_SET) != 0) {
+    std::fclose(file);
+    return nullptr;
+  }
+
+  auto batch = std::make_unique<csv_split_offsets_batch>();
+  batch->offsets.reserve(shard_count + 1);
+  batch->offsets.push_back(0);
+  if (file_size == 0) {
+    std::fclose(file);
+    return batch;
+  }
+
+  std::vector<uint64_t> targets;
+  targets.reserve(shard_count > 1 ? shard_count - 1 : 0);
+  for (size_t shard_index = 1; shard_index < shard_count; ++shard_index) {
+    targets.push_back((file_size * static_cast<uint64_t>(shard_index)) /
+                      static_cast<uint64_t>(shard_count));
+  }
+
+  std::vector<uint8_t> buffer(8 * 1024 * 1024);
+  size_t target_index = 0;
+  uint64_t absolute = 0;
+  bool in_quotes = false;
+  bool at_field_start = true;
+  bool pending_quote = false;
+  bool previous_was_cr = false;
+
+  while (true) {
+    const size_t bytes_read = std::fread(buffer.data(), 1, buffer.size(), file);
+    if (bytes_read == 0) {
+      break;
+    }
+
+    size_t index = 0;
+    while (index < bytes_read && target_index < targets.size()) {
+      const uint8_t byte = buffer[index];
+
+      if (pending_quote) {
+        if (byte == '"') {
+          pending_quote = false;
+          at_field_start = false;
+          ++index;
+          ++absolute;
+          continue;
+        }
+        pending_quote = false;
+        in_quotes = false;
+        continue;
+      }
+
+      if (in_quotes) {
+        if (byte == '"') {
+          pending_quote = true;
+        }
+        ++index;
+        ++absolute;
+        continue;
+      }
+
+      if (previous_was_cr && byte == '\n') {
+        previous_was_cr = false;
+        ++index;
+        ++absolute;
+        continue;
+      }
+      previous_was_cr = false;
+
+      if (byte == '"' && at_field_start) {
+        in_quotes = true;
+        at_field_start = false;
+        ++index;
+        ++absolute;
+        continue;
+      }
+
+      if (byte == '\n' || byte == '\r') {
+        const uint64_t row_end = absolute + 1;
+        previous_was_cr = byte == '\r';
+        at_field_start = true;
+        bool crossed_target = false;
+        while (target_index < targets.size() && row_end >= targets[target_index]) {
+          crossed_target = true;
+          ++target_index;
+        }
+        if (crossed_target && row_end > batch->offsets.back()) {
+          batch->offsets.push_back(row_end);
+        }
+        ++index;
+        ++absolute;
+        continue;
+      }
+
+      if (byte == delimiter) {
+        at_field_start = true;
+      } else {
+        at_field_start = false;
+      }
+
+      ++index;
+      ++absolute;
+    }
+
+    absolute += static_cast<uint64_t>(bytes_read - index);
+    if (target_index >= targets.size()) {
+      break;
+    }
+  }
+
+  std::fclose(file);
+
+  if (batch->offsets.back() != file_size) {
+    batch->offsets.push_back(file_size);
+  }
+  return batch;
 }
 
 void append_latin1_scalar(std::string &out, const uint8_t *data, size_t len) {
@@ -2172,6 +2317,10 @@ csv_column_stats_batch *checked_column_stats_batch(void *batch) {
   return static_cast<csv_column_stats_batch *>(batch);
 }
 
+csv_split_offsets_batch *checked_split_offsets_batch(void *batch) {
+  return static_cast<csv_split_offsets_batch *>(batch);
+}
+
 bool valid_value_offsets(const uint32_t *offsets, size_t value_count,
                          uint64_t values_data_len) {
   if (value_count == 0 || offsets == nullptr) {
@@ -2516,6 +2665,90 @@ CSV_EXPORT void csv_column_stats_batch_destroy(void *batch) {
   delete static_cast<csv_native::csv_column_stats_batch *>(batch);
 }
 
+CSV_EXPORT void *csv_group_by_count_batch_create(
+    const uint8_t *dict_data, uint64_t dict_data_len,
+    const uint32_t *dict_offsets, uint64_t dict_offsets_len,
+    const uint64_t *counts, uint64_t counts_len, uint64_t row_count) {
+  if (dict_data_len >
+          static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      dict_offsets_len >
+          static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      counts_len > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      row_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      (dict_data == nullptr && dict_data_len != 0) ||
+      (dict_offsets == nullptr && dict_offsets_len != 0) ||
+      (counts == nullptr && counts_len != 0) || dict_offsets_len == 0 ||
+      dict_offsets_len != counts_len + 1) {
+    return nullptr;
+  }
+
+  const size_t data_len = static_cast<size_t>(dict_data_len);
+  const size_t offsets_len = static_cast<size_t>(dict_offsets_len);
+  const size_t counts_size = static_cast<size_t>(counts_len);
+  if (dict_offsets[0] != 0 ||
+      dict_offsets[offsets_len - 1] != static_cast<uint32_t>(data_len)) {
+    return nullptr;
+  }
+  for (size_t index = 1; index < offsets_len; ++index) {
+    if (dict_offsets[index] < dict_offsets[index - 1]) {
+      return nullptr;
+    }
+  }
+
+  auto *batch = new csv_native::csv_group_by_count_batch();
+  batch->row_count = row_count;
+  batch->counts.assign(counts, counts + counts_size);
+  batch->dict_offsets.assign(dict_offsets, dict_offsets + offsets_len);
+  batch->dict_data.assign(reinterpret_cast<const char *>(dict_data), data_len);
+  return batch;
+}
+
+CSV_EXPORT void *csv_column_stats_batch_create(
+    const uint32_t *ids, uint64_t ids_len, const uint64_t *counts,
+    uint64_t counts_len, const uint32_t *dict_offsets,
+    uint64_t dict_offsets_len, const uint8_t *dict_data,
+    uint64_t dict_data_len) {
+  if (ids_len > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      counts_len > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      dict_offsets_len >
+          static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      dict_data_len >
+          static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+      (ids == nullptr && ids_len != 0) ||
+      (counts == nullptr && counts_len != 0) ||
+      (dict_offsets == nullptr && dict_offsets_len != 0) ||
+      (dict_data == nullptr && dict_data_len != 0) || dict_offsets_len == 0 ||
+      dict_offsets_len != counts_len + 1) {
+    return nullptr;
+  }
+
+  const size_t row_count = static_cast<size_t>(ids_len);
+  const size_t dict_count = static_cast<size_t>(counts_len);
+  const size_t offsets_len = static_cast<size_t>(dict_offsets_len);
+  const size_t data_len = static_cast<size_t>(dict_data_len);
+  if (dict_offsets[0] != 0 ||
+      dict_offsets[offsets_len - 1] != static_cast<uint32_t>(data_len)) {
+    return nullptr;
+  }
+  for (size_t index = 1; index < offsets_len; ++index) {
+    if (dict_offsets[index] < dict_offsets[index - 1]) {
+      return nullptr;
+    }
+  }
+  for (size_t index = 0; index < row_count; ++index) {
+    if (ids[index] >= dict_count && dict_count != 0) {
+      return nullptr;
+    }
+  }
+
+  auto *batch = new csv_native::csv_column_stats_batch();
+  batch->ids.assign(ids, ids + row_count);
+  batch->counts.assign(counts, counts + dict_count);
+  batch->dict_offsets.assign(dict_offsets, dict_offsets + offsets_len);
+  batch->dict_data.assign(reinterpret_cast<const char *>(dict_data), data_len);
+  return batch;
+}
+
 CSV_EXPORT void csv_multi_column_stats_batch_destroy(void *batch) {
   delete static_cast<csv_native::csv_multi_column_stats_batch *>(batch);
 }
@@ -2783,6 +3016,35 @@ CSV_EXPORT uint64_t csv_parser_count_trusted_newlines(const uint8_t *data,
   }
 
   return csv_native::count_trusted_newlines(data, static_cast<size_t>(len));
+}
+
+CSV_EXPORT void *csv_parser_find_split_offsets(const char *path,
+                                               uint64_t shard_count,
+                                               uint8_t delimiter) {
+  if (shard_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return nullptr;
+  }
+  auto batch = csv_native::find_csv_safe_split_offsets(
+      path, static_cast<size_t>(shard_count), delimiter);
+  return batch.release();
+}
+
+CSV_EXPORT void csv_split_offsets_batch_destroy(void *batch) {
+  delete csv_native::checked_split_offsets_batch(batch);
+}
+
+CSV_EXPORT uint64_t csv_split_offsets_batch_count(void *batch) {
+  if (batch == nullptr) {
+    return 0;
+  }
+  return csv_native::checked_split_offsets_batch(batch)->offsets.size();
+}
+
+CSV_EXPORT const uint64_t *csv_split_offsets_batch_ptr(void *batch) {
+  if (batch == nullptr) {
+    return nullptr;
+  }
+  return csv_native::checked_split_offsets_batch(batch)->offsets.data();
 }
 
 CSV_EXPORT uint64_t csv_parser_finish_count(void *parser) {

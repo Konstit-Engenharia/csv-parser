@@ -10,6 +10,11 @@ export interface CsvFieldRange {
   end: number;
 }
 
+export interface CsvShard {
+  start: number;
+  end: number;
+}
+
 export interface CsvParserOptions {
   encoding?: CsvEncoding;
   delimiter?: string;
@@ -74,6 +79,7 @@ export interface CsvNativeProjectionOptions {
 export interface CsvApiFileOptions extends CsvFileOptions {
   columns?: CsvColumns;
   trustedFixedColumns?: number;
+  workerCount?: number;
   where?: CsvWhereFilter;
 }
 
@@ -99,4 +105,43 @@ export interface CsvGroupByCountEntry {
   count: number;
 }
 
+export type CsvRowView = Pick<
+  NativeCsvRowView,
+  | 'rowIndex'
+  | 'fieldCount'
+  | 'fieldRange'
+  | 'range'
+  | 'fieldBytes'
+  | 'bytes'
+  | 'fieldBuffer'
+  | 'buffer'
+  | 'fieldString'
+  | 'get'
+  | 'pick'
+>;
+
+export type CsvRowViewCallback = (row: CsvRowView, rowIndex: number) => void;
 export type NativeCsvRowCallback = (row: NativeCsvRowView, rowIndex: number) => void;
+export type CsvColumnRangeCallback = (rowIndex: number, start: number, end: number) => void;
+export type CsvColumnBytesCallback = (rowIndex: number, bytes: Uint8Array) => void;
+export type CsvScanColumnsCallback = (rowIndex: number, ranges: Int32Array, data: Buffer) => void;
+
+export interface CsvColumnarBatchView {
+  readonly rowCount: number;
+  readonly totalFields: number;
+  readonly dataLength: number;
+  readonly selectedColumns: CsvColumns | undefined;
+  data(): Buffer;
+  dataView(): Uint8Array;
+  rowOffsets(): Uint32Array;
+  fieldOffsets(): Uint32Array;
+  rowFieldCount(rowIndex: number): number;
+  fieldRange(rowIndex: number, columnIndex: number): CsvFieldRange | null;
+  fieldBytes(rowIndex: number, columnIndex: number): Uint8Array | null;
+  fieldBuffer(rowIndex: number, columnIndex: number): Buffer | null;
+  forEachColumnRange(columnIndex: number, callback: CsvColumnRangeCallback, startRow?: number, endRow?: number): void;
+  forEachColumnBytes(columnIndex: number, callback: CsvColumnBytesCallback, startRow?: number, endRow?: number): void;
+  scanColumns(columns: CsvColumns, callback: CsvScanColumnsCallback, startRow?: number, endRow?: number): void;
+}
+
+export type CsvColumnarBatchCallback = (batch: CsvColumnarBatchView, batchIndex: number) => void;
