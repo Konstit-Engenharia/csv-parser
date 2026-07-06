@@ -26,30 +26,30 @@
 namespace csv_native {
 namespace hn = hwy::HWY_NAMESPACE;
 
-enum class Encoding : int {
-  kUtf8 = 0,
-  kLatin1 = 1,
+enum class csv_encoding : int {
+  utf8 = 0,
+  latin1 = 1,
 };
 
-enum class OutputMode {
-  kBatch,
-  kCount,
-  kDictionary,
-  kGroupByCount,
-  kColumnStats,
-  kMultiColumnStats,
+enum class output_mode {
+  batch,
+  count,
+  dictionary,
+  group_by_count,
+  column_stats,
+  multi_column_stats,
 };
 
-enum class RowFilterKind : uint8_t {
-  kNone = 0,
-  kEquals = 1,
-  kIn = 2,
-  kStartsWith = 3,
+enum class row_filter_kind : uint8_t {
+  none = 0,
+  equals = 1,
+  in = 2,
+  starts_with = 3,
 };
 
-struct RowFilter {
+struct row_filter {
   bool enabled = false;
-  RowFilterKind kind = RowFilterKind::kNone;
+  row_filter_kind kind = row_filter_kind::none;
   uint32_t column = 0;
   const uint8_t *value = nullptr;
   size_t value_len = 0;
@@ -58,23 +58,23 @@ struct RowFilter {
   size_t value_count = 0;
 };
 
-struct CsvBatch {
+struct csv_batch {
   std::vector<uint32_t> row_offsets{0};
   std::vector<uint32_t> field_offsets{0};
   std::string data;
 
-  void Reserve(size_t input_len, Encoding encoding) {
+  void reserve(size_t input_len, csv_encoding encoding) {
     const size_t data_capacity =
-        encoding == Encoding::kLatin1 ? input_len * 2 : input_len;
+        encoding == csv_encoding::latin1 ? input_len * 2 : input_len;
     data.reserve(data_capacity);
     field_offsets.reserve((input_len / 6) + 32);
     row_offsets.reserve((input_len / 160) + 32);
   }
 
-  void ReserveTrusted(size_t input_len, Encoding encoding,
-                      uint32_t fixed_columns, size_t rows_hint) {
+  void reserve_trusted(size_t input_len, csv_encoding encoding,
+                       uint32_t fixed_columns, size_t rows_hint) {
     const size_t data_capacity =
-        encoding == Encoding::kLatin1 ? input_len * 2 : input_len;
+        encoding == csv_encoding::latin1 ? input_len * 2 : input_len;
     data.reserve(data_capacity);
     const size_t fields_hint =
         rows_hint * static_cast<size_t>(fixed_columns) + 1;
@@ -82,10 +82,10 @@ struct CsvBatch {
     row_offsets.reserve(rows_hint + 1);
   }
 
-  void ReserveFixed(size_t input_len, Encoding encoding,
-                    uint32_t fixed_columns) {
+  void reserve_fixed(size_t input_len, csv_encoding encoding,
+                     uint32_t fixed_columns) {
     const size_t data_capacity =
-        encoding == Encoding::kLatin1 ? input_len * 2 : input_len;
+        encoding == csv_encoding::latin1 ? input_len * 2 : input_len;
     data.reserve(data_capacity);
     const size_t rows_hint = (input_len / 160) + 32;
     field_offsets.reserve(rows_hint * static_cast<size_t>(fixed_columns) + 1);
@@ -93,7 +93,7 @@ struct CsvBatch {
   }
 };
 
-struct CsvDictionaryBatch {
+struct csv_dictionary_batch {
   std::vector<uint32_t> ids;
   std::vector<uint32_t> dict_offsets{0};
   std::string dict_data;
@@ -105,7 +105,7 @@ struct CsvDictionaryBatch {
   }
 };
 
-struct CsvGroupByCountBatch {
+struct csv_group_by_count_batch {
   std::vector<uint64_t> counts;
   std::vector<uint32_t> dict_offsets{0};
   std::string dict_data;
@@ -116,7 +116,7 @@ struct CsvGroupByCountBatch {
   }
 };
 
-struct CsvColumnStatsBatch {
+struct csv_column_stats_batch {
   std::vector<uint32_t> ids;
   std::vector<uint64_t> counts;
   std::vector<uint32_t> dict_offsets{0};
@@ -129,14 +129,14 @@ struct CsvColumnStatsBatch {
   }
 };
 
-struct CsvMultiColumnStatsBatch {
+struct csv_multi_column_stats_batch {
   std::vector<uint32_t> columns;
-  std::vector<std::unique_ptr<CsvColumnStatsBatch>> batches;
+  std::vector<std::unique_ptr<csv_column_stats_batch>> batches;
 
   uint64_t column_count() const { return batches.size(); }
 };
 
-constexpr size_t kNpos = std::numeric_limits<size_t>::max();
+constexpr size_t npos = std::numeric_limits<size_t>::max();
 
 uint64_t count_trusted_newlines(const uint8_t *data, size_t len) {
   if (data == nullptr || len == 0) {
@@ -193,7 +193,7 @@ void append_latin1_scalar_byte(std::string &out, uint8_t byte) {
 }
 
 #if defined(__AVX2__)
-constexpr size_t kLatin1SimdBlock = 16;
+constexpr size_t latin1_simd_block = 16;
 
 bool latin1_simd_block_all_non_ascii(const uint8_t *data) {
   const __m128i bytes =
@@ -215,12 +215,12 @@ void append_latin1_simd_non_ascii_block(std::string &out, const uint8_t *data) {
       _mm256_or_si256(leading, _mm256_slli_epi16(trailing, 8));
 
   const size_t offset = out.size();
-  out.resize(offset + kLatin1SimdBlock * 2);
+  out.resize(offset + latin1_simd_block * 2);
   _mm256_storeu_si256(reinterpret_cast<__m256i *>(out.data() + offset), packed);
 }
 #define CSV_NATIVE_LATIN1_SIMD_BLOCK 1
 #elif defined(__ARM_NEON) && defined(__aarch64__)
-constexpr size_t kLatin1SimdBlock = 16;
+constexpr size_t latin1_simd_block = 16;
 
 bool latin1_simd_block_all_non_ascii(const uint8_t *data) {
   const uint8x16_t bytes = vld1q_u8(data);
@@ -242,7 +242,7 @@ void append_latin1_simd_non_ascii_block(std::string &out, const uint8_t *data) {
   const uint16x8_t high = latin1_neon_encode_half(vget_high_u8(bytes));
 
   const size_t offset = out.size();
-  out.resize(offset + kLatin1SimdBlock * 2);
+  out.resize(offset + latin1_simd_block * 2);
   auto *dst = reinterpret_cast<uint8_t *>(out.data() + offset);
   vst1q_u8(dst, vreinterpretq_u8_u16(low));
   vst1q_u8(dst + 16, vreinterpretq_u8_u16(high));
@@ -268,10 +268,10 @@ void append_latin1(std::string &out, const uint8_t *data, size_t len) {
     }
 
 #if defined(CSV_NATIVE_LATIN1_SIMD_BLOCK)
-    if (i + kLatin1SimdBlock <= len &&
+    if (i + latin1_simd_block <= len &&
         latin1_simd_block_all_non_ascii(data + i)) {
       append_latin1_simd_non_ascii_block(out, data + i);
-      i += kLatin1SimdBlock;
+      i += latin1_simd_block;
       continue;
     }
 #endif
@@ -318,7 +318,7 @@ size_t find_byte_simd(const uint8_t *data, size_t len, uint8_t needle) {
       return i;
     }
   }
-  return kNpos;
+  return npos;
 }
 
 size_t find_plain_special_simd(const uint8_t *data, size_t len,
@@ -348,7 +348,7 @@ size_t find_plain_special_simd(const uint8_t *data, size_t len,
       return i;
     }
   }
-  return kNpos;
+  return npos;
 }
 
 bool is_quoted_field_terminator(uint8_t byte, uint8_t delimiter) {
@@ -362,34 +362,34 @@ uint64_t clear_mask_bits_through(uint64_t bits, size_t lane) {
   return bits & (~0ull << (lane + 1));
 }
 
-class CsvParser {
+class csv_parser {
 public:
-  CsvParser(Encoding encoding, uint8_t delimiter)
+  csv_parser(csv_encoding encoding, uint8_t delimiter)
       : encoding_(encoding), delimiter_(delimiter) {}
 
-  CsvBatch *WriteBatch(const uint8_t *data, size_t len, bool final) {
-    return WriteProjectedBatch(data, len, final, nullptr, 0, RowFilter{});
+  csv_batch *write_batch(const uint8_t *data, size_t len, bool final) {
+    return write_projected_batch(data, len, final, nullptr, 0, row_filter{});
   }
 
-  CsvBatch *WriteFixedBatch(const uint8_t *data, size_t len, bool final,
-                            uint32_t fixed_columns) {
+  csv_batch *write_fixed_batch(const uint8_t *data, size_t len, bool final,
+                               uint32_t fixed_columns) {
     if (fixed_columns == 0) {
-      SetError("fixed columns must be greater than zero");
+      set_error("fixed columns must be greater than zero");
       return nullptr;
     }
 
-    auto batch = std::make_unique<CsvBatch>();
-    batch->ReserveFixed(len, encoding_, fixed_columns);
-    mode_ = OutputMode::kBatch;
+    auto batch = std::make_unique<csv_batch>();
+    batch->reserve_fixed(len, encoding_, fixed_columns);
+    mode_ = output_mode::batch;
     batch_ = batch.get();
-    Configure(nullptr, 0, RowFilter{});
+    configure(nullptr, 0, row_filter{});
     fixed_columns_enabled_ = true;
     fixed_columns_ = fixed_columns;
     parse_failed_ = false;
     emitted_rows_ = 0;
-    Parse(data, len);
+    parse(data, len);
     if (final) {
-      FinishStream();
+      finish_stream();
     }
     fixed_columns_enabled_ = false;
     fixed_columns_ = 0;
@@ -400,22 +400,22 @@ public:
     return batch.release();
   }
 
-  CsvBatch *WriteTrustedFixedBatch(const uint8_t *data, size_t len, bool final,
-                                   uint32_t fixed_columns) {
+  csv_batch *write_trusted_fixed_batch(const uint8_t *data, size_t len,
+                                       bool final, uint32_t fixed_columns) {
     if (fixed_columns == 0) {
-      SetError("trusted fixed columns must be greater than zero");
+      set_error("trusted fixed columns must be greater than zero");
       return nullptr;
     }
 
-    auto batch = std::make_unique<CsvBatch>();
-    batch->ReserveTrusted(
+    auto batch = std::make_unique<csv_batch>();
+    batch->reserve_trusted(
         len, encoding_, fixed_columns,
         static_cast<size_t>(count_trusted_newlines(data, len)));
-    mode_ = OutputMode::kBatch;
+    mode_ = output_mode::batch;
     batch_ = batch.get();
-    Configure(nullptr, 0, RowFilter{});
+    configure(nullptr, 0, row_filter{});
     emitted_rows_ = 0;
-    if (!ParseTrustedFixedRows(data, len, final, fixed_columns)) {
+    if (!parse_trusted_fixed_rows(data, len, final, fixed_columns)) {
       batch_ = nullptr;
       return nullptr;
     }
@@ -423,167 +423,173 @@ public:
     return batch.release();
   }
 
-  CsvBatch *WriteProjectedBatch(const uint8_t *data, size_t len, bool final,
-                                const uint32_t *selected_columns,
-                                size_t selected_columns_len, RowFilter filter) {
-    auto batch = std::make_unique<CsvBatch>();
-    batch->Reserve(len, encoding_);
-    mode_ = OutputMode::kBatch;
+  csv_batch *write_projected_batch(const uint8_t *data, size_t len, bool final,
+                                   const uint32_t *selected_columns,
+                                   size_t selected_columns_len,
+                                   row_filter filter) {
+    auto batch = std::make_unique<csv_batch>();
+    batch->reserve(len, encoding_);
+    mode_ = output_mode::batch;
     batch_ = batch.get();
-    Configure(selected_columns, selected_columns_len, filter);
+    configure(selected_columns, selected_columns_len, filter);
     emitted_rows_ = 0;
-    Parse(data, len);
+    parse(data, len);
     if (final) {
-      FinishStream();
+      finish_stream();
     }
     batch_ = nullptr;
     return batch.release();
   }
 
-  CsvBatch *FinishBatch() { return WriteBatch(nullptr, 0, true); }
+  csv_batch *finish_batch() { return write_batch(nullptr, 0, true); }
 
-  CsvBatch *FinishFixedBatch(uint32_t fixed_columns) {
-    return WriteFixedBatch(nullptr, 0, true, fixed_columns);
+  csv_batch *finish_fixed_batch(uint32_t fixed_columns) {
+    return write_fixed_batch(nullptr, 0, true, fixed_columns);
   }
 
-  CsvBatch *FinishTrustedFixedBatch(uint32_t fixed_columns) {
-    return WriteTrustedFixedBatch(nullptr, 0, true, fixed_columns);
+  csv_batch *finish_trusted_fixed_batch(uint32_t fixed_columns) {
+    return write_trusted_fixed_batch(nullptr, 0, true, fixed_columns);
   }
 
-  CsvBatch *FinishProjectedBatch(const uint32_t *selected_columns,
-                                 size_t selected_columns_len,
-                                 RowFilter filter) {
-    return WriteProjectedBatch(nullptr, 0, true, selected_columns,
-                               selected_columns_len, filter);
+  csv_batch *finish_projected_batch(const uint32_t *selected_columns,
+                                    size_t selected_columns_len,
+                                    row_filter filter) {
+    return write_projected_batch(nullptr, 0, true, selected_columns,
+                                 selected_columns_len, filter);
   }
 
-  CsvDictionaryBatch *WriteDictionaryBatch(const uint8_t *data, size_t len,
-                                           bool final, uint32_t column) {
-    auto dictionary = std::make_unique<CsvDictionaryBatch>();
+  csv_dictionary_batch *write_dictionary_batch(const uint8_t *data, size_t len,
+                                               bool final, uint32_t column) {
+    auto dictionary = std::make_unique<csv_dictionary_batch>();
     dictionary->ids.reserve((len / 160) + 32);
-    mode_ = OutputMode::kDictionary;
+    mode_ = output_mode::dictionary;
     dictionary_batch_ = dictionary.get();
     dictionary_column_ = column;
     dictionary_hash_ids_.clear();
     dictionary_hash_ids_.reserve(128);
     dictionary_hash_collisions_.clear();
     emitted_rows_ = 0;
-    Parse(data, len);
+    parse(data, len);
     if (final) {
-      FinishStream();
+      finish_stream();
     }
     dictionary_batch_ = nullptr;
 
     return dictionary.release();
   }
 
-  CsvDictionaryBatch *FinishDictionaryBatch(uint32_t column) {
-    return WriteDictionaryBatch(nullptr, 0, true, column);
+  csv_dictionary_batch *finish_dictionary_batch(uint32_t column) {
+    return write_dictionary_batch(nullptr, 0, true, column);
   }
 
-  uint64_t WriteGroupByCount(const uint8_t *data, size_t len, uint32_t column) {
+  uint64_t write_group_by_count(const uint8_t *data, size_t len,
+                                uint32_t column) {
     if (group_by_count_batch_owner_ == nullptr) {
-      group_by_count_batch_owner_ = std::make_unique<CsvGroupByCountBatch>();
+      group_by_count_batch_owner_ =
+          std::make_unique<csv_group_by_count_batch>();
       group_by_hash_ids_.clear();
       group_by_hash_ids_.reserve(128);
       group_by_hash_collisions_.clear();
       group_by_column_ = column;
     } else if (group_by_column_ != column) {
-      SetError("groupBy count column changed during stream");
+      set_error("groupBy count column changed during stream");
       return 0;
     }
 
-    mode_ = OutputMode::kGroupByCount;
+    mode_ = output_mode::group_by_count;
     group_by_count_batch_ = group_by_count_batch_owner_.get();
     emitted_rows_ = 0;
-    Parse(data, len);
+    parse(data, len);
     return emitted_rows_;
   }
 
-  CsvGroupByCountBatch *FinishGroupByCount(uint32_t column) {
+  csv_group_by_count_batch *finish_group_by_count(uint32_t column) {
     if (group_by_count_batch_owner_ == nullptr) {
-      group_by_count_batch_owner_ = std::make_unique<CsvGroupByCountBatch>();
+      group_by_count_batch_owner_ =
+          std::make_unique<csv_group_by_count_batch>();
       group_by_hash_ids_.clear();
       group_by_hash_ids_.reserve(128);
       group_by_hash_collisions_.clear();
       group_by_column_ = column;
     } else if (group_by_column_ != column) {
-      SetError("groupBy count column changed during stream");
+      set_error("groupBy count column changed during stream");
       return nullptr;
     }
 
-    mode_ = OutputMode::kGroupByCount;
+    mode_ = output_mode::group_by_count;
     group_by_count_batch_ = group_by_count_batch_owner_.get();
     emitted_rows_ = 0;
-    FinishStream();
+    finish_stream();
     group_by_count_batch_ = nullptr;
     group_by_hash_ids_.clear();
     group_by_hash_collisions_.clear();
     return group_by_count_batch_owner_.release();
   }
 
-  uint64_t WriteColumnStats(const uint8_t *data, size_t len, uint32_t column) {
+  uint64_t write_column_stats(const uint8_t *data, size_t len,
+                              uint32_t column) {
     if (column_stats_batch_owner_ == nullptr) {
-      column_stats_batch_owner_ = std::make_unique<CsvColumnStatsBatch>();
+      column_stats_batch_owner_ = std::make_unique<csv_column_stats_batch>();
       column_stats_hash_ids_.clear();
       column_stats_hash_ids_.reserve(128);
       column_stats_hash_collisions_.clear();
       column_stats_column_ = column;
     } else if (column_stats_column_ != column) {
-      SetError("column stats column changed during stream");
+      set_error("column stats column changed during stream");
       return 0;
     }
 
-    mode_ = OutputMode::kColumnStats;
+    mode_ = output_mode::column_stats;
     column_stats_batch_ = column_stats_batch_owner_.get();
     emitted_rows_ = 0;
-    Parse(data, len);
+    parse(data, len);
     return emitted_rows_;
   }
 
-  CsvColumnStatsBatch *FinishColumnStats(uint32_t column) {
+  csv_column_stats_batch *finish_column_stats(uint32_t column) {
     if (column_stats_batch_owner_ == nullptr) {
-      column_stats_batch_owner_ = std::make_unique<CsvColumnStatsBatch>();
+      column_stats_batch_owner_ = std::make_unique<csv_column_stats_batch>();
       column_stats_hash_ids_.clear();
       column_stats_hash_ids_.reserve(128);
       column_stats_hash_collisions_.clear();
       column_stats_column_ = column;
     } else if (column_stats_column_ != column) {
-      SetError("column stats column changed during stream");
+      set_error("column stats column changed during stream");
       return nullptr;
     }
 
-    mode_ = OutputMode::kColumnStats;
+    mode_ = output_mode::column_stats;
     column_stats_batch_ = column_stats_batch_owner_.get();
     emitted_rows_ = 0;
-    FinishStream();
+    finish_stream();
     column_stats_batch_ = nullptr;
     column_stats_hash_ids_.clear();
     column_stats_hash_collisions_.clear();
     return column_stats_batch_owner_.release();
   }
 
-  uint64_t WriteMultiColumnStats(const uint8_t *data, size_t len,
-                                 const uint32_t *columns, size_t columns_len) {
-    if (!EnsureMultiColumnStats(columns, columns_len, len)) {
+  uint64_t write_multi_column_stats(const uint8_t *data, size_t len,
+                                    const uint32_t *columns,
+                                    size_t columns_len) {
+    if (!ensure_multi_column_stats(columns, columns_len, len)) {
       return 0;
     }
 
-    mode_ = OutputMode::kMultiColumnStats;
+    mode_ = output_mode::multi_column_stats;
     emitted_rows_ = 0;
-    Parse(data, len);
+    parse(data, len);
     return emitted_rows_;
   }
 
-  CsvMultiColumnStatsBatch *FinishMultiColumnStats(const uint32_t *columns,
-                                                   size_t columns_len) {
-    if (!EnsureMultiColumnStats(columns, columns_len, 0)) {
+  csv_multi_column_stats_batch *
+  finish_multi_column_stats(const uint32_t *columns, size_t columns_len) {
+    if (!ensure_multi_column_stats(columns, columns_len, 0)) {
       return nullptr;
     }
 
-    mode_ = OutputMode::kMultiColumnStats;
+    mode_ = output_mode::multi_column_stats;
     emitted_rows_ = 0;
-    FinishStream();
+    finish_stream();
     multi_column_stats_indexes_.clear();
     multi_column_stats_hash_ids_.clear();
     multi_column_stats_hash_collisions_.clear();
@@ -592,57 +598,57 @@ public:
     return multi_column_stats_batch_owner_.release();
   }
 
-  uint64_t WriteCount(const uint8_t *data, size_t len, bool final) {
-    return WriteCountWhere(data, len, final, RowFilter{});
+  uint64_t write_count(const uint8_t *data, size_t len, bool final) {
+    return write_count_where(data, len, final, row_filter{});
   }
 
-  uint64_t WriteCountWhereEquals(const uint8_t *data, size_t len, bool final,
-                                 RowFilter filter) {
+  uint64_t write_count_where_equals(const uint8_t *data, size_t len, bool final,
+                                    row_filter filter) {
     filter.kind =
-        filter.enabled ? RowFilterKind::kEquals : RowFilterKind::kNone;
-    return WriteCountWhere(data, len, final, filter);
+        filter.enabled ? row_filter_kind::equals : row_filter_kind::none;
+    return write_count_where(data, len, final, filter);
   }
 
-  uint64_t WriteCountWhereIn(const uint8_t *data, size_t len, bool final,
-                             RowFilter filter) {
-    filter.kind = filter.enabled ? RowFilterKind::kIn : RowFilterKind::kNone;
-    return WriteCountWhere(data, len, final, filter);
+  uint64_t write_count_where_in(const uint8_t *data, size_t len, bool final,
+                                row_filter filter) {
+    filter.kind = filter.enabled ? row_filter_kind::in : row_filter_kind::none;
+    return write_count_where(data, len, final, filter);
   }
 
-  uint64_t WriteCountWhereStartsWith(const uint8_t *data, size_t len,
-                                     bool final, RowFilter filter) {
+  uint64_t write_count_where_starts_with(const uint8_t *data, size_t len,
+                                         bool final, row_filter filter) {
     filter.kind =
-        filter.enabled ? RowFilterKind::kStartsWith : RowFilterKind::kNone;
-    return WriteCountWhere(data, len, final, filter);
+        filter.enabled ? row_filter_kind::starts_with : row_filter_kind::none;
+    return write_count_where(data, len, final, filter);
   }
 
-  uint64_t WriteCountWhere(const uint8_t *data, size_t len, bool final,
-                           RowFilter filter) {
-    mode_ = OutputMode::kCount;
-    Configure(nullptr, 0, filter);
+  uint64_t write_count_where(const uint8_t *data, size_t len, bool final,
+                             row_filter filter) {
+    mode_ = output_mode::count;
+    configure(nullptr, 0, filter);
     emitted_rows_ = 0;
-    Parse(data, len);
+    parse(data, len);
     if (final) {
-      FinishStream();
+      finish_stream();
     }
     return emitted_rows_;
   }
 
-  uint64_t FinishCount() { return WriteCount(nullptr, 0, true); }
+  uint64_t finish_count() { return write_count(nullptr, 0, true); }
 
-  uint64_t FinishCountWhereEquals(RowFilter filter) {
-    return WriteCountWhereEquals(nullptr, 0, true, filter);
+  uint64_t finish_count_where_equals(row_filter filter) {
+    return write_count_where_equals(nullptr, 0, true, filter);
   }
 
-  uint64_t FinishCountWhereIn(RowFilter filter) {
-    return WriteCountWhereIn(nullptr, 0, true, filter);
+  uint64_t finish_count_where_in(row_filter filter) {
+    return write_count_where_in(nullptr, 0, true, filter);
   }
 
-  uint64_t FinishCountWhereStartsWith(RowFilter filter) {
-    return WriteCountWhereStartsWith(nullptr, 0, true, filter);
+  uint64_t finish_count_where_starts_with(row_filter filter) {
+    return write_count_where_starts_with(nullptr, 0, true, filter);
   }
 
-  void Reset() {
+  void reset() {
     field_.clear();
     trusted_row_buffer_.clear();
     row_fields_.clear();
@@ -672,7 +678,7 @@ public:
     fixed_columns_enabled_ = false;
     fixed_columns_ = 0;
     parse_failed_ = false;
-    filter_ = RowFilter{};
+    filter_ = row_filter{};
     in_quotes_ = false;
     pending_quote_ = false;
     at_field_start_ = true;
@@ -698,13 +704,15 @@ public:
     direct_projection_field_offsets_start_ = 0;
   }
 
-  const char *LastError() const { return error_.empty() ? "" : error_.c_str(); }
+  const char *last_error() const {
+    return error_.empty() ? "" : error_.c_str();
+  }
 
-  void SetError(const char *value) { error_ = value; }
+  void set_error(const char *value) { error_ = value; }
 
 private:
-  void Configure(const uint32_t *selected_columns, size_t selected_columns_len,
-                 RowFilter filter) {
+  void configure(const uint32_t *selected_columns, size_t selected_columns_len,
+                 row_filter filter) {
     selected_columns_ = selected_columns;
     selected_columns_len_ = selected_columns_len;
     projection_enabled_ = selected_columns != nullptr;
@@ -732,24 +740,24 @@ private:
         selected_column_outputs_[column].push_back(checked_u32(i));
       }
     }
-    direct_projection_filter_ = CanUseDirectProjectionFilter();
+    direct_projection_filter_ = can_use_direct_projection_filter();
   }
 
-  bool EnsureMultiColumnStats(const uint32_t *columns, size_t columns_len,
-                              size_t input_len) {
+  bool ensure_multi_column_stats(const uint32_t *columns, size_t columns_len,
+                                 size_t input_len) {
     if (columns == nullptr && columns_len != 0) {
-      SetError("multi-column stats columns are null");
+      set_error("multi-column stats columns are null");
       return false;
     }
 
     if (multi_column_stats_batch_owner_ != nullptr) {
       if (multi_column_stats_batch_owner_->columns.size() != columns_len) {
-        SetError("multi-column stats columns changed during stream");
+        set_error("multi-column stats columns changed during stream");
         return false;
       }
       for (size_t index = 0; index < columns_len; ++index) {
         if (multi_column_stats_batch_owner_->columns[index] != columns[index]) {
-          SetError("multi-column stats columns changed during stream");
+          set_error("multi-column stats columns changed during stream");
           return false;
         }
       }
@@ -757,7 +765,7 @@ private:
     }
 
     multi_column_stats_batch_owner_ =
-        std::make_unique<CsvMultiColumnStatsBatch>();
+        std::make_unique<csv_multi_column_stats_batch>();
     if (columns_len != 0) {
       multi_column_stats_batch_owner_->columns.assign(columns,
                                                       columns + columns_len);
@@ -772,7 +780,7 @@ private:
     multi_column_stats_row_seen_.assign(columns_len, false);
 
     for (size_t index = 0; index < columns_len; ++index) {
-      auto batch = std::make_unique<CsvColumnStatsBatch>();
+      auto batch = std::make_unique<csv_column_stats_batch>();
       batch->ids.reserve((input_len / 160) + 32);
       multi_column_stats_batch_owner_->batches.push_back(std::move(batch));
       multi_column_stats_indexes_[columns[index]].push_back(index);
@@ -782,13 +790,13 @@ private:
     return true;
   }
 
-  void Parse(const uint8_t *data, size_t len) {
+  void parse(const uint8_t *data, size_t len) {
     if (data == nullptr || len == 0) {
       return;
     }
 
-    if (mode_ == OutputMode::kCount && !filter_.enabled) {
-      ParseCountOnly(data, len);
+    if (mode_ == output_mode::count && !filter_.enabled) {
+      parse_count_only(data, len);
       return;
     }
 
@@ -797,7 +805,7 @@ private:
       if (in_quotes_) {
         if (pending_quote_) {
           if (data[i] == '"') {
-            AppendDecodedByte('"');
+            append_decoded_byte('"');
             pending_quote_ = false;
             saw_row_data_ = true;
             at_field_start_ = false;
@@ -810,8 +818,8 @@ private:
         }
 
         const size_t quote = find_byte_simd(data + i, len - i, '"');
-        const size_t span = quote == kNpos ? len - i : quote;
-        AppendDecodedSpan(data + i, span);
+        const size_t span = quote == npos ? len - i : quote;
+        append_decoded_span(data + i, span);
         i += span;
 
         if (i < len && data[i] == '"') {
@@ -830,14 +838,14 @@ private:
       previous_was_cr_ = false;
 
       if (byte == delimiter_) {
-        FinishField();
+        finish_field();
         saw_row_data_ = true;
         ++i;
         continue;
       }
 
       if (byte == '\n' || byte == '\r') {
-        FinishRow();
+        finish_row();
         previous_was_cr_ = byte == '\r';
         ++i;
         continue;
@@ -845,19 +853,19 @@ private:
 
       if (byte == '"' && at_field_start_) {
         const size_t close_quote =
-            FindCompleteQuotedFieldClose(data + i, len - i);
-        if (close_quote != kNpos) {
-          AppendCompleteQuotedField(data + i, close_quote);
+            find_complete_quoted_field_close(data + i, len - i);
+        if (close_quote != npos) {
+          append_complete_quoted_field(data + i, close_quote);
           const size_t terminator_index = i + close_quote + 1;
           const uint8_t terminator = data[terminator_index];
           if (terminator == delimiter_) {
-            FinishField();
+            finish_field();
             saw_row_data_ = true;
             i = terminator_index + 1;
             continue;
           }
           if (terminator == '\n' || terminator == '\r') {
-            FinishRow();
+            finish_row();
             previous_was_cr_ = terminator == '\r';
             i = terminator_index + 1;
             continue;
@@ -873,13 +881,13 @@ private:
         continue;
       }
 
-      const size_t span = FindPlainSpan(data + i, len - i);
-      AppendPlainSpan(data + i, span, len - i);
+      const size_t span = find_plain_span(data + i, len - i);
+      append_plain_span(data + i, span, len - i);
       i += span;
     }
   }
 
-  void ParseCountOnly(const uint8_t *data, size_t len) {
+  void parse_count_only(const uint8_t *data, size_t len) {
     size_t i = 0;
     while (i < len) {
       if (in_quotes_) {
@@ -899,7 +907,7 @@ private:
         const size_t quote = find_byte_simd(data + i, len - i, '"');
         saw_row_data_ = true;
         at_field_start_ = false;
-        if (quote == kNpos) {
+        if (quote == npos) {
           return;
         }
         i += quote + 1;
@@ -943,20 +951,20 @@ private:
         continue;
       }
 
-      const size_t span = FindPlainSpan(data + i, len - i);
+      const size_t span = find_plain_span(data + i, len - i);
       saw_row_data_ = true;
       at_field_start_ = false;
       i += span;
     }
   }
 
-  bool ParseTrustedFixedRows(const uint8_t *data, size_t len, bool final,
-                             uint32_t fixed_columns) {
+  bool parse_trusted_fixed_rows(const uint8_t *data, size_t len, bool final,
+                                uint32_t fixed_columns) {
     size_t row_start = 0;
     while (row_start < len) {
       const size_t newline = find_byte_simd(data + row_start, len - row_start,
                                             static_cast<uint8_t>('\n'));
-      if (newline == kNpos) {
+      if (newline == npos) {
         break;
       }
 
@@ -968,11 +976,11 @@ private:
       if (!trusted_row_buffer_.empty()) {
         trusted_row_buffer_.append(
             reinterpret_cast<const char *>(data + row_start), row_len);
-        if (!ParseTrustedFixedBufferedRow(fixed_columns)) {
+        if (!parse_trusted_fixed_buffered_row(fixed_columns)) {
           return false;
         }
-      } else if (!ParseTrustedFixedRow(data + row_start, row_len,
-                                       fixed_columns)) {
+      } else if (!parse_trusted_fixed_row(data + row_start, row_len,
+                                          fixed_columns)) {
         return false;
       }
 
@@ -985,7 +993,7 @@ private:
     }
 
     if (final && !trusted_row_buffer_.empty()) {
-      if (!ParseTrustedFixedBufferedRow(fixed_columns)) {
+      if (!parse_trusted_fixed_buffered_row(fixed_columns)) {
         return false;
       }
     }
@@ -993,25 +1001,25 @@ private:
     return true;
   }
 
-  bool ParseTrustedFixedBufferedRow(uint32_t fixed_columns) {
+  bool parse_trusted_fixed_buffered_row(uint32_t fixed_columns) {
     size_t row_len = trusted_row_buffer_.size();
     if (row_len != 0 && trusted_row_buffer_[row_len - 1] == '\r') {
       --row_len;
     }
-    const bool ok = ParseTrustedFixedRow(
+    const bool ok = parse_trusted_fixed_row(
         reinterpret_cast<const uint8_t *>(trusted_row_buffer_.data()), row_len,
         fixed_columns);
     trusted_row_buffer_.clear();
     return ok;
   }
 
-  bool ParseTrustedFixedRow(const uint8_t *row, size_t len,
-                            uint32_t fixed_columns) {
+  bool parse_trusted_fixed_row(const uint8_t *row, size_t len,
+                               uint32_t fixed_columns) {
     if (len == 0) {
       return true;
     }
     if (batch_ == nullptr) {
-      SetError("trusted fixed batch is null");
+      set_error("trusted fixed batch is null");
       return false;
     }
 
@@ -1024,15 +1032,15 @@ private:
         while (i < len) {
           const size_t quote =
               find_byte_simd(row + i, len - i, static_cast<uint8_t>('"'));
-          const size_t span = quote == kNpos ? len - i : quote;
-          AppendTrustedFixedSpan(row + i, span);
+          const size_t span = quote == npos ? len - i : quote;
+          append_trusted_fixed_span(row + i, span);
           i += span;
-          if (quote == kNpos) {
+          if (quote == npos) {
             break;
           }
           ++i;
           if (i < len && row[i] == '"') {
-            AppendTrustedFixedByte(static_cast<uint8_t>('"'));
+            append_trusted_fixed_byte(static_cast<uint8_t>('"'));
             ++i;
             continue;
           }
@@ -1041,7 +1049,7 @@ private:
         }
 
         if (!closed) {
-          SetError("trusted fixed quoted field is not closed before row end");
+          set_error("trusted fixed quoted field is not closed before row end");
           return false;
         }
         while (i < len && row[i] != delimiter_) {
@@ -1049,12 +1057,12 @@ private:
         }
       } else {
         const size_t delimiter = find_byte_simd(row + i, len - i, delimiter_);
-        const size_t span = delimiter == kNpos ? len - i : delimiter;
-        AppendTrustedFixedSpan(row + i, span);
+        const size_t span = delimiter == npos ? len - i : delimiter;
+        append_trusted_fixed_span(row + i, span);
         i += span;
       }
 
-      FinishTrustedFixedField();
+      finish_trusted_fixed_field();
       ++parsed_columns;
 
       if (i >= len) {
@@ -1062,53 +1070,54 @@ private:
       }
 
       if (row[i] != delimiter_) {
-        SetError("trusted fixed row parser stopped before delimiter");
+        set_error("trusted fixed row parser stopped before delimiter");
         return false;
       }
       ++i;
 
       if (i == len) {
-        FinishTrustedFixedField();
+        finish_trusted_fixed_field();
         ++parsed_columns;
         break;
       }
     }
 
     if (parsed_columns != fixed_columns) {
-      SetError("trusted fixed row column count mismatch");
+      set_error("trusted fixed row column count mismatch");
       return false;
     }
 
-    FinishBatchRow();
+    finish_batch_row();
     ++emitted_rows_;
     return true;
   }
 
-  void AppendTrustedFixedByte(uint8_t byte) {
-    AppendTrustedFixedSpan(&byte, 1);
+  void append_trusted_fixed_byte(uint8_t byte) {
+    append_trusted_fixed_span(&byte, 1);
   }
 
-  void AppendTrustedFixedSpan(const uint8_t *data, size_t len) {
+  void append_trusted_fixed_span(const uint8_t *data, size_t len) {
     if (len == 0) {
       return;
     }
-    if (encoding_ == Encoding::kUtf8) {
+    if (encoding_ == csv_encoding::utf8) {
       batch_->data.append(reinterpret_cast<const char *>(data), len);
       return;
     }
     append_latin1(batch_->data, data, len);
   }
 
-  void FinishTrustedFixedField() {
+  void finish_trusted_fixed_field() {
     batch_->field_offsets.push_back(checked_u32(batch_->data.size()));
   }
 
-  size_t FindPlainSpan(const uint8_t *data, size_t len) const {
+  size_t find_plain_span(const uint8_t *data, size_t len) const {
     const size_t found = find_plain_special_simd(data, len, delimiter_);
-    return found == kNpos ? len : found;
+    return found == npos ? len : found;
   }
 
-  size_t FindCompleteQuotedFieldClose(const uint8_t *data, size_t len) const {
+  size_t find_complete_quoted_field_close(const uint8_t *data,
+                                          size_t len) const {
     complete_quoted_field_has_escape_ = false;
 
     const hn::CappedTag<uint8_t, 64> du8;
@@ -1128,7 +1137,7 @@ private:
         const size_t lane = hwy::Num0BitsBelowLS1Bit_Nonzero64(quote_bits);
         const size_t quote = i + lane;
         if (quote + 1 >= len) {
-          return kNpos;
+          return npos;
         }
 
         const uint8_t next = data[quote + 1];
@@ -1144,7 +1153,7 @@ private:
         if (is_quoted_field_terminator(next, delimiter_)) {
           return quote;
         }
-        return kNpos;
+        return npos;
       }
 
       i += lanes;
@@ -1159,7 +1168,7 @@ private:
       }
 
       if (i + 1 >= len) {
-        return kNpos;
+        return npos;
       }
 
       const uint8_t next = data[i + 1];
@@ -1171,35 +1180,35 @@ private:
       if (is_quoted_field_terminator(next, delimiter_)) {
         return i;
       }
-      return kNpos;
+      return npos;
     }
 
-    return kNpos;
+    return npos;
   }
 
-  void AppendDecodedByte(uint8_t byte) { AppendDecodedSpan(&byte, 1); }
+  void append_decoded_byte(uint8_t byte) { append_decoded_span(&byte, 1); }
 
-  void AppendPlainSpan(const uint8_t *data, size_t len, size_t remaining) {
-    if (CanAppendCompletePlainFieldToArena(len, remaining)) {
-      AppendUtf8SpanToArena(data, len);
+  void append_plain_span(const uint8_t *data, size_t len, size_t remaining) {
+    if (can_append_complete_plain_field_to_arena(len, remaining)) {
+      append_utf8_span_to_arena(data, len);
       return;
     }
 
-    AppendDecodedSpan(data, len);
+    append_decoded_span(data, len);
   }
 
-  void AppendDecodedSpan(const uint8_t *data, size_t len) {
+  void append_decoded_span(const uint8_t *data, size_t len) {
     if (len == 0) {
       return;
     }
     saw_row_data_ = true;
     at_field_start_ = false;
 
-    if (!ShouldCaptureCurrentField()) {
+    if (!should_capture_current_field()) {
       return;
     }
 
-    if (encoding_ == Encoding::kUtf8) {
+    if (encoding_ == csv_encoding::utf8) {
       field_.append(reinterpret_cast<const char *>(data), len);
       return;
     }
@@ -1207,13 +1216,14 @@ private:
     append_latin1(field_, data, len);
   }
 
-  bool CanAppendCompletePlainFieldToArena(size_t len, size_t remaining) const {
-    return mode_ == OutputMode::kBatch && encoding_ == Encoding::kUtf8 &&
-           batch_ != nullptr && !UseDeferredRows() && at_field_start_ &&
+  bool can_append_complete_plain_field_to_arena(size_t len,
+                                                size_t remaining) const {
+    return mode_ == output_mode::batch && encoding_ == csv_encoding::utf8 &&
+           batch_ != nullptr && !use_deferred_rows() && at_field_start_ &&
            field_.empty() && !field_in_arena_ && len < remaining;
   }
 
-  void AppendUtf8SpanToArena(const uint8_t *data, size_t len) {
+  void append_utf8_span_to_arena(const uint8_t *data, size_t len) {
     saw_row_data_ = true;
     at_field_start_ = false;
     field_in_arena_ = true;
@@ -1222,25 +1232,25 @@ private:
     }
   }
 
-  void AppendCompleteQuotedField(const uint8_t *data, size_t close_quote) {
+  void append_complete_quoted_field(const uint8_t *data, size_t close_quote) {
     saw_row_data_ = true;
     at_field_start_ = false;
 
-    if (!ShouldCaptureCurrentField()) {
+    if (!should_capture_current_field()) {
       return;
     }
 
-    if (encoding_ == Encoding::kUtf8 && mode_ == OutputMode::kBatch &&
-        batch_ != nullptr && !UseDeferredRows() && field_.empty() &&
+    if (encoding_ == csv_encoding::utf8 && mode_ == output_mode::batch &&
+        batch_ != nullptr && !use_deferred_rows() && field_.empty() &&
         !field_in_arena_) {
-      AppendQuotedFieldToArena(data, close_quote);
+      append_quoted_field_to_arena(data, close_quote);
       return;
     }
 
-    AppendQuotedFieldToFieldBuffer(data, close_quote);
+    append_quoted_field_to_field_buffer(data, close_quote);
   }
 
-  void AppendQuotedFieldToArena(const uint8_t *data, size_t close_quote) {
+  void append_quoted_field_to_arena(const uint8_t *data, size_t close_quote) {
     field_in_arena_ = true;
     if (!complete_quoted_field_has_escape_) {
       batch_->data.append(reinterpret_cast<const char *>(data + 1),
@@ -1263,36 +1273,37 @@ private:
                         close_quote - segment_start);
   }
 
-  void AppendQuotedFieldToFieldBuffer(const uint8_t *data, size_t close_quote) {
+  void append_quoted_field_to_field_buffer(const uint8_t *data,
+                                           size_t close_quote) {
     if (!complete_quoted_field_has_escape_) {
-      AppendDecodedSpan(data + 1, close_quote - 1);
+      append_decoded_span(data + 1, close_quote - 1);
       return;
     }
 
     size_t segment_start = 1;
     for (size_t i = 1; i < close_quote; ++i) {
       if (data[i] == '"' && i + 1 < close_quote && data[i + 1] == '"') {
-        AppendDecodedSpan(data + segment_start, i - segment_start);
-        AppendDecodedByte('"');
+        append_decoded_span(data + segment_start, i - segment_start);
+        append_decoded_byte('"');
         ++i;
         segment_start = i + 1;
       }
     }
-    AppendDecodedSpan(data + segment_start, close_quote - segment_start);
+    append_decoded_span(data + segment_start, close_quote - segment_start);
   }
 
-  void FinishField() {
-    if (UseDeferredRows()) {
-      FinishDeferredField();
-    } else if (mode_ == OutputMode::kDictionary) {
-      FinishDictionaryField();
-    } else if (mode_ == OutputMode::kGroupByCount) {
-      FinishGroupByCountField();
-    } else if (mode_ == OutputMode::kColumnStats) {
-      FinishColumnStatsField();
-    } else if (mode_ == OutputMode::kMultiColumnStats) {
-      FinishMultiColumnStatsField();
-    } else if (mode_ == OutputMode::kBatch && batch_ != nullptr) {
+  void finish_field() {
+    if (use_deferred_rows()) {
+      finish_deferred_field();
+    } else if (mode_ == output_mode::dictionary) {
+      finish_dictionary_field();
+    } else if (mode_ == output_mode::group_by_count) {
+      finish_group_by_count_field();
+    } else if (mode_ == output_mode::column_stats) {
+      finish_column_stats_field();
+    } else if (mode_ == output_mode::multi_column_stats) {
+      finish_multi_column_stats_field();
+    } else if (mode_ == output_mode::batch && batch_ != nullptr) {
       if (!field_in_arena_) {
         batch_->data.append(field_);
       }
@@ -1304,86 +1315,86 @@ private:
     ++current_column_;
   }
 
-  void FinishRow() {
+  void finish_row() {
     if (!saw_row_data_) {
       at_field_start_ = true;
       return;
     }
 
-    FinishField();
+    finish_field();
     const bool emit_row =
         !filter_.enabled || (row_filter_seen_ && row_filter_matched_);
-    if (mode_ == OutputMode::kBatch && emit_row) {
+    if (mode_ == output_mode::batch && emit_row) {
       if (direct_projection_filter_) {
-        FinishBatchRow();
-      } else if (UseDeferredRows()) {
-        CommitDeferredBatchRow();
+        finish_batch_row();
+      } else if (use_deferred_rows()) {
+        commit_deferred_batch_row();
       } else {
-        FinishBatchRow();
+        finish_batch_row();
       }
-    } else if (mode_ == OutputMode::kBatch && direct_projection_filter_) {
-      RollbackDirectProjectionRow();
+    } else if (mode_ == output_mode::batch && direct_projection_filter_) {
+      rollback_direct_projection_row();
     }
-    if (mode_ == OutputMode::kDictionary) {
-      FinishDictionaryRow();
+    if (mode_ == output_mode::dictionary) {
+      finish_dictionary_row();
     }
-    if (mode_ == OutputMode::kGroupByCount) {
-      FinishGroupByCountRow();
+    if (mode_ == output_mode::group_by_count) {
+      finish_group_by_count_row();
     }
-    if (mode_ == OutputMode::kColumnStats) {
-      FinishColumnStatsRow();
+    if (mode_ == output_mode::column_stats) {
+      finish_column_stats_row();
     }
-    if (mode_ == OutputMode::kMultiColumnStats) {
-      FinishMultiColumnStatsRow();
+    if (mode_ == output_mode::multi_column_stats) {
+      finish_multi_column_stats_row();
     }
     if (emit_row) {
       ++emitted_rows_;
     }
-    ResetRowState();
+    reset_row_state();
     saw_row_data_ = false;
     at_field_start_ = true;
   }
 
-  bool UseDeferredRows() const {
+  bool use_deferred_rows() const {
     return projection_enabled_ || filter_.enabled || fixed_columns_enabled_;
   }
 
-  bool ShouldCaptureCurrentField() const {
-    if (mode_ == OutputMode::kCount) {
+  bool should_capture_current_field() const {
+    if (mode_ == output_mode::count) {
       return filter_.enabled && current_column_ == filter_.column;
     }
 
-    if (mode_ == OutputMode::kDictionary) {
+    if (mode_ == output_mode::dictionary) {
       return current_column_ == dictionary_column_;
     }
 
-    if (mode_ == OutputMode::kGroupByCount) {
+    if (mode_ == output_mode::group_by_count) {
       return current_column_ == group_by_column_;
     }
 
-    if (mode_ == OutputMode::kColumnStats) {
+    if (mode_ == output_mode::column_stats) {
       return current_column_ == column_stats_column_;
     }
 
-    if (mode_ == OutputMode::kMultiColumnStats) {
+    if (mode_ == output_mode::multi_column_stats) {
       return multi_column_stats_indexes_.find(current_column_) !=
              multi_column_stats_indexes_.end();
     }
 
-    if (!UseDeferredRows()) {
+    if (!use_deferred_rows()) {
       return true;
     }
 
-    return ShouldStoreCurrentField() ||
+    return should_store_current_field() ||
            (filter_.enabled && current_column_ == filter_.column);
   }
 
-  bool ShouldStoreCurrentField() const {
+  bool should_store_current_field() const {
     return !projection_enabled_ || selected_output_count(current_column_) > 0;
   }
 
-  bool CanUseDirectProjectionFilter() const {
-    if (mode_ != OutputMode::kBatch || !projection_enabled_ ||
+  bool can_use_direct_projection_filter() const {
+    if (mode_ != output_mode::batch || !projection_enabled_ ||
         !filter_.enabled || selected_columns_len_ == 0) {
       return false;
     }
@@ -1405,18 +1416,18 @@ private:
                : 0;
   }
 
-  void FinishDeferredField() {
+  void finish_deferred_field() {
     if (direct_projection_filter_) {
-      FinishDirectProjectionField();
+      finish_direct_projection_field();
       return;
     }
 
     if (filter_.enabled && current_column_ == filter_.column) {
       row_filter_seen_ = true;
-      row_filter_matched_ = FieldMatchesFilter();
+      row_filter_matched_ = field_matches_filter();
     }
 
-    if (mode_ != OutputMode::kBatch) {
+    if (mode_ != output_mode::batch) {
       return;
     }
 
@@ -1435,13 +1446,13 @@ private:
     }
   }
 
-  void FinishDirectProjectionField() {
+  void finish_direct_projection_field() {
     if (filter_.enabled && current_column_ == filter_.column) {
       row_filter_seen_ = true;
-      row_filter_matched_ = FieldMatchesFilter();
+      row_filter_matched_ = field_matches_filter();
     }
 
-    if (batch_ == nullptr || !ShouldStoreCurrentField()) {
+    if (batch_ == nullptr || !should_store_current_field()) {
       return;
     }
 
@@ -1455,7 +1466,7 @@ private:
     batch_->field_offsets.push_back(checked_u32(batch_->data.size()));
   }
 
-  void RollbackDirectProjectionRow() {
+  void rollback_direct_projection_row() {
     if (batch_ == nullptr || !direct_projection_row_started_) {
       return;
     }
@@ -1463,21 +1474,21 @@ private:
     batch_->field_offsets.resize(direct_projection_field_offsets_start_);
   }
 
-  bool FieldMatchesFilter() const {
+  bool field_matches_filter() const {
     switch (filter_.kind) {
-    case RowFilterKind::kEquals:
-      return FieldEqualsFilter(filter_.value, filter_.value_len);
-    case RowFilterKind::kIn:
-      return FieldInFilter();
-    case RowFilterKind::kStartsWith:
-      return FieldStartsWithFilter();
-    case RowFilterKind::kNone:
+    case row_filter_kind::equals:
+      return field_equals_filter(filter_.value, filter_.value_len);
+    case row_filter_kind::in:
+      return field_in_filter();
+    case row_filter_kind::starts_with:
+      return field_starts_with_filter();
+    case row_filter_kind::none:
       return true;
     }
     return false;
   }
 
-  bool FieldEqualsFilter(const uint8_t *value, size_t value_len) const {
+  bool field_equals_filter(const uint8_t *value, size_t value_len) const {
     if (field_.size() != value_len) {
       return false;
     }
@@ -1487,21 +1498,21 @@ private:
     return std::memcmp(field_.data(), value, value_len) == 0;
   }
 
-  bool FieldInFilter() const {
+  bool field_in_filter() const {
     if (filter_.value_offsets == nullptr || filter_.values_data == nullptr) {
       return false;
     }
     for (size_t index = 0; index < filter_.value_count; ++index) {
       const uint32_t start = filter_.value_offsets[index];
       const uint32_t end = filter_.value_offsets[index + 1];
-      if (FieldEqualsFilter(filter_.values_data + start, end - start)) {
+      if (field_equals_filter(filter_.values_data + start, end - start)) {
         return true;
       }
     }
     return false;
   }
 
-  bool FieldStartsWithFilter() const {
+  bool field_starts_with_filter() const {
     if (field_.size() < filter_.value_len) {
       return false;
     }
@@ -1511,74 +1522,74 @@ private:
     return std::memcmp(field_.data(), filter_.value, filter_.value_len) == 0;
   }
 
-  void FinishDictionaryField() {
+  void finish_dictionary_field() {
     if (dictionary_batch_ != nullptr && current_column_ == dictionary_column_) {
       dictionary_row_seen_ = true;
-      dictionary_row_id_ = InternDictionaryValue(
+      dictionary_row_id_ = intern_dictionary_value(
           *dictionary_batch_, dictionary_hash_ids_, dictionary_hash_collisions_,
           field_.data(), field_.size());
     }
   }
 
-  void FinishDictionaryRow() {
+  void finish_dictionary_row() {
     if (dictionary_batch_ == nullptr) {
       return;
     }
     if (!dictionary_row_seen_) {
       dictionary_row_id_ =
-          InternDictionaryValue(*dictionary_batch_, dictionary_hash_ids_,
-                                dictionary_hash_collisions_, nullptr, 0);
+          intern_dictionary_value(*dictionary_batch_, dictionary_hash_ids_,
+                                  dictionary_hash_collisions_, nullptr, 0);
     }
     dictionary_batch_->ids.push_back(dictionary_row_id_);
   }
 
-  void FinishGroupByCountField() {
+  void finish_group_by_count_field() {
     if (group_by_count_batch_ != nullptr &&
         current_column_ == group_by_column_) {
       group_by_row_seen_ = true;
-      group_by_row_id_ = InternGroupByCountValue(
+      group_by_row_id_ = intern_group_by_count_value(
           *group_by_count_batch_, group_by_hash_ids_, group_by_hash_collisions_,
           field_.data(), field_.size());
     }
   }
 
-  void FinishGroupByCountRow() {
+  void finish_group_by_count_row() {
     if (group_by_count_batch_ == nullptr) {
       return;
     }
     if (!group_by_row_seen_) {
-      group_by_row_id_ =
-          InternGroupByCountValue(*group_by_count_batch_, group_by_hash_ids_,
-                                  group_by_hash_collisions_, nullptr, 0);
+      group_by_row_id_ = intern_group_by_count_value(
+          *group_by_count_batch_, group_by_hash_ids_, group_by_hash_collisions_,
+          nullptr, 0);
     }
     ++group_by_count_batch_->counts[group_by_row_id_];
     ++group_by_count_batch_->row_count;
   }
 
-  void FinishColumnStatsField() {
+  void finish_column_stats_field() {
     if (column_stats_batch_ != nullptr &&
         current_column_ == column_stats_column_) {
       column_stats_row_seen_ = true;
-      column_stats_row_id_ = InternColumnStatsValue(
+      column_stats_row_id_ = intern_column_stats_value(
           *column_stats_batch_, column_stats_hash_ids_,
           column_stats_hash_collisions_, field_.data(), field_.size());
     }
   }
 
-  void FinishColumnStatsRow() {
+  void finish_column_stats_row() {
     if (column_stats_batch_ == nullptr) {
       return;
     }
     if (!column_stats_row_seen_) {
-      column_stats_row_id_ =
-          InternColumnStatsValue(*column_stats_batch_, column_stats_hash_ids_,
-                                 column_stats_hash_collisions_, nullptr, 0);
+      column_stats_row_id_ = intern_column_stats_value(
+          *column_stats_batch_, column_stats_hash_ids_,
+          column_stats_hash_collisions_, nullptr, 0);
     }
     column_stats_batch_->ids.push_back(column_stats_row_id_);
     ++column_stats_batch_->counts[column_stats_row_id_];
   }
 
-  void FinishMultiColumnStatsField() {
+  void finish_multi_column_stats_field() {
     if (multi_column_stats_batch_owner_ == nullptr) {
       return;
     }
@@ -1590,7 +1601,7 @@ private:
 
     for (const size_t index : found->second) {
       multi_column_stats_row_seen_[index] = true;
-      multi_column_stats_row_ids_[index] = InternColumnStatsValue(
+      multi_column_stats_row_ids_[index] = intern_column_stats_value(
           *multi_column_stats_batch_owner_->batches[index],
           multi_column_stats_hash_ids_[index],
           multi_column_stats_hash_collisions_[index], field_.data(),
@@ -1598,7 +1609,7 @@ private:
     }
   }
 
-  void FinishMultiColumnStatsRow() {
+  void finish_multi_column_stats_row() {
     if (multi_column_stats_batch_owner_ == nullptr) {
       return;
     }
@@ -1607,7 +1618,7 @@ private:
          index < multi_column_stats_batch_owner_->batches.size(); ++index) {
       auto &batch = *multi_column_stats_batch_owner_->batches[index];
       if (!multi_column_stats_row_seen_[index]) {
-        multi_column_stats_row_ids_[index] = InternColumnStatsValue(
+        multi_column_stats_row_ids_[index] = intern_column_stats_value(
             batch, multi_column_stats_hash_ids_[index],
             multi_column_stats_hash_collisions_[index], nullptr, 0);
       }
@@ -1616,19 +1627,19 @@ private:
     }
   }
 
-  void CommitDeferredBatchRow() {
+  void commit_deferred_batch_row() {
     if (batch_ == nullptr) {
       return;
     }
 
     if (projection_enabled_) {
-      CommitFields(projected_fields_);
+      commit_fields(projected_fields_);
     } else {
-      CommitFields(row_fields_);
+      commit_fields(row_fields_);
     }
   }
 
-  void CommitFields(const std::vector<std::string> &fields) {
+  void commit_fields(const std::vector<std::string> &fields) {
     if (batch_ == nullptr) {
       return;
     }
@@ -1637,10 +1648,10 @@ private:
       batch_->data.append(field);
       batch_->field_offsets.push_back(checked_u32(batch_->data.size()));
     }
-    FinishBatchRow();
+    finish_batch_row();
   }
 
-  void ResetRowState() {
+  void reset_row_state() {
     current_column_ = 0;
     row_filter_seen_ = false;
     row_filter_matched_ = false;
@@ -1659,7 +1670,7 @@ private:
     direct_projection_field_offsets_start_ = 0;
   }
 
-  void FinishBatchRow() {
+  void finish_batch_row() {
     if (batch_ == nullptr) {
       return;
     }
@@ -1669,7 +1680,7 @@ private:
       const size_t row_end = batch_->field_offsets.size() - 1;
       const size_t field_count = row_end - row_start;
       if (field_count != fixed_columns_) {
-        SetError("fixed row column count mismatch");
+        set_error("fixed row column count mismatch");
         parse_failed_ = true;
         return;
       }
@@ -1679,7 +1690,7 @@ private:
         checked_u32(batch_->field_offsets.size() - 1));
   }
 
-  void FinishStream() {
+  void finish_stream() {
     if (pending_quote_) {
       pending_quote_ = false;
       in_quotes_ = false;
@@ -1688,7 +1699,7 @@ private:
       in_quotes_ = false;
     }
     if (saw_row_data_) {
-      FinishRow();
+      finish_row();
     }
   }
 
@@ -1699,65 +1710,16 @@ private:
     return static_cast<uint32_t>(value);
   }
 
-  static uint32_t InternDictionaryValue(
-      CsvDictionaryBatch &dictionary,
+  static uint32_t intern_dictionary_value(
+      csv_dictionary_batch &dictionary,
       std::unordered_map<uint64_t, uint32_t> &hash_ids,
       std::unordered_map<uint64_t, std::vector<uint32_t>> &hash_collisions,
       const char *value, size_t value_len) {
     const char *actual = value == nullptr ? "" : value;
-    const uint64_t hash = HashBytes(actual, value_len);
+    const uint64_t hash = hash_bytes(actual, value_len);
     const auto found = hash_ids.find(hash);
     if (found != hash_ids.end()) {
-      if (DictionaryValueEquals(dictionary, found->second, actual, value_len)) {
-        return found->second;
-      }
-
-      const auto collisions = hash_collisions.find(hash);
-      if (collisions != hash_collisions.end()) {
-        for (const uint32_t id : collisions->second) {
-          if (DictionaryValueEquals(dictionary, id, actual, value_len)) {
-            return id;
-          }
-        }
-      }
-
-      const uint32_t id = AppendDictionaryValue(dictionary, actual, value_len);
-      hash_collisions[hash].push_back(id);
-      return id;
-    }
-
-    const uint32_t id = AppendDictionaryValue(dictionary, actual, value_len);
-    hash_ids.emplace(hash, id);
-    return id;
-  }
-
-  static uint32_t AppendDictionaryValue(CsvDictionaryBatch &dictionary,
-                                        const char *value, size_t value_len) {
-    const uint32_t id = checked_u32(dictionary.dict_offsets.size() - 1);
-    dictionary.dict_data.append(value, value_len);
-    dictionary.dict_offsets.push_back(checked_u32(dictionary.dict_data.size()));
-    return id;
-  }
-
-  static bool DictionaryValueEquals(const CsvDictionaryBatch &dictionary,
-                                    uint32_t id, const char *value,
-                                    size_t value_len) {
-    const size_t start = dictionary.dict_offsets[id];
-    const size_t end = dictionary.dict_offsets[id + 1];
-    return BytesEqual(dictionary.dict_data.data() + start, end - start, value,
-                      value_len);
-  }
-
-  static uint32_t InternGroupByCountValue(
-      CsvGroupByCountBatch &dictionary,
-      std::unordered_map<uint64_t, uint32_t> &hash_ids,
-      std::unordered_map<uint64_t, std::vector<uint32_t>> &hash_collisions,
-      const char *value, size_t value_len) {
-    const char *actual = value == nullptr ? "" : value;
-    const uint64_t hash = HashBytes(actual, value_len);
-    const auto found = hash_ids.find(hash);
-    if (found != hash_ids.end()) {
-      if (GroupByCountValueEquals(dictionary, found->second, actual,
+      if (dictionary_value_equals(dictionary, found->second, actual,
                                   value_len)) {
         return found->second;
       }
@@ -1765,76 +1727,78 @@ private:
       const auto collisions = hash_collisions.find(hash);
       if (collisions != hash_collisions.end()) {
         for (const uint32_t id : collisions->second) {
-          if (GroupByCountValueEquals(dictionary, id, actual, value_len)) {
+          if (dictionary_value_equals(dictionary, id, actual, value_len)) {
             return id;
           }
         }
       }
 
       const uint32_t id =
-          AppendGroupByCountValue(dictionary, actual, value_len);
+          append_dictionary_value(dictionary, actual, value_len);
       hash_collisions[hash].push_back(id);
       return id;
     }
 
-    const uint32_t id = AppendGroupByCountValue(dictionary, actual, value_len);
+    const uint32_t id = append_dictionary_value(dictionary, actual, value_len);
     hash_ids.emplace(hash, id);
     return id;
   }
 
-  static uint32_t AppendGroupByCountValue(CsvGroupByCountBatch &dictionary,
+  static uint32_t append_dictionary_value(csv_dictionary_batch &dictionary,
                                           const char *value, size_t value_len) {
     const uint32_t id = checked_u32(dictionary.dict_offsets.size() - 1);
     dictionary.dict_data.append(value, value_len);
     dictionary.dict_offsets.push_back(checked_u32(dictionary.dict_data.size()));
-    dictionary.counts.push_back(0);
     return id;
   }
 
-  static bool GroupByCountValueEquals(const CsvGroupByCountBatch &dictionary,
+  static bool dictionary_value_equals(const csv_dictionary_batch &dictionary,
                                       uint32_t id, const char *value,
                                       size_t value_len) {
     const size_t start = dictionary.dict_offsets[id];
     const size_t end = dictionary.dict_offsets[id + 1];
-    return BytesEqual(dictionary.dict_data.data() + start, end - start, value,
-                      value_len);
+    return bytes_equal(dictionary.dict_data.data() + start, end - start, value,
+                       value_len);
   }
 
-  static uint32_t InternColumnStatsValue(
-      CsvColumnStatsBatch &dictionary,
+  static uint32_t intern_group_by_count_value(
+      csv_group_by_count_batch &dictionary,
       std::unordered_map<uint64_t, uint32_t> &hash_ids,
       std::unordered_map<uint64_t, std::vector<uint32_t>> &hash_collisions,
       const char *value, size_t value_len) {
     const char *actual = value == nullptr ? "" : value;
-    const uint64_t hash = HashBytes(actual, value_len);
+    const uint64_t hash = hash_bytes(actual, value_len);
     const auto found = hash_ids.find(hash);
     if (found != hash_ids.end()) {
-      if (ColumnStatsValueEquals(dictionary, found->second, actual,
-                                 value_len)) {
+      if (group_by_count_value_equals(dictionary, found->second, actual,
+                                      value_len)) {
         return found->second;
       }
 
       const auto collisions = hash_collisions.find(hash);
       if (collisions != hash_collisions.end()) {
         for (const uint32_t id : collisions->second) {
-          if (ColumnStatsValueEquals(dictionary, id, actual, value_len)) {
+          if (group_by_count_value_equals(dictionary, id, actual, value_len)) {
             return id;
           }
         }
       }
 
-      const uint32_t id = AppendColumnStatsValue(dictionary, actual, value_len);
+      const uint32_t id =
+          append_group_by_count_value(dictionary, actual, value_len);
       hash_collisions[hash].push_back(id);
       return id;
     }
 
-    const uint32_t id = AppendColumnStatsValue(dictionary, actual, value_len);
+    const uint32_t id =
+        append_group_by_count_value(dictionary, actual, value_len);
     hash_ids.emplace(hash, id);
     return id;
   }
 
-  static uint32_t AppendColumnStatsValue(CsvColumnStatsBatch &dictionary,
-                                         const char *value, size_t value_len) {
+  static uint32_t
+  append_group_by_count_value(csv_group_by_count_batch &dictionary,
+                              const char *value, size_t value_len) {
     const uint32_t id = checked_u32(dictionary.dict_offsets.size() - 1);
     dictionary.dict_data.append(value, value_len);
     dictionary.dict_offsets.push_back(checked_u32(dictionary.dict_data.size()));
@@ -1842,16 +1806,71 @@ private:
     return id;
   }
 
-  static bool ColumnStatsValueEquals(const CsvColumnStatsBatch &dictionary,
-                                     uint32_t id, const char *value,
-                                     size_t value_len) {
+  static bool
+  group_by_count_value_equals(const csv_group_by_count_batch &dictionary,
+                              uint32_t id, const char *value,
+                              size_t value_len) {
     const size_t start = dictionary.dict_offsets[id];
     const size_t end = dictionary.dict_offsets[id + 1];
-    return BytesEqual(dictionary.dict_data.data() + start, end - start, value,
-                      value_len);
+    return bytes_equal(dictionary.dict_data.data() + start, end - start, value,
+                       value_len);
   }
 
-  static uint64_t HashBytes(const char *data, size_t len) {
+  static uint32_t intern_column_stats_value(
+      csv_column_stats_batch &dictionary,
+      std::unordered_map<uint64_t, uint32_t> &hash_ids,
+      std::unordered_map<uint64_t, std::vector<uint32_t>> &hash_collisions,
+      const char *value, size_t value_len) {
+    const char *actual = value == nullptr ? "" : value;
+    const uint64_t hash = hash_bytes(actual, value_len);
+    const auto found = hash_ids.find(hash);
+    if (found != hash_ids.end()) {
+      if (column_stats_value_equals(dictionary, found->second, actual,
+                                    value_len)) {
+        return found->second;
+      }
+
+      const auto collisions = hash_collisions.find(hash);
+      if (collisions != hash_collisions.end()) {
+        for (const uint32_t id : collisions->second) {
+          if (column_stats_value_equals(dictionary, id, actual, value_len)) {
+            return id;
+          }
+        }
+      }
+
+      const uint32_t id =
+          append_column_stats_value(dictionary, actual, value_len);
+      hash_collisions[hash].push_back(id);
+      return id;
+    }
+
+    const uint32_t id =
+        append_column_stats_value(dictionary, actual, value_len);
+    hash_ids.emplace(hash, id);
+    return id;
+  }
+
+  static uint32_t append_column_stats_value(csv_column_stats_batch &dictionary,
+                                            const char *value,
+                                            size_t value_len) {
+    const uint32_t id = checked_u32(dictionary.dict_offsets.size() - 1);
+    dictionary.dict_data.append(value, value_len);
+    dictionary.dict_offsets.push_back(checked_u32(dictionary.dict_data.size()));
+    dictionary.counts.push_back(0);
+    return id;
+  }
+
+  static bool
+  column_stats_value_equals(const csv_column_stats_batch &dictionary,
+                            uint32_t id, const char *value, size_t value_len) {
+    const size_t start = dictionary.dict_offsets[id];
+    const size_t end = dictionary.dict_offsets[id + 1];
+    return bytes_equal(dictionary.dict_data.data() + start, end - start, value,
+                       value_len);
+  }
+
+  static uint64_t hash_bytes(const char *data, size_t len) {
     uint64_t hash = 1469598103934665603ull;
     for (size_t index = 0; index < len; ++index) {
       hash ^= static_cast<uint8_t>(data[index]);
@@ -1860,22 +1879,22 @@ private:
     return hash;
   }
 
-  static bool BytesEqual(const char *left, size_t left_len, const char *right,
-                         size_t right_len) {
+  static bool bytes_equal(const char *left, size_t left_len, const char *right,
+                          size_t right_len) {
     return left_len == right_len &&
            (left_len == 0 || std::memcmp(left, right, left_len) == 0);
   }
 
-  Encoding encoding_;
+  csv_encoding encoding_;
   uint8_t delimiter_;
-  OutputMode mode_ = OutputMode::kBatch;
-  CsvBatch *batch_ = nullptr;
-  CsvDictionaryBatch *dictionary_batch_ = nullptr;
-  CsvGroupByCountBatch *group_by_count_batch_ = nullptr;
-  std::unique_ptr<CsvGroupByCountBatch> group_by_count_batch_owner_;
-  CsvColumnStatsBatch *column_stats_batch_ = nullptr;
-  std::unique_ptr<CsvColumnStatsBatch> column_stats_batch_owner_;
-  std::unique_ptr<CsvMultiColumnStatsBatch> multi_column_stats_batch_owner_;
+  output_mode mode_ = output_mode::batch;
+  csv_batch *batch_ = nullptr;
+  csv_dictionary_batch *dictionary_batch_ = nullptr;
+  csv_group_by_count_batch *group_by_count_batch_ = nullptr;
+  std::unique_ptr<csv_group_by_count_batch> group_by_count_batch_owner_;
+  csv_column_stats_batch *column_stats_batch_ = nullptr;
+  std::unique_ptr<csv_column_stats_batch> column_stats_batch_owner_;
+  std::unique_ptr<csv_multi_column_stats_batch> multi_column_stats_batch_owner_;
   const uint32_t *selected_columns_ = nullptr;
   size_t selected_columns_len_ = 0;
   std::vector<uint8_t> selected_column_counts_;
@@ -1888,7 +1907,7 @@ private:
   bool direct_projection_row_started_ = false;
   size_t direct_projection_data_start_ = 0;
   size_t direct_projection_field_offsets_start_ = 0;
-  RowFilter filter_;
+  row_filter filter_;
   std::string field_;
   std::string trusted_row_buffer_;
   std::vector<std::string> row_fields_;
@@ -1931,22 +1950,24 @@ private:
   uint64_t emitted_rows_ = 0;
 };
 
-CsvParser *checked_parser(void *parser) {
-  return static_cast<CsvParser *>(parser);
+csv_parser *checked_parser(void *parser) {
+  return static_cast<csv_parser *>(parser);
 }
 
-CsvBatch *checked_batch(void *batch) { return static_cast<CsvBatch *>(batch); }
-
-CsvDictionaryBatch *checked_dictionary_batch(void *batch) {
-  return static_cast<CsvDictionaryBatch *>(batch);
+csv_batch *checked_batch(void *batch) {
+  return static_cast<csv_batch *>(batch);
 }
 
-CsvGroupByCountBatch *checked_group_by_count_batch(void *batch) {
-  return static_cast<CsvGroupByCountBatch *>(batch);
+csv_dictionary_batch *checked_dictionary_batch(void *batch) {
+  return static_cast<csv_dictionary_batch *>(batch);
 }
 
-CsvColumnStatsBatch *checked_column_stats_batch(void *batch) {
-  return static_cast<CsvColumnStatsBatch *>(batch);
+csv_group_by_count_batch *checked_group_by_count_batch(void *batch) {
+  return static_cast<csv_group_by_count_batch *>(batch);
+}
+
+csv_column_stats_batch *checked_column_stats_batch(void *batch) {
+  return static_cast<csv_column_stats_batch *>(batch);
 }
 
 bool valid_value_offsets(const uint32_t *offsets, size_t value_count,
@@ -1968,8 +1989,8 @@ bool valid_value_offsets(const uint32_t *offsets, size_t value_count,
   return true;
 }
 
-CsvMultiColumnStatsBatch *checked_multi_column_stats_batch(void *batch) {
-  return static_cast<CsvMultiColumnStatsBatch *>(batch);
+csv_multi_column_stats_batch *checked_multi_column_stats_batch(void *batch) {
+  return static_cast<csv_multi_column_stats_batch *>(batch);
 }
 
 } // namespace csv_native
@@ -1979,9 +2000,9 @@ CSV_EXPORT void *csv_parser_create(int encoding, uint8_t delimiter) {
       delimiter == '"') {
     return nullptr;
   }
-  const auto selected = encoding == 1 ? csv_native::Encoding::kLatin1
-                                      : csv_native::Encoding::kUtf8;
-  return new csv_native::CsvParser(selected, delimiter);
+  const auto selected = encoding == 1 ? csv_native::csv_encoding::latin1
+                                      : csv_native::csv_encoding::utf8;
+  return new csv_native::csv_parser(selected, delimiter);
 }
 
 CSV_EXPORT void csv_parser_destroy(void *parser) {
@@ -1992,7 +2013,7 @@ CSV_EXPORT void csv_parser_reset(void *parser) {
   if (parser == nullptr) {
     return;
   }
-  csv_native::checked_parser(parser)->Reset();
+  csv_native::checked_parser(parser)->reset();
 }
 
 CSV_EXPORT void *csv_parser_write_batch(void *parser, const uint8_t *data,
@@ -2002,7 +2023,7 @@ CSV_EXPORT void *csv_parser_write_batch(void *parser, const uint8_t *data,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->WriteBatch(
+  return csv_native::checked_parser(parser)->write_batch(
       data, static_cast<size_t>(len), final);
 }
 
@@ -2011,7 +2032,7 @@ CSV_EXPORT void *csv_parser_finish_batch(void *parser) {
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishBatch();
+  return csv_native::checked_parser(parser)->finish_batch();
 }
 
 CSV_EXPORT void *csv_parser_write_fixed_batch(void *parser, const uint8_t *data,
@@ -2022,7 +2043,7 @@ CSV_EXPORT void *csv_parser_write_fixed_batch(void *parser, const uint8_t *data,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->WriteFixedBatch(
+  return csv_native::checked_parser(parser)->write_fixed_batch(
       data, static_cast<size_t>(len), final, fixed_columns);
 }
 
@@ -2032,7 +2053,7 @@ CSV_EXPORT void *csv_parser_finish_fixed_batch(void *parser,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishFixedBatch(fixed_columns);
+  return csv_native::checked_parser(parser)->finish_fixed_batch(fixed_columns);
 }
 
 CSV_EXPORT void *csv_parser_write_trusted_fixed_batch(void *parser,
@@ -2044,7 +2065,7 @@ CSV_EXPORT void *csv_parser_write_trusted_fixed_batch(void *parser,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->WriteTrustedFixedBatch(
+  return csv_native::checked_parser(parser)->write_trusted_fixed_batch(
       data, static_cast<size_t>(len), final, fixed_columns);
 }
 
@@ -2054,7 +2075,7 @@ CSV_EXPORT void *csv_parser_finish_trusted_fixed_batch(void *parser,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishTrustedFixedBatch(
+  return csv_native::checked_parser(parser)->finish_trusted_fixed_batch(
       fixed_columns);
 }
 
@@ -2074,14 +2095,14 @@ CSV_EXPORT void *csv_parser_write_projected_batch(
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->WriteProjectedBatch(
+  return csv_native::checked_parser(parser)->write_projected_batch(
       data, static_cast<size_t>(len), final,
       has_projection ? selected_columns : nullptr,
       has_projection ? static_cast<size_t>(selected_columns_len) : 0,
-      csv_native::RowFilter{
+      csv_native::row_filter{
           .enabled = has_filter,
-          .kind = has_filter ? csv_native::RowFilterKind::kEquals
-                             : csv_native::RowFilterKind::kNone,
+          .kind = has_filter ? csv_native::row_filter_kind::equals
+                             : csv_native::row_filter_kind::none,
           .column = filter_column,
           .value = filter_value,
           .value_len = static_cast<size_t>(filter_value_len),
@@ -2102,13 +2123,13 @@ CSV_EXPORT void *csv_parser_finish_projected_batch(
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishProjectedBatch(
+  return csv_native::checked_parser(parser)->finish_projected_batch(
       has_projection ? selected_columns : nullptr,
       has_projection ? static_cast<size_t>(selected_columns_len) : 0,
-      csv_native::RowFilter{
+      csv_native::row_filter{
           .enabled = has_filter,
-          .kind = has_filter ? csv_native::RowFilterKind::kEquals
-                             : csv_native::RowFilterKind::kNone,
+          .kind = has_filter ? csv_native::row_filter_kind::equals
+                             : csv_native::row_filter_kind::none,
           .column = filter_column,
           .value = filter_value,
           .value_len = static_cast<size_t>(filter_value_len),
@@ -2124,7 +2145,7 @@ CSV_EXPORT void *csv_parser_write_dictionary_batch(void *parser,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->WriteDictionaryBatch(
+  return csv_native::checked_parser(parser)->write_dictionary_batch(
       data, static_cast<size_t>(len), final, column);
 }
 
@@ -2134,7 +2155,7 @@ CSV_EXPORT void *csv_parser_finish_dictionary_batch(void *parser,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishDictionaryBatch(column);
+  return csv_native::checked_parser(parser)->finish_dictionary_batch(column);
 }
 
 CSV_EXPORT uint64_t csv_parser_write_group_by_count(void *parser,
@@ -2146,7 +2167,7 @@ CSV_EXPORT uint64_t csv_parser_write_group_by_count(void *parser,
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->WriteGroupByCount(
+  return csv_native::checked_parser(parser)->write_group_by_count(
       data, static_cast<size_t>(len), column);
 }
 
@@ -2156,7 +2177,7 @@ CSV_EXPORT void *csv_parser_finish_group_by_count(void *parser,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishGroupByCount(column);
+  return csv_native::checked_parser(parser)->finish_group_by_count(column);
 }
 
 CSV_EXPORT uint64_t csv_parser_write_column_stats(void *parser,
@@ -2168,7 +2189,7 @@ CSV_EXPORT uint64_t csv_parser_write_column_stats(void *parser,
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->WriteColumnStats(
+  return csv_native::checked_parser(parser)->write_column_stats(
       data, static_cast<size_t>(len), column);
 }
 
@@ -2177,7 +2198,7 @@ CSV_EXPORT void *csv_parser_finish_column_stats(void *parser, uint32_t column) {
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishColumnStats(column);
+  return csv_native::checked_parser(parser)->finish_column_stats(column);
 }
 
 CSV_EXPORT uint64_t csv_parser_write_multi_column_stats(void *parser,
@@ -2192,7 +2213,7 @@ CSV_EXPORT uint64_t csv_parser_write_multi_column_stats(void *parser,
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->WriteMultiColumnStats(
+  return csv_native::checked_parser(parser)->write_multi_column_stats(
       data, static_cast<size_t>(len), columns,
       static_cast<size_t>(columns_len));
 }
@@ -2206,28 +2227,28 @@ CSV_EXPORT void *csv_parser_finish_multi_column_stats(void *parser,
     return nullptr;
   }
 
-  return csv_native::checked_parser(parser)->FinishMultiColumnStats(
+  return csv_native::checked_parser(parser)->finish_multi_column_stats(
       columns, static_cast<size_t>(columns_len));
 }
 
 CSV_EXPORT void csv_batch_destroy(void *batch) {
-  delete static_cast<csv_native::CsvBatch *>(batch);
+  delete static_cast<csv_native::csv_batch *>(batch);
 }
 
 CSV_EXPORT void csv_dictionary_batch_destroy(void *batch) {
-  delete static_cast<csv_native::CsvDictionaryBatch *>(batch);
+  delete static_cast<csv_native::csv_dictionary_batch *>(batch);
 }
 
 CSV_EXPORT void csv_group_by_count_batch_destroy(void *batch) {
-  delete static_cast<csv_native::CsvGroupByCountBatch *>(batch);
+  delete static_cast<csv_native::csv_group_by_count_batch *>(batch);
 }
 
 CSV_EXPORT void csv_column_stats_batch_destroy(void *batch) {
-  delete static_cast<csv_native::CsvColumnStatsBatch *>(batch);
+  delete static_cast<csv_native::csv_column_stats_batch *>(batch);
 }
 
 CSV_EXPORT void csv_multi_column_stats_batch_destroy(void *batch) {
-  delete static_cast<csv_native::CsvMultiColumnStatsBatch *>(batch);
+  delete static_cast<csv_native::csv_multi_column_stats_batch *>(batch);
 }
 
 CSV_EXPORT uint64_t csv_dictionary_batch_row_count(void *batch) {
@@ -2401,7 +2422,7 @@ CSV_EXPORT uint64_t csv_batch_row_count(void *batch) {
   if (batch == nullptr) {
     return 0;
   }
-  const auto *typed = static_cast<const csv_native::CsvBatch *>(batch);
+  const auto *typed = static_cast<const csv_native::csv_batch *>(batch);
   return typed->row_offsets.empty() ? 0 : typed->row_offsets.size() - 1;
 }
 
@@ -2409,7 +2430,7 @@ CSV_EXPORT uint64_t csv_batch_total_fields(void *batch) {
   if (batch == nullptr) {
     return 0;
   }
-  const auto *typed = static_cast<const csv_native::CsvBatch *>(batch);
+  const auto *typed = static_cast<const csv_native::csv_batch *>(batch);
   return typed->field_offsets.empty() ? 0 : typed->field_offsets.size() - 1;
 }
 
@@ -2417,14 +2438,14 @@ CSV_EXPORT uint64_t csv_batch_data_len(void *batch) {
   if (batch == nullptr) {
     return 0;
   }
-  return static_cast<const csv_native::CsvBatch *>(batch)->data.size();
+  return static_cast<const csv_native::csv_batch *>(batch)->data.size();
 }
 
 CSV_EXPORT const uint8_t *csv_batch_data_ptr(void *batch) {
   if (batch == nullptr) {
     return nullptr;
   }
-  const auto *typed = static_cast<const csv_native::CsvBatch *>(batch);
+  const auto *typed = static_cast<const csv_native::csv_batch *>(batch);
   return reinterpret_cast<const uint8_t *>(typed->data.data());
 }
 
@@ -2432,14 +2453,15 @@ CSV_EXPORT const uint32_t *csv_batch_row_offsets_ptr(void *batch) {
   if (batch == nullptr) {
     return nullptr;
   }
-  return static_cast<const csv_native::CsvBatch *>(batch)->row_offsets.data();
+  return static_cast<const csv_native::csv_batch *>(batch)->row_offsets.data();
 }
 
 CSV_EXPORT const uint32_t *csv_batch_field_offsets_ptr(void *batch) {
   if (batch == nullptr) {
     return nullptr;
   }
-  return static_cast<const csv_native::CsvBatch *>(batch)->field_offsets.data();
+  return static_cast<const csv_native::csv_batch *>(batch)
+      ->field_offsets.data();
 }
 
 CSV_EXPORT uint64_t csv_batch_count_where_equals(void *batch, uint32_t column,
@@ -2481,7 +2503,7 @@ CSV_EXPORT uint64_t csv_parser_write_count(void *parser, const uint8_t *data,
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->WriteCount(
+  return csv_native::checked_parser(parser)->write_count(
       data, static_cast<size_t>(len), final);
 }
 
@@ -2499,7 +2521,7 @@ CSV_EXPORT uint64_t csv_parser_finish_count(void *parser) {
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->FinishCount();
+  return csv_native::checked_parser(parser)->finish_count();
 }
 
 CSV_EXPORT uint64_t csv_parser_write_count_where_equals(
@@ -2514,11 +2536,11 @@ CSV_EXPORT uint64_t csv_parser_write_count_where_equals(
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->WriteCountWhereEquals(
+  return csv_native::checked_parser(parser)->write_count_where_equals(
       data, static_cast<size_t>(len), final,
-      csv_native::RowFilter{
+      csv_native::row_filter{
           .enabled = true,
-          .kind = csv_native::RowFilterKind::kEquals,
+          .kind = csv_native::row_filter_kind::equals,
           .column = filter_column,
           .value = filter_value,
           .value_len = static_cast<size_t>(filter_value_len),
@@ -2541,11 +2563,11 @@ CSV_EXPORT uint64_t csv_parser_write_count_where_in(
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->WriteCountWhereIn(
+  return csv_native::checked_parser(parser)->write_count_where_in(
       data, static_cast<size_t>(len), final,
-      csv_native::RowFilter{
+      csv_native::row_filter{
           .enabled = true,
-          .kind = csv_native::RowFilterKind::kIn,
+          .kind = csv_native::row_filter_kind::in,
           .column = filter_column,
           .values_data = values_data,
           .value_offsets = value_offsets,
@@ -2565,11 +2587,11 @@ CSV_EXPORT uint64_t csv_parser_write_count_where_starts_with(
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->WriteCountWhereStartsWith(
+  return csv_native::checked_parser(parser)->write_count_where_starts_with(
       data, static_cast<size_t>(len), final,
-      csv_native::RowFilter{
+      csv_native::row_filter{
           .enabled = true,
-          .kind = csv_native::RowFilterKind::kStartsWith,
+          .kind = csv_native::row_filter_kind::starts_with,
           .column = filter_column,
           .value = filter_value,
           .value_len = static_cast<size_t>(filter_value_len),
@@ -2586,10 +2608,10 @@ CSV_EXPORT uint64_t csv_parser_finish_count_where_equals(
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->FinishCountWhereEquals(
-      csv_native::RowFilter{
+  return csv_native::checked_parser(parser)->finish_count_where_equals(
+      csv_native::row_filter{
           .enabled = true,
-          .kind = csv_native::RowFilterKind::kEquals,
+          .kind = csv_native::row_filter_kind::equals,
           .column = filter_column,
           .value = filter_value,
           .value_len = static_cast<size_t>(filter_value_len),
@@ -2610,10 +2632,10 @@ CSV_EXPORT uint64_t csv_parser_finish_count_where_in(
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->FinishCountWhereIn(
-      csv_native::RowFilter{
+  return csv_native::checked_parser(parser)->finish_count_where_in(
+      csv_native::row_filter{
           .enabled = true,
-          .kind = csv_native::RowFilterKind::kIn,
+          .kind = csv_native::row_filter_kind::in,
           .column = filter_column,
           .values_data = values_data,
           .value_offsets = value_offsets,
@@ -2631,10 +2653,10 @@ CSV_EXPORT uint64_t csv_parser_finish_count_where_starts_with(
     return 0;
   }
 
-  return csv_native::checked_parser(parser)->FinishCountWhereStartsWith(
-      csv_native::RowFilter{
+  return csv_native::checked_parser(parser)->finish_count_where_starts_with(
+      csv_native::row_filter{
           .enabled = true,
-          .kind = csv_native::RowFilterKind::kStartsWith,
+          .kind = csv_native::row_filter_kind::starts_with,
           .column = filter_column,
           .value = filter_value,
           .value_len = static_cast<size_t>(filter_value_len),
@@ -2645,5 +2667,5 @@ CSV_EXPORT const char *csv_parser_last_error(void *parser) {
   if (parser == nullptr) {
     return "parser is null";
   }
-  return csv_native::checked_parser(parser)->LastError();
+  return csv_native::checked_parser(parser)->last_error();
 }

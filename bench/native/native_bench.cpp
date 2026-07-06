@@ -54,13 +54,13 @@ uint64_t csv_column_stats_batch_dict_count(void *batch);
 
 namespace {
 
-constexpr uint8_t kDelimiter = ';';
-constexpr uint32_t kDictionaryColumn = 19;
-constexpr uint32_t kGroupByColumn = 19;
-constexpr uint32_t kFilterColumn = 19;
-constexpr uint8_t kFilterValue[] = {'S', 'P'};
-constexpr uint32_t kSelectedColumns[] = {0, 4, 19};
-constexpr uint64_t kDefaultBytes = 256ull * 1024ull * 1024ull;
+constexpr uint8_t delimiter = ';';
+constexpr uint32_t dictionary_column = 19;
+constexpr uint32_t group_by_column = 19;
+constexpr uint32_t filter_column = 19;
+constexpr uint8_t filter_value[] = {'S', 'P'};
+constexpr uint32_t selected_columns[] = {0, 4, 19};
+constexpr uint64_t default_bytes = 256ull * 1024ull * 1024ull;
 
 std::vector<uint8_t> g_input;
 std::string g_input_path;
@@ -119,7 +119,7 @@ std::vector<uint8_t> read_input(const std::string &path, uint64_t byte_limit) {
 }
 
 void *new_parser() {
-  void *parser = csv_parser_create(0, kDelimiter);
+  void *parser = csv_parser_create(0, delimiter);
   if (parser == nullptr) {
     fail("csv_parser_create returned null");
   }
@@ -132,7 +132,7 @@ void consume(uint64_t value) {
 
 csv::CSVFormat vincent_format(bool threading) {
   csv::CSVFormat format;
-  format.delimiter(static_cast<char>(kDelimiter))
+  format.delimiter(static_cast<char>(delimiter))
       .no_header()
       .variable_columns(csv::VariableColumnPolicy::KEEP)
       .threading(threading);
@@ -207,8 +207,8 @@ void bench_trusted_count() {
 void bench_filter_count() {
   void *parser = new_parser();
   const uint64_t rows = csv_parser_write_count_where_equals(
-      parser, g_input.data(), g_input.size(), true, kFilterColumn, kFilterValue,
-      sizeof(kFilterValue));
+      parser, g_input.data(), g_input.size(), true, filter_column, filter_value,
+      sizeof(filter_value));
   csv_parser_destroy(parser);
   consume(rows);
 }
@@ -229,7 +229,7 @@ void bench_binary_batch() {
 void bench_dictionary() {
   void *parser = new_parser();
   void *batch = csv_parser_write_dictionary_batch(
-      parser, g_input.data(), g_input.size(), true, kDictionaryColumn);
+      parser, g_input.data(), g_input.size(), true, dictionary_column);
   csv_parser_destroy(parser);
   if (batch == nullptr) {
     fail("csv_parser_write_dictionary_batch returned null");
@@ -242,8 +242,8 @@ void bench_dictionary() {
 void bench_group_by_count() {
   void *parser = new_parser();
   csv_parser_write_group_by_count(parser, g_input.data(), g_input.size(),
-                                  kGroupByColumn);
-  void *batch = csv_parser_finish_group_by_count(parser, kGroupByColumn);
+                                  group_by_column);
+  void *batch = csv_parser_finish_group_by_count(parser, group_by_column);
   csv_parser_destroy(parser);
   if (batch == nullptr) {
     fail("csv_parser_finish_group_by_count returned null");
@@ -257,7 +257,7 @@ void bench_dictionary_then_group_by() {
   void *dictionary_parser = new_parser();
   void *dictionary_batch = csv_parser_write_dictionary_batch(
       dictionary_parser, g_input.data(), g_input.size(), true,
-      kDictionaryColumn);
+      dictionary_column);
   csv_parser_destroy(dictionary_parser);
   if (dictionary_batch == nullptr) {
     fail("csv_parser_write_dictionary_batch returned null");
@@ -268,9 +268,9 @@ void bench_dictionary_then_group_by() {
 
   void *group_parser = new_parser();
   csv_parser_write_group_by_count(group_parser, g_input.data(), g_input.size(),
-                                  kGroupByColumn);
+                                  group_by_column);
   void *group_batch =
-      csv_parser_finish_group_by_count(group_parser, kGroupByColumn);
+      csv_parser_finish_group_by_count(group_parser, group_by_column);
   csv_parser_destroy(group_parser);
   if (group_batch == nullptr) {
     fail("csv_parser_finish_group_by_count returned null");
@@ -283,8 +283,8 @@ void bench_dictionary_then_group_by() {
 void bench_column_stats() {
   void *parser = new_parser();
   csv_parser_write_column_stats(parser, g_input.data(), g_input.size(),
-                                kDictionaryColumn);
-  void *batch = csv_parser_finish_column_stats(parser, kDictionaryColumn);
+                                dictionary_column);
+  void *batch = csv_parser_finish_column_stats(parser, dictionary_column);
   csv_parser_destroy(parser);
   if (batch == nullptr) {
     fail("csv_parser_finish_column_stats returned null");
@@ -297,9 +297,9 @@ void bench_column_stats() {
 void bench_project_filter() {
   void *parser = new_parser();
   void *batch = csv_parser_write_projected_batch(
-      parser, g_input.data(), g_input.size(), true, true, kSelectedColumns,
-      sizeof(kSelectedColumns) / sizeof(kSelectedColumns[0]), true,
-      kFilterColumn, kFilterValue, sizeof(kFilterValue));
+      parser, g_input.data(), g_input.size(), true, true, selected_columns,
+      sizeof(selected_columns) / sizeof(selected_columns[0]), true,
+      filter_column, filter_value, sizeof(filter_value));
   csv_parser_destroy(parser);
   if (batch == nullptr) {
     fail("csv_parser_write_projected_batch returned null");
@@ -314,7 +314,7 @@ void bench_project_filter() {
 int main() {
   const auto path = string_env("CSV_NATIVE_BENCH_FILE", "example.csv");
   const auto byte_limit =
-      parse_u64_env("CSV_NATIVE_BENCH_BYTES", kDefaultBytes);
+      parse_u64_env("CSV_NATIVE_BENCH_BYTES", default_bytes);
   const auto filter = string_env("CSV_NATIVE_BENCH_FILTER", ".*");
   const auto format = string_env("CSV_NATIVE_BENCH_FORMAT", "mitata");
   g_input_path = path;
