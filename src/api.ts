@@ -323,6 +323,7 @@ function toParserOptions(options: CsvApiFileOptions | CsvFileOptions): CsvParser
     return {
       delimiter: options.delimiter,
       encoding: options.encoding,
+      strict: options.strict,
       selectedColumns,
       trusted: {
         fixedColumns: options.trustedFixedColumns,
@@ -333,6 +334,7 @@ function toParserOptions(options: CsvApiFileOptions | CsvFileOptions): CsvParser
   return {
     delimiter: options.delimiter,
     encoding: options.encoding,
+    strict: options.strict,
     selectedColumns,
     fixedColumns: options.fixedColumns,
     trusted: options.trusted,

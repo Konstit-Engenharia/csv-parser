@@ -69,6 +69,41 @@ describe('csv high-level API', () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain('rows() supports only where.equals');
   });
+
+  test('propagates strict mode to high-level row parsing', async () => {
+    let error: unknown;
+    try {
+      await csv.parse(Buffer.from('id,name\n1,"Ada'), { strict: true });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('unterminated quoted field');
+  });
+
+  test('keeps strict unsupported aggregate paths explicit', async () => {
+    const path = await writeFixture('id,name\n1,Ada\n');
+
+    let countError: unknown;
+    try {
+      await csv.count(path, { strict: true });
+    } catch (caught) {
+      countError = caught;
+    }
+    expect(countError).toBeInstanceOf(Error);
+    expect((countError as Error).message).toContain('strict CSV validation is not supported for count');
+
+    let projectedError: unknown;
+    try {
+      for await (const _rows of csv.rows(path, { strict: true, columns: [0], where: { column: 1, equals: 'Ada' } })) {
+        throw new Error('unreachable');
+      }
+    } catch (caught) {
+      projectedError = caught;
+    }
+    expect(projectedError).toBeInstanceOf(Error);
+    expect((projectedError as Error).message).toContain('strict CSV validation is not supported for projected batches');
+  });
 });
 
 async function writeFixture(data: string): Promise<string> {

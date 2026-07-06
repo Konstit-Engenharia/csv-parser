@@ -40,6 +40,14 @@ const CSV_SYMBOLS = {
     args: ['ptr'],
     returns: 'ptr',
   },
+  csv_parser_write_strict_batch: {
+    args: ['ptr', 'buffer', 'u64', 'bool'],
+    returns: 'ptr',
+  },
+  csv_parser_finish_strict_batch: {
+    args: ['ptr'],
+    returns: 'ptr',
+  },
   csv_parser_write_fixed_batch: {
     args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
     returns: 'ptr',
@@ -48,11 +56,27 @@ const CSV_SYMBOLS = {
     args: ['ptr', 'u32'],
     returns: 'ptr',
   },
+  csv_parser_write_strict_fixed_batch: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
+    returns: 'ptr',
+  },
+  csv_parser_finish_strict_fixed_batch: {
+    args: ['ptr', 'u32'],
+    returns: 'ptr',
+  },
   csv_parser_write_trusted_fixed_batch: {
     args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
     returns: 'ptr',
   },
   csv_parser_finish_trusted_fixed_batch: {
+    args: ['ptr', 'u32'],
+    returns: 'ptr',
+  },
+  csv_parser_write_strict_trusted_fixed_batch: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
+    returns: 'ptr',
+  },
+  csv_parser_finish_strict_trusted_fixed_batch: {
     args: ['ptr', 'u32'],
     returns: 'ptr',
   },
@@ -278,7 +302,11 @@ export const native = loadNative();
 
 function loadNative(): Library<typeof CSV_SYMBOLS> {
   const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  const target = `${process.platform}-${process.arch}`;
   const candidates = [
+    join(root, 'build', target, `libcsv_native.${suffix}`),
+    join(root, 'build', target, 'Release', `libcsv_native.${suffix}`),
+    join(root, 'prebuilds', target, `libcsv_native.${suffix}`),
     join(root, 'build', `libcsv_native.${suffix}`),
     join(root, 'build', 'Release', `libcsv_native.${suffix}`),
     join(root, `libcsv_native.${suffix}`),

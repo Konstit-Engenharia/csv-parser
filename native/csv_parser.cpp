@@ -351,6 +351,38 @@ size_t find_plain_special_simd(const uint8_t *data, size_t len,
   return npos;
 }
 
+size_t find_strict_plain_special_simd(const uint8_t *data, size_t len,
+                                      uint8_t delimiter) {
+  const hn::ScalableTag<uint8_t> du8;
+  const size_t lanes = hn::Lanes(du8);
+  const auto delimiter_v = hn::Set(du8, delimiter);
+  const auto quote_v = hn::Set(du8, static_cast<uint8_t>('"'));
+  const auto lf_v = hn::Set(du8, static_cast<uint8_t>('\n'));
+  const auto cr_v = hn::Set(du8, static_cast<uint8_t>('\r'));
+  size_t i = 0;
+
+  while (i + lanes <= len) {
+    const auto bytes = hn::LoadU(du8, data + i);
+    const auto delimiter_mask = hn::Eq(bytes, delimiter_v);
+    const auto quote_mask = hn::Eq(bytes, quote_v);
+    const auto newline_mask = hn::Or(hn::Eq(bytes, lf_v), hn::Eq(bytes, cr_v));
+    const intptr_t found = hn::FindFirstTrue(
+        du8, hn::Or(hn::Or(delimiter_mask, quote_mask), newline_mask));
+    if (found >= 0) {
+      return i + static_cast<size_t>(found);
+    }
+    i += lanes;
+  }
+
+  for (; i < len; ++i) {
+    const uint8_t byte = data[i];
+    if (byte == delimiter || byte == '"' || byte == '\n' || byte == '\r') {
+      return i;
+    }
+  }
+  return npos;
+}
+
 bool is_quoted_field_terminator(uint8_t byte, uint8_t delimiter) {
   return byte == delimiter || byte == '\n' || byte == '\r';
 }
@@ -368,11 +400,25 @@ public:
       : encoding_(encoding), delimiter_(delimiter) {}
 
   csv_batch *write_batch(const uint8_t *data, size_t len, bool final) {
-    return write_projected_batch(data, len, final, nullptr, 0, row_filter{});
+    return write_batch_impl(data, len, final, false);
+  }
+
+  csv_batch *write_strict_batch(const uint8_t *data, size_t len, bool final) {
+    return write_batch_impl(data, len, final, true);
   }
 
   csv_batch *write_fixed_batch(const uint8_t *data, size_t len, bool final,
                                uint32_t fixed_columns) {
+    return write_fixed_batch_impl(data, len, final, fixed_columns, false);
+  }
+
+  csv_batch *write_strict_fixed_batch(const uint8_t *data, size_t len,
+                                      bool final, uint32_t fixed_columns) {
+    return write_fixed_batch_impl(data, len, final, fixed_columns, true);
+  }
+
+  csv_batch *write_fixed_batch_impl(const uint8_t *data, size_t len, bool final,
+                                    uint32_t fixed_columns, bool strict) {
     if (fixed_columns == 0) {
       set_error("fixed columns must be greater than zero");
       return nullptr;
@@ -385,14 +431,16 @@ public:
     configure(nullptr, 0, row_filter{});
     fixed_columns_enabled_ = true;
     fixed_columns_ = fixed_columns;
+    strict_quote_syntax_ = strict;
     parse_failed_ = false;
     emitted_rows_ = 0;
     parse(data, len);
-    if (final) {
+    if (!parse_failed_ && final) {
       finish_stream();
     }
     fixed_columns_enabled_ = false;
     fixed_columns_ = 0;
+    strict_quote_syntax_ = false;
     batch_ = nullptr;
     if (parse_failed_) {
       return nullptr;
@@ -402,6 +450,20 @@ public:
 
   csv_batch *write_trusted_fixed_batch(const uint8_t *data, size_t len,
                                        bool final, uint32_t fixed_columns) {
+    return write_trusted_fixed_batch_impl(data, len, final, fixed_columns,
+                                          false);
+  }
+
+  csv_batch *write_strict_trusted_fixed_batch(const uint8_t *data, size_t len,
+                                              bool final,
+                                              uint32_t fixed_columns) {
+    return write_trusted_fixed_batch_impl(data, len, final, fixed_columns,
+                                          true);
+  }
+
+  csv_batch *write_trusted_fixed_batch_impl(const uint8_t *data, size_t len,
+                                            bool final, uint32_t fixed_columns,
+                                            bool strict) {
     if (fixed_columns == 0) {
       set_error("trusted fixed columns must be greater than zero");
       return nullptr;
@@ -415,7 +477,7 @@ public:
     batch_ = batch.get();
     configure(nullptr, 0, row_filter{});
     emitted_rows_ = 0;
-    if (!parse_trusted_fixed_rows(data, len, final, fixed_columns)) {
+    if (!parse_trusted_fixed_rows(data, len, final, fixed_columns, strict)) {
       batch_ = nullptr;
       return nullptr;
     }
@@ -446,12 +508,24 @@ public:
 
   csv_batch *finish_batch() { return write_batch(nullptr, 0, true); }
 
+  csv_batch *finish_strict_batch() {
+    return write_strict_batch(nullptr, 0, true);
+  }
+
   csv_batch *finish_fixed_batch(uint32_t fixed_columns) {
     return write_fixed_batch(nullptr, 0, true, fixed_columns);
   }
 
+  csv_batch *finish_strict_fixed_batch(uint32_t fixed_columns) {
+    return write_strict_fixed_batch(nullptr, 0, true, fixed_columns);
+  }
+
   csv_batch *finish_trusted_fixed_batch(uint32_t fixed_columns) {
     return write_trusted_fixed_batch(nullptr, 0, true, fixed_columns);
+  }
+
+  csv_batch *finish_strict_trusted_fixed_batch(uint32_t fixed_columns) {
+    return write_strict_trusted_fixed_batch(nullptr, 0, true, fixed_columns);
   }
 
   csv_batch *finish_projected_batch(const uint32_t *selected_columns,
@@ -716,6 +790,31 @@ public:
   void set_error(const char *value) { error_ = value; }
 
 private:
+  csv_batch *write_batch_impl(const uint8_t *data, size_t len, bool final,
+                              bool strict) {
+    auto batch = std::make_unique<csv_batch>();
+    batch->reserve(len, encoding_);
+    mode_ = output_mode::batch;
+    batch_ = batch.get();
+    allow_direct_projection_filter_ = final && !saw_row_data_;
+    configure(nullptr, 0, row_filter{});
+    strict_quote_syntax_ = strict;
+    parse_failed_ = false;
+    emitted_rows_ = 0;
+    parse(data, len);
+    if (final) {
+      finish_stream();
+    } else {
+      spill_unfinished_batch_row();
+    }
+    strict_quote_syntax_ = false;
+    batch_ = nullptr;
+    if (parse_failed_) {
+      return nullptr;
+    }
+    return batch.release();
+  }
+
   void configure(const uint32_t *selected_columns, size_t selected_columns_len,
                  row_filter filter) {
     selected_columns_ = selected_columns;
@@ -817,6 +916,12 @@ private:
             ++i;
             continue;
           }
+          if (strict_quote_syntax_ &&
+              !is_quoted_field_terminator(data[i], delimiter_)) {
+            fail_parse("strict CSV quote syntax error: unescaped quote in "
+                       "quoted field");
+            return;
+          }
           pending_quote_ = false;
           in_quotes_ = false;
           continue;
@@ -884,6 +989,12 @@ private:
         saw_row_data_ = true;
         ++i;
         continue;
+      }
+
+      if (strict_quote_syntax_ && byte == '"') {
+        fail_parse(
+            "strict CSV quote syntax error: unescaped quote in unquoted field");
+        return;
       }
 
       const size_t span = find_plain_span(data + i, len - i);
@@ -962,7 +1073,7 @@ private:
   }
 
   bool parse_trusted_fixed_rows(const uint8_t *data, size_t len, bool final,
-                                uint32_t fixed_columns) {
+                                uint32_t fixed_columns, bool strict) {
     size_t row_start = 0;
     while (row_start < len) {
       const size_t newline = find_byte_simd(data + row_start, len - row_start,
@@ -979,11 +1090,11 @@ private:
       if (!trusted_row_buffer_.empty()) {
         trusted_row_buffer_.append(
             reinterpret_cast<const char *>(data + row_start), row_len);
-        if (!parse_trusted_fixed_buffered_row(fixed_columns)) {
+        if (!parse_trusted_fixed_buffered_row(fixed_columns, strict)) {
           return false;
         }
       } else if (!parse_trusted_fixed_row(data + row_start, row_len,
-                                          fixed_columns)) {
+                                          fixed_columns, strict)) {
         return false;
       }
 
@@ -996,7 +1107,7 @@ private:
     }
 
     if (final && !trusted_row_buffer_.empty()) {
-      if (!parse_trusted_fixed_buffered_row(fixed_columns)) {
+      if (!parse_trusted_fixed_buffered_row(fixed_columns, strict)) {
         return false;
       }
     }
@@ -1004,20 +1115,20 @@ private:
     return true;
   }
 
-  bool parse_trusted_fixed_buffered_row(uint32_t fixed_columns) {
+  bool parse_trusted_fixed_buffered_row(uint32_t fixed_columns, bool strict) {
     size_t row_len = trusted_row_buffer_.size();
     if (row_len != 0 && trusted_row_buffer_[row_len - 1] == '\r') {
       --row_len;
     }
     const bool ok = parse_trusted_fixed_row(
         reinterpret_cast<const uint8_t *>(trusted_row_buffer_.data()), row_len,
-        fixed_columns);
+        fixed_columns, strict);
     trusted_row_buffer_.clear();
     return ok;
   }
 
   bool parse_trusted_fixed_row(const uint8_t *row, size_t len,
-                               uint32_t fixed_columns) {
+                               uint32_t fixed_columns, bool strict) {
     if (len == 0) {
       return true;
     }
@@ -1055,14 +1166,26 @@ private:
           set_error("trusted fixed quoted field is not closed before row end");
           return false;
         }
+        if (strict && i < len && row[i] != delimiter_) {
+          set_error(
+              "strict CSV quote syntax error: unescaped quote in quoted field");
+          return false;
+        }
         while (i < len && row[i] != delimiter_) {
           ++i;
         }
       } else {
-        const size_t delimiter = find_byte_simd(row + i, len - i, delimiter_);
-        const size_t span = delimiter == npos ? len - i : delimiter;
+        const size_t special =
+            strict ? find_trusted_fixed_unquoted_special(row + i, len - i)
+                   : find_byte_simd(row + i, len - i, delimiter_);
+        const size_t span = special == npos ? len - i : special;
         append_trusted_fixed_span(row + i, span);
         i += span;
+        if (strict && i < len && row[i] == '"') {
+          set_error("strict CSV quote syntax error: unescaped quote in "
+                    "unquoted field");
+          return false;
+        }
       }
 
       finish_trusted_fixed_field();
@@ -1114,8 +1237,18 @@ private:
     batch_->field_offsets.push_back(checked_u32(batch_->data.size()));
   }
 
+  size_t find_trusted_fixed_unquoted_special(const uint8_t *data,
+                                             size_t len) const {
+    const size_t found = find_strict_plain_special_simd(data, len, delimiter_);
+    return found == npos || data[found] == '\n' || data[found] == '\r' ? npos
+                                                                       : found;
+  }
+
   size_t find_plain_span(const uint8_t *data, size_t len) const {
-    const size_t found = find_plain_special_simd(data, len, delimiter_);
+    const size_t found =
+        strict_quote_syntax_
+            ? find_strict_plain_special_simd(data, len, delimiter_)
+            : find_plain_special_simd(data, len, delimiter_);
     return found == npos ? len : found;
   }
 
@@ -1735,11 +1868,20 @@ private:
       in_quotes_ = false;
     }
     if (in_quotes_) {
+      if (strict_quote_syntax_) {
+        fail_parse("strict CSV quote syntax error: unterminated quoted field");
+        return;
+      }
       in_quotes_ = false;
     }
     if (saw_row_data_) {
       finish_row();
     }
+  }
+
+  void fail_parse(const char *message) {
+    set_error(message);
+    parse_failed_ = true;
   }
 
   static uint32_t checked_u32(size_t value) {
@@ -1941,6 +2083,7 @@ private:
   bool projection_enabled_ = false;
   bool direct_projection_filter_ = false;
   bool fixed_columns_enabled_ = false;
+  bool strict_quote_syntax_ = false;
   uint32_t fixed_columns_ = 0;
   bool parse_failed_ = false;
   bool direct_projection_row_started_ = false;
@@ -2068,12 +2211,32 @@ CSV_EXPORT void *csv_parser_write_batch(void *parser, const uint8_t *data,
       data, static_cast<size_t>(len), final);
 }
 
+CSV_EXPORT void *csv_parser_write_strict_batch(void *parser,
+                                               const uint8_t *data,
+                                               uint64_t len, bool final) {
+  if (parser == nullptr ||
+      len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return nullptr;
+  }
+
+  return csv_native::checked_parser(parser)->write_strict_batch(
+      data, static_cast<size_t>(len), final);
+}
+
 CSV_EXPORT void *csv_parser_finish_batch(void *parser) {
   if (parser == nullptr) {
     return nullptr;
   }
 
   return csv_native::checked_parser(parser)->finish_batch();
+}
+
+CSV_EXPORT void *csv_parser_finish_strict_batch(void *parser) {
+  if (parser == nullptr) {
+    return nullptr;
+  }
+
+  return csv_native::checked_parser(parser)->finish_strict_batch();
 }
 
 CSV_EXPORT void *csv_parser_write_fixed_batch(void *parser, const uint8_t *data,
@@ -2088,6 +2251,19 @@ CSV_EXPORT void *csv_parser_write_fixed_batch(void *parser, const uint8_t *data,
       data, static_cast<size_t>(len), final, fixed_columns);
 }
 
+CSV_EXPORT void *csv_parser_write_strict_fixed_batch(void *parser,
+                                                     const uint8_t *data,
+                                                     uint64_t len, bool final,
+                                                     uint32_t fixed_columns) {
+  if (parser == nullptr ||
+      len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return nullptr;
+  }
+
+  return csv_native::checked_parser(parser)->write_strict_fixed_batch(
+      data, static_cast<size_t>(len), final, fixed_columns);
+}
+
 CSV_EXPORT void *csv_parser_finish_fixed_batch(void *parser,
                                                uint32_t fixed_columns) {
   if (parser == nullptr) {
@@ -2095,6 +2271,16 @@ CSV_EXPORT void *csv_parser_finish_fixed_batch(void *parser,
   }
 
   return csv_native::checked_parser(parser)->finish_fixed_batch(fixed_columns);
+}
+
+CSV_EXPORT void *csv_parser_finish_strict_fixed_batch(void *parser,
+                                                      uint32_t fixed_columns) {
+  if (parser == nullptr) {
+    return nullptr;
+  }
+
+  return csv_native::checked_parser(parser)->finish_strict_fixed_batch(
+      fixed_columns);
 }
 
 CSV_EXPORT void *csv_parser_write_trusted_fixed_batch(void *parser,
@@ -2110,6 +2296,19 @@ CSV_EXPORT void *csv_parser_write_trusted_fixed_batch(void *parser,
       data, static_cast<size_t>(len), final, fixed_columns);
 }
 
+CSV_EXPORT void *
+csv_parser_write_strict_trusted_fixed_batch(void *parser, const uint8_t *data,
+                                            uint64_t len, bool final,
+                                            uint32_t fixed_columns) {
+  if (parser == nullptr ||
+      len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return nullptr;
+  }
+
+  return csv_native::checked_parser(parser)->write_strict_trusted_fixed_batch(
+      data, static_cast<size_t>(len), final, fixed_columns);
+}
+
 CSV_EXPORT void *csv_parser_finish_trusted_fixed_batch(void *parser,
                                                        uint32_t fixed_columns) {
   if (parser == nullptr) {
@@ -2117,6 +2316,17 @@ CSV_EXPORT void *csv_parser_finish_trusted_fixed_batch(void *parser,
   }
 
   return csv_native::checked_parser(parser)->finish_trusted_fixed_batch(
+      fixed_columns);
+}
+
+CSV_EXPORT void *
+csv_parser_finish_strict_trusted_fixed_batch(void *parser,
+                                             uint32_t fixed_columns) {
+  if (parser == nullptr) {
+    return nullptr;
+  }
+
+  return csv_native::checked_parser(parser)->finish_strict_trusted_fixed_batch(
       fixed_columns);
 }
 

@@ -15,6 +15,7 @@ export interface CsvParserOptions {
   delimiter?: string;
   selectedColumns?: CsvColumns;
   fixedColumns?: number;
+  strict?: boolean;
   trusted?: CsvTrustedParserOptions;
 }
 

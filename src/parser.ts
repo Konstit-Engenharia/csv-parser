@@ -30,6 +30,7 @@ import type {
 
 export class NativeCsvParser {
   #handle: Pointer | null;
+  readonly #strict: boolean;
   readonly #fixedColumns: number | undefined;
   readonly #trustedFixedColumns: number | undefined;
 
@@ -38,6 +39,7 @@ export class NativeCsvParser {
     if (delimiter.length !== 1) {
       throw new Error('delimiter must be one character');
     }
+    this.#strict = options.strict === true;
     this.#fixedColumns = normalizeFixedColumnsCount(options.fixedColumns, 'fixed column count');
     this.#trustedFixedColumns = normalizeTrustedFixedColumns(options.trusted);
     if (this.#fixedColumns !== undefined && this.#trustedFixedColumns !== undefined) {
@@ -66,7 +68,25 @@ export class NativeCsvParser {
 
     const handle = this.#requireHandle();
     const input = normalizeChunk(chunk);
-    const batch = this.#trustedFixedColumns !== undefined
+    const batch = this.#strict && this.#trustedFixedColumns !== undefined
+      ? native.symbols.csv_parser_write_strict_trusted_fixed_batch(
+        handle,
+        input,
+        BigInt(input.byteLength),
+        final,
+        this.#trustedFixedColumns,
+      )
+      : this.#strict && this.#fixedColumns !== undefined
+      ? native.symbols.csv_parser_write_strict_fixed_batch(
+        handle,
+        input,
+        BigInt(input.byteLength),
+        final,
+        this.#fixedColumns,
+      )
+      : this.#strict
+      ? native.symbols.csv_parser_write_strict_batch(handle, input, BigInt(input.byteLength), final)
+      : this.#trustedFixedColumns !== undefined
       ? native.symbols.csv_parser_write_trusted_fixed_batch(
         handle,
         input,
@@ -94,6 +114,7 @@ export class NativeCsvParser {
     options: CsvNativeProjectionOptions = {},
     final = false,
   ): NativeCsvBatch {
+    this.#rejectStrictUnsupported('projected batches');
     if (chunk.byteLength === 0 && final) {
       return this.endProjectedBatch(options);
     }
@@ -122,6 +143,7 @@ export class NativeCsvParser {
   }
 
   writeDictionaryBatch(chunk: NodeJS.TypedArray | DataView, column: number, final = false): NativeCsvDictionaryBatch {
+    this.#rejectStrictUnsupported('dictionary batches');
     if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
       throw new RangeError(`dictionary column out of range: ${column}`);
     }
@@ -145,6 +167,7 @@ export class NativeCsvParser {
   }
 
   writeGroupByCount(chunk: NodeJS.TypedArray | DataView, column: number): number {
+    this.#rejectStrictUnsupported('groupBy count');
     if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
       throw new RangeError(`groupBy count column out of range: ${column}`);
     }
@@ -163,6 +186,7 @@ export class NativeCsvParser {
   }
 
   writeColumnStats(chunk: NodeJS.TypedArray | DataView, column: number): number {
+    this.#rejectStrictUnsupported('column stats');
     if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
       throw new RangeError(`column stats column out of range: ${column}`);
     }
@@ -181,6 +205,7 @@ export class NativeCsvParser {
   }
 
   writeMultiColumnStats(chunk: NodeJS.TypedArray | DataView, columns: CsvColumns): number {
+    this.#rejectStrictUnsupported('multi-column stats');
     if (chunk.byteLength === 0 || columns.length === 0) {
       return 0;
     }
@@ -207,7 +232,13 @@ export class NativeCsvParser {
   }
 
   endBatch(): NativeCsvBatch {
-    const batch = this.#trustedFixedColumns !== undefined
+    const batch = this.#strict && this.#trustedFixedColumns !== undefined
+      ? native.symbols.csv_parser_finish_strict_trusted_fixed_batch(this.#requireHandle(), this.#trustedFixedColumns)
+      : this.#strict && this.#fixedColumns !== undefined
+      ? native.symbols.csv_parser_finish_strict_fixed_batch(this.#requireHandle(), this.#fixedColumns)
+      : this.#strict
+      ? native.symbols.csv_parser_finish_strict_batch(this.#requireHandle())
+      : this.#trustedFixedColumns !== undefined
       ? native.symbols.csv_parser_finish_trusted_fixed_batch(this.#requireHandle(), this.#trustedFixedColumns)
       : this.#fixedColumns !== undefined
       ? native.symbols.csv_parser_finish_fixed_batch(this.#requireHandle(), this.#fixedColumns)
@@ -219,6 +250,7 @@ export class NativeCsvParser {
   }
 
   endProjectedBatch(options: CsvNativeProjectionOptions = {}): NativeCsvBatch {
+    this.#rejectStrictUnsupported('projected batches');
     const columns = normalizeColumns(options.selectedColumns);
     const filter = normalizeEqualsFilter(options.equalsFilter);
     const batch = native.symbols.csv_parser_finish_projected_batch(
@@ -238,6 +270,7 @@ export class NativeCsvParser {
   }
 
   endDictionaryBatch(column: number): NativeCsvDictionaryBatch {
+    this.#rejectStrictUnsupported('dictionary batches');
     if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
       throw new RangeError(`dictionary column out of range: ${column}`);
     }
@@ -249,6 +282,7 @@ export class NativeCsvParser {
   }
 
   endGroupByCount(column: number): NativeCsvGroupByCountBatch {
+    this.#rejectStrictUnsupported('groupBy count');
     if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
       throw new RangeError(`groupBy count column out of range: ${column}`);
     }
@@ -260,6 +294,7 @@ export class NativeCsvParser {
   }
 
   endColumnStats(column: number): NativeCsvColumnStatsBatch {
+    this.#rejectStrictUnsupported('column stats');
     if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
       throw new RangeError(`column stats column out of range: ${column}`);
     }
@@ -271,6 +306,7 @@ export class NativeCsvParser {
   }
 
   endMultiColumnStats(columns: CsvColumns): NativeCsvColumnStatsBatch[] {
+    this.#rejectStrictUnsupported('multi-column stats');
     if (columns.length === 0) {
       return [];
     }
@@ -288,6 +324,7 @@ export class NativeCsvParser {
   }
 
   writeCount(chunk: NodeJS.TypedArray | DataView, final = false): number {
+    this.#rejectStrictUnsupported('count');
     if (chunk.byteLength === 0 && final) {
       return this.endCount();
     }
@@ -298,10 +335,12 @@ export class NativeCsvParser {
   }
 
   endCount(): number {
+    this.#rejectStrictUnsupported('count');
     return Number(native.symbols.csv_parser_finish_count(this.#requireHandle()));
   }
 
   writeCountWhereEquals(chunk: NodeJS.TypedArray | DataView, filter: CsvEqualsFilter, final = false): number {
+    this.#rejectStrictUnsupported('count filters');
     if (chunk.byteLength === 0 && final) {
       return this.endCountWhereEquals(filter);
     }
@@ -321,6 +360,7 @@ export class NativeCsvParser {
   }
 
   endCountWhereEquals(filter: CsvEqualsFilter): number {
+    this.#rejectStrictUnsupported('count filters');
     const normalized = normalizeEqualsFilter(filter);
     return Number(native.symbols.csv_parser_finish_count_where_equals(
       this.#requireHandle(),
@@ -331,6 +371,7 @@ export class NativeCsvParser {
   }
 
   writeCountWhereIn(chunk: NodeJS.TypedArray | DataView, filter: CsvInFilter, final = false): number {
+    this.#rejectStrictUnsupported('count filters');
     if (chunk.byteLength === 0 && final) {
       return this.endCountWhereIn(filter);
     }
@@ -352,6 +393,7 @@ export class NativeCsvParser {
   }
 
   endCountWhereIn(filter: CsvInFilter): number {
+    this.#rejectStrictUnsupported('count filters');
     const normalized = normalizeInFilter(filter);
     return Number(native.symbols.csv_parser_finish_count_where_in(
       this.#requireHandle(),
@@ -364,6 +406,7 @@ export class NativeCsvParser {
   }
 
   writeCountWhereStartsWith(chunk: NodeJS.TypedArray | DataView, filter: CsvStartsWithFilter, final = false): number {
+    this.#rejectStrictUnsupported('count filters');
     if (chunk.byteLength === 0 && final) {
       return this.endCountWhereStartsWith(filter);
     }
@@ -383,6 +426,7 @@ export class NativeCsvParser {
   }
 
   endCountWhereStartsWith(filter: CsvStartsWithFilter): number {
+    this.#rejectStrictUnsupported('count filters');
     const normalized = normalizeStartsWithFilter(filter);
     return Number(native.symbols.csv_parser_finish_count_where_starts_with(
       this.#requireHandle(),
@@ -420,5 +464,11 @@ export class NativeCsvParser {
     }
     const value = native.symbols.csv_parser_last_error(this.#handle);
     return value.toString();
+  }
+
+  #rejectStrictUnsupported(operation: string): void {
+    if (this.#strict) {
+      throw new Error(`strict CSV validation is not supported for ${operation}`);
+    }
   }
 }

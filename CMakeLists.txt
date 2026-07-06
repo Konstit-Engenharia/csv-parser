@@ -14,9 +14,17 @@ add_library(csv_native SHARED
 
 target_compile_features(csv_native PRIVATE cxx_std_20)
 
-set(CSV_NATIVE_CPU_FLAGS -march=native)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)")
+set(CSV_NATIVE_CPU_FLAGS)
+if(APPLE)
+  if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+    set(CSV_NATIVE_CPU_FLAGS -mavx2 -mfma -mpopcnt)
+  elseif(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+    set(CSV_NATIVE_CPU_FLAGS -mcpu=apple-m1)
+  endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)")
   set(CSV_NATIVE_CPU_FLAGS -mcpu=native)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)")
+  set(CSV_NATIVE_CPU_FLAGS -march=native)
 endif()
 
 target_compile_options(csv_native PRIVATE
