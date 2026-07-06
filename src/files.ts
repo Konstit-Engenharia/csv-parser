@@ -10,6 +10,10 @@ import {
 } from './native.ts';
 import { normalizeChunk } from './normalize.ts';
 import { NativeCsvParser } from './parser.ts';
+import {
+  rejectStrictSchemaUnsupported,
+  strictSchemaValidator,
+} from './strict-schema.ts';
 import type {
   CsvColumns,
   CsvFieldValue,
@@ -21,9 +25,12 @@ import type {
 
 export function parseCsvBuffer(buffer: NodeJS.TypedArray | DataView, options: CsvParserOptions = {}): CsvRow[] {
   const parser = new NativeCsvParser(options);
+  const validator = strictSchemaValidator(options);
   try {
     const batch = parser.writeBatch(buffer, true);
     try {
+      validator?.validateBatch(batch);
+      validator?.finish();
       return batch.rowsInto([], options.selectedColumns);
     } finally {
       batch.close();
@@ -43,10 +50,12 @@ export function countTrustedNewlineRows(buffer: NodeJS.TypedArray | DataView): n
 
 export async function* parseCsvFile(path: string, options: CsvFileOptions = {}): AsyncGenerator<CsvRow[], void> {
   const parser = new NativeCsvParser(options);
+  const validator = strictSchemaValidator(options);
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
       const batch = parser.writeBatch(chunk as Buffer);
       try {
+        validator?.validateBatch(batch);
         const rows = batch.rowsInto([], options.selectedColumns);
         if (rows.length > 0) {
           yield rows;
@@ -58,6 +67,8 @@ export async function* parseCsvFile(path: string, options: CsvFileOptions = {}):
 
     const batch = parser.endBatch();
     try {
+      validator?.validateBatch(batch);
+      validator?.finish();
       const rows = batch.rowsInto([], options.selectedColumns);
       if (rows.length > 0) {
         yield rows;
@@ -74,6 +85,7 @@ export async function* parseCsvFileProjected(
   path: string,
   options: CsvFileOptions & CsvNativeProjectionOptions = {},
 ): AsyncGenerator<CsvRow[], void> {
+  rejectStrictSchemaUnsupported(options, 'projected file parsing');
   const parser = new NativeCsvParser(options);
   const projectionOptions: CsvNativeProjectionOptions = {
     selectedColumns: options.selectedColumns,
@@ -111,6 +123,7 @@ export async function* parseCsvFileDictionary(
   columnIndex: number,
   options: CsvFileOptions = {},
 ): AsyncGenerator<NativeCsvDictionaryBatch, void> {
+  rejectStrictSchemaUnsupported(options, 'dictionary batches');
   const parser = new NativeCsvParser(options);
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
@@ -138,6 +151,7 @@ export async function parseCsvFileGroupByCount(
   columnIndex: number,
   options: CsvFileOptions = {},
 ): Promise<NativeCsvGroupByCountBatch> {
+  rejectStrictSchemaUnsupported(options, 'groupBy count');
   const parser = new NativeCsvParser(options);
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
@@ -154,6 +168,7 @@ export async function parseCsvFileColumnStats(
   columnIndex: number,
   options: CsvFileOptions = {},
 ): Promise<NativeCsvColumnStatsBatch> {
+  rejectStrictSchemaUnsupported(options, 'column stats');
   const parser = new NativeCsvParser(options);
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
@@ -170,6 +185,7 @@ export async function parseCsvFileMultiColumnStats(
   columns: CsvColumns,
   options: CsvFileOptions = {},
 ): Promise<NativeCsvColumnStatsBatch[]> {
+  rejectStrictSchemaUnsupported(options, 'multi-column stats');
   if (columns.length === 0) {
     return [];
   }
@@ -186,9 +202,28 @@ export async function parseCsvFileMultiColumnStats(
 }
 
 export async function countCsvFile(path: string, options: CsvFileOptions = {}): Promise<number> {
+  rejectStrictSchemaUnsupported(options, 'count');
   const parser = new NativeCsvParser(options);
   let rows = 0;
   try {
+    if (options.strict === true) {
+      for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+        const batch = parser.writeBatch(chunk as Buffer);
+        try {
+          rows += batch.rowCount;
+        } finally {
+          batch.close();
+        }
+      }
+      const batch = parser.endBatch();
+      try {
+        rows += batch.rowCount;
+      } finally {
+        batch.close();
+      }
+      return rows;
+    }
+
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
       rows += parser.writeCount(chunk as Buffer);
     }
@@ -205,6 +240,7 @@ export async function countCsvFileWhereEquals(
   value: CsvFieldValue,
   options: CsvFileOptions = {},
 ): Promise<number> {
+  rejectStrictSchemaUnsupported(options, 'count filters');
   const parser = new NativeCsvParser(options);
   const filter = { column: columnIndex, value };
   let rows = 0;
@@ -225,6 +261,7 @@ export async function countCsvFileWhereIn(
   values: readonly CsvFieldValue[],
   options: CsvFileOptions = {},
 ): Promise<number> {
+  rejectStrictSchemaUnsupported(options, 'count filters');
   if (values.length === 0) {
     return 0;
   }
@@ -249,6 +286,7 @@ export async function countCsvFileWhereStartsWith(
   prefix: CsvFieldValue,
   options: CsvFileOptions = {},
 ): Promise<number> {
+  rejectStrictSchemaUnsupported(options, 'count filters');
   const parser = new NativeCsvParser(options);
   const filter = { column: columnIndex, prefix };
   let rows = 0;

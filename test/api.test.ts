@@ -81,17 +81,60 @@ describe('csv high-level API', () => {
     expect((error as Error).message).toContain('unterminated quoted field');
   });
 
-  test('keeps strict unsupported aggregate paths explicit', async () => {
+  test('validates strict schema metadata in high-level rows', async () => {
+    const path = await writeFixture('id;name;uf\n1;Ana;SP\n');
+    const rows: string[][] = [];
+
+    for await (
+      const batch of csv.file(path)
+        .delimiter(';')
+        .strict()
+        .expectedHeaders(['id', 'name', 'uf'])
+        .minDataRows(1)
+        .rows()
+    ) {
+      rows.push(...batch);
+    }
+
+    expect(rows).toEqual([
+      ['id', 'name', 'uf'],
+      ['1', 'Ana', 'SP'],
+    ]);
+  });
+
+  test('rejects strict schema metadata mismatch in high-level rows', async () => {
+    const path = await writeFixture('id;full_name;uf\n1;Ana;SP\n');
+
+    let error: unknown;
+    try {
+      for await (const _rows of csv.file(path).delimiter(';').strict().expectedHeaders(['id', 'name', 'uf']).rows()) {
+        throw new Error('unreachable');
+      }
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('strict CSV schema error: header mismatch at column 1');
+  });
+
+  test('counts strict rows without materializing strings', async () => {
+    const path = await writeFixture('id,name\n1,Ada\n');
+
+    expect(await csv.count(path, { strict: true })).toBe(2);
+  });
+
+  test('keeps strict unsupported filtered and aggregate paths explicit', async () => {
     const path = await writeFixture('id,name\n1,Ada\n');
 
     let countError: unknown;
     try {
-      await csv.count(path, { strict: true });
+      await csv.count(path, { strict: true, where: { column: 1, equals: 'Ada' } });
     } catch (caught) {
       countError = caught;
     }
     expect(countError).toBeInstanceOf(Error);
-    expect((countError as Error).message).toContain('strict CSV validation is not supported for count');
+    expect((countError as Error).message).toContain('strict CSV validation is not supported for count filters');
 
     let projectedError: unknown;
     try {

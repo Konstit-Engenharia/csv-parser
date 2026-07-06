@@ -16,6 +16,9 @@ export interface CsvParserOptions {
   selectedColumns?: CsvColumns;
   fixedColumns?: number;
   strict?: boolean;
+  expectedHeaders?: readonly string[];
+  requireHeader?: boolean;
+  minDataRows?: number;
   trusted?: CsvTrustedParserOptions;
 }
 

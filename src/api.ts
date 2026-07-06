@@ -7,6 +7,10 @@ import type {
 } from './batches.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import { NativeCsvParser } from './parser.ts';
+import {
+  rejectStrictSchemaUnsupported,
+  strictSchemaValidator,
+} from './strict-schema.ts';
 import type {
   CsvApiFileOptions,
   CsvColumns,
@@ -42,6 +46,11 @@ export class CsvFileBuilder {
     return this;
   }
 
+  strict(enabled = true): this {
+    this.#options.strict = enabled;
+    return this;
+  }
+
   select(columns: CsvColumns): this {
     this.#options.columns = columns;
     return this;
@@ -54,6 +63,21 @@ export class CsvFileBuilder {
 
   trustedFixedColumns(count: number): this {
     this.#options.trustedFixedColumns = count;
+    return this;
+  }
+
+  expectedHeaders(headers: readonly string[]): this {
+    this.#options.expectedHeaders = headers;
+    return this;
+  }
+
+  requireHeader(required = true): this {
+    this.#options.requireHeader = required;
+    return this;
+  }
+
+  minDataRows(rows: number): this {
+    this.#options.minDataRows = rows;
     return this;
   }
 
@@ -123,10 +147,14 @@ export async function parse<TColumns extends CsvColumns | undefined = undefined>
   buffer: NodeJS.TypedArray | DataView,
   options: CsvApiFileOptions & { columns?: TColumns; } = {},
 ): Promise<CsvProjectedRow<TColumns>[]> {
+  rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
+  const validator = strictSchemaValidator(options);
   try {
     const batch = writeRowsBatch(parser, buffer, options, true);
     try {
+      validator?.validateBatch(batch);
+      validator?.finish();
       return materializeRows(batch, options);
     } finally {
       batch.close();
@@ -154,11 +182,19 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
 
 export async function* batches(path: string, options: CsvApiFileOptions = {}): AsyncGenerator<NativeCsvBatch, void> {
   ensureRowsWhereSupported(options.where);
+  rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
+  const validator = strictSchemaValidator(options);
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
       const batch = writeRowsBatch(parser, chunk as Buffer, options);
       if (batch.rowCount > 0) {
+        try {
+          validator?.validateBatch(batch);
+        } catch (error) {
+          batch.close();
+          throw error;
+        }
         yield batch;
       } else {
         batch.close();
@@ -167,8 +203,16 @@ export async function* batches(path: string, options: CsvApiFileOptions = {}): A
 
     const batch = finishRowsBatch(parser, options);
     if (batch.rowCount > 0) {
+      try {
+        validator?.validateBatch(batch);
+        validator?.finish();
+      } catch (error) {
+        batch.close();
+        throw error;
+      }
       yield batch;
     } else {
+      validator?.finish();
       batch.close();
     }
   } finally {
@@ -191,9 +235,28 @@ export async function withBatches(
 }
 
 export async function count(path: string, options: CsvApiFileOptions = {}): Promise<number> {
+  rejectStrictSchemaUnsupported(options, 'count');
   const parser = new NativeCsvParser(toParserOptions(options));
   let total = 0;
   try {
+    if (options.strict === true && options.where === undefined) {
+      for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
+        const batch = parser.writeBatch(chunk as Buffer);
+        try {
+          total += batch.rowCount;
+        } finally {
+          batch.close();
+        }
+      }
+      const batch = parser.endBatch();
+      try {
+        total += batch.rowCount;
+      } finally {
+        batch.close();
+      }
+      return total;
+    }
+
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
       total += writeCount(parser, chunk as Buffer, options.where);
     }
@@ -403,6 +466,12 @@ function ensureRowsWhereSupported(where: CsvWhereFilter | undefined): void {
     return;
   }
   throw new Error('rows() supports only where.equals; use count() for where.in or where.startsWith');
+}
+
+function rejectFilteredStrictSchema(options: CsvApiFileOptions): void {
+  if (options.where !== undefined) {
+    rejectStrictSchemaUnsupported(options, 'filtered rows');
+  }
 }
 
 function writeCount(parser: NativeCsvParser, chunk: NodeJS.TypedArray | DataView, where: CsvWhereFilter | undefined): number {

@@ -14,6 +14,7 @@
     "test:native:sanitize": "bun scripts/test-native-sanitizers.ts",
     "bench": "bun run build:native && bun bench/csv.bench.ts",
     "bench:csv-parser:example": "bun run build:native && bun bench/csv-parser/example-file.bench.ts",
+    "bench:csv-parser:guard": "bun run build:native && bun bench/csv-parser/regression-guard.ts",
     "bench:csv-parser:synthetic:latin1": "bun run build:native && bun bench/csv-parser/synthetic-latin1.bench.ts",
     "bench:csv-parser:synthetic:utf8": "bun run build:native && bun bench/csv-parser/synthetic-utf8.bench.ts",
     "bench:example": "bun run build:native && bun bench/example-file.bench.ts",

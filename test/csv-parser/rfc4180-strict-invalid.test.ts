@@ -94,6 +94,31 @@ describe('strict RFC 4180 quote syntax validation', () => {
     }
   }
 
-  test.todo('strict RFC 4180 mode rejects header-missing-row with schema metadata', () => {});
-  test.todo('strict RFC 4180 mode rejects header-name-mismatch with schema metadata', () => {});
+  test('strict RFC 4180 mode rejects header-missing-row with schema metadata', () => {
+    expect(() =>
+      parseRows('id,name\n', {
+        expectedHeaders: ['id', 'name'],
+        minDataRows: 1,
+        strict: true,
+      })
+    ).toThrow('strict CSV schema error: expected at least 1 data row(s), got 0');
+  });
+
+  test('strict RFC 4180 mode rejects header-name-mismatch with schema metadata', () => {
+    expect(() =>
+      parseRows('id,full_name\n1,Ada\n', {
+        expectedHeaders: ['id', 'name'],
+        strict: true,
+      })
+    ).toThrow('strict CSV schema error: header mismatch at column 1');
+  });
+
+  test('strict RFC 4180 mode rejects missing header with schema metadata', () => {
+    expect(() =>
+      parseRows('', {
+        expectedHeaders: ['id', 'name'],
+        strict: true,
+      })
+    ).toThrow('strict CSV schema error: missing header row');
+  });
 });

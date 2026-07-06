@@ -68,3 +68,6 @@ jobs:
 
       - name: Benchmark regression smoke
         run: bun bench/regression-smoke.ts
+
+      - name: csv-parser comparison guard
+        run: bun bench/csv-parser/regression-guard.ts

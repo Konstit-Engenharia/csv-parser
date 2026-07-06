@@ -100,9 +100,13 @@ Useful builder methods:
 - `delimiter(value)`
 - `encoding('utf8' | 'latin1' | 'iso88591' | 'iso-8859-1')`
 - `chunkSize(bytes)`
+- `strict()`
 - `select(columns)`
 - `fixedColumns(count)`
 - `trustedFixedColumns(count)`
+- `expectedHeaders(headers)`
+- `requireHeader()`
+- `minDataRows(count)`
 - `whereEquals(column, value)`
 - `whereIn(column, values)`
 - `whereStartsWith(column, prefix)`
@@ -119,9 +123,23 @@ await csv.parse(Buffer.from('id,name\n1,"Ada'), { strict: true });
 // throws: native CSV parser failed: strict CSV quote syntax error: unterminated quoted field
 ```
 
-Strict mode currently covers row batches, `fixedColumns`, and the fast `trustedFixedColumns` path. Projected batches,
-dictionary batches, count filters, and aggregate APIs reject `strict: true` explicitly until they have strict native
-variants.
+Strict mode also validates optional schema metadata during row parsing:
+
+```ts
+await csv.parse(Buffer.from('id,name\n1,Ada\n'), {
+  strict: true,
+  expectedHeaders: ['id', 'name'],
+  minDataRows: 1,
+});
+```
+
+- `expectedHeaders` validates the first row exactly.
+- `requireHeader` rejects empty input when a header row is required.
+- `minDataRows` validates row count after the header row.
+
+Strict mode currently covers row batches, `count()` without filters, `fixedColumns`, the fast `trustedFixedColumns` path,
+and row schema metadata. Projected batches, dictionary batches, count filters, and aggregate APIs reject `strict: true`
+explicitly until they have strict native variants.
 
 ## Batch API
 
@@ -243,4 +261,5 @@ Small correctness/performance smoke:
 
 ```sh
 bun run bench:regression-smoke
+bun run bench:csv-parser:guard
 ```
