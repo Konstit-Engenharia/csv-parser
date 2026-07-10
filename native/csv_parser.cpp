@@ -1,5 +1,5 @@
-#include <hwy/highway.h>
 #include <ankerl/unordered_dense.h>
+#include <hwy/highway.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -26,6 +26,60 @@
 #endif
 
 namespace csv_native {
+
+struct prehashed_key_hash {
+  using is_avalanching = void;
+
+  size_t operator()(uint64_t value) const noexcept {
+    return static_cast<size_t>(value);
+  }
+};
+
+template <typename Value>
+using dense_hash_map =
+    ankerl::unordered_dense::map<uint64_t, Value, prehashed_key_hash>;
+
+template <typename Value> class adaptive_hash_map {
+public:
+  void clear() {
+    standard_.clear();
+    dense_.clear();
+    use_dense_ = false;
+  }
+
+  void reserve(size_t count) { standard_.reserve(count); }
+
+  Value *find(uint64_t key) {
+    if (use_dense_) {
+      const auto found = dense_.find(key);
+      return found == dense_.end() ? nullptr : &found->second;
+    }
+    const auto found = standard_.find(key);
+    return found == standard_.end() ? nullptr : &found->second;
+  }
+
+  void emplace(uint64_t key, Value value) {
+    if (!use_dense_ && standard_.size() >= 64) {
+      dense_.reserve(standard_.size() + 1);
+      for (auto &entry : standard_) {
+        dense_.emplace(entry.first, std::move(entry.second));
+      }
+      standard_.clear();
+      standard_.rehash(0);
+      use_dense_ = true;
+    }
+    if (use_dense_) {
+      dense_.emplace(key, std::move(value));
+    } else {
+      standard_.emplace(key, std::move(value));
+    }
+  }
+
+private:
+  std::unordered_map<uint64_t, Value> standard_;
+  dense_hash_map<Value> dense_;
+  bool use_dense_ = false;
+};
 namespace hn = hwy::HWY_NAMESPACE;
 
 enum class csv_encoding : int {
@@ -2294,17 +2348,15 @@ private:
   }
 
   static uint32_t intern_dictionary_value(
-      csv_dictionary_batch &dictionary,
-      std::unordered_map<uint64_t, uint32_t> &hash_ids,
+      csv_dictionary_batch &dictionary, adaptive_hash_map<uint32_t> &hash_ids,
       std::unordered_map<uint64_t, std::vector<uint32_t>> &hash_collisions,
       const char *value, size_t value_len) {
     const char *actual = value == nullptr ? "" : value;
     const uint64_t hash = hash_bytes(actual, value_len);
     const auto found = hash_ids.find(hash);
-    if (found != hash_ids.end()) {
-      if (dictionary_value_equals(dictionary, found->second, actual,
-                                  value_len)) {
-        return found->second;
+    if (found != nullptr) {
+      if (dictionary_value_equals(dictionary, *found, actual, value_len)) {
+        return *found;
       }
 
       const auto collisions = hash_collisions.find(hash);
@@ -2346,16 +2398,15 @@ private:
 
   static uint32_t intern_group_by_count_value(
       csv_group_by_count_batch &dictionary,
-      std::unordered_map<uint64_t, uint32_t> &hash_ids,
+      adaptive_hash_map<uint32_t> &hash_ids,
       std::unordered_map<uint64_t, std::vector<uint32_t>> &hash_collisions,
       const char *value, size_t value_len) {
     const char *actual = value == nullptr ? "" : value;
     const uint64_t hash = hash_bytes(actual, value_len);
     const auto found = hash_ids.find(hash);
-    if (found != hash_ids.end()) {
-      if (group_by_count_value_equals(dictionary, found->second, actual,
-                                      value_len)) {
-        return found->second;
+    if (found != nullptr) {
+      if (group_by_count_value_equals(dictionary, *found, actual, value_len)) {
+        return *found;
       }
 
       const auto collisions = hash_collisions.find(hash);
@@ -2400,17 +2451,15 @@ private:
   }
 
   static uint32_t intern_column_stats_value(
-      csv_column_stats_batch &dictionary,
-      std::unordered_map<uint64_t, uint32_t> &hash_ids,
+      csv_column_stats_batch &dictionary, adaptive_hash_map<uint32_t> &hash_ids,
       std::unordered_map<uint64_t, std::vector<uint32_t>> &hash_collisions,
       const char *value, size_t value_len) {
     const char *actual = value == nullptr ? "" : value;
     const uint64_t hash = hash_bytes(actual, value_len);
     const auto found = hash_ids.find(hash);
-    if (found != hash_ids.end()) {
-      if (column_stats_value_equals(dictionary, found->second, actual,
-                                    value_len)) {
-        return found->second;
+    if (found != nullptr) {
+      if (column_stats_value_equals(dictionary, *found, actual, value_len)) {
+        return *found;
       }
 
       const auto collisions = hash_collisions.find(hash);
@@ -2499,17 +2548,16 @@ private:
   std::string trusted_row_buffer_;
   std::vector<std::string> row_fields_;
   std::vector<std::string> projected_fields_;
-  std::unordered_map<uint64_t, uint32_t> dictionary_hash_ids_;
+  adaptive_hash_map<uint32_t> dictionary_hash_ids_;
   std::unordered_map<uint64_t, std::vector<uint32_t>>
       dictionary_hash_collisions_;
-  std::unordered_map<uint64_t, uint32_t> group_by_hash_ids_;
+  adaptive_hash_map<uint32_t> group_by_hash_ids_;
   std::unordered_map<uint64_t, std::vector<uint32_t>> group_by_hash_collisions_;
-  std::unordered_map<uint64_t, uint32_t> column_stats_hash_ids_;
+  adaptive_hash_map<uint32_t> column_stats_hash_ids_;
   std::unordered_map<uint64_t, std::vector<uint32_t>>
       column_stats_hash_collisions_;
   std::unordered_map<uint32_t, std::vector<size_t>> multi_column_stats_indexes_;
-  std::vector<std::unordered_map<uint64_t, uint32_t>>
-      multi_column_stats_hash_ids_;
+  std::vector<adaptive_hash_map<uint32_t>> multi_column_stats_hash_ids_;
   std::vector<std::unordered_map<uint64_t, std::vector<uint32_t>>>
       multi_column_stats_hash_collisions_;
   std::vector<std::string> in_filter_values_;
