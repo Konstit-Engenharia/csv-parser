@@ -1258,12 +1258,7 @@ private:
     }
   }
 
-  __attribute__((noinline)) void parse_count_only(const uint8_t *data,
-                                                  size_t len) {
-#if defined(__AVX2__)
-    parse_count_only_avx2(data, len);
-    return;
-#endif
+  void parse_count_only(const uint8_t *data, size_t len) {
     size_t i = 0;
     while (i < len) {
       if (in_quotes_) {
@@ -1331,132 +1326,6 @@ private:
       i += span;
     }
   }
-
-#if defined(__AVX2__)
-  __attribute__((noinline)) void parse_count_only_avx2(const uint8_t *data,
-                                                       size_t len) {
-    const auto delimiter_v = _mm256_set1_epi8(static_cast<char>(delimiter_));
-    const auto quote_v = _mm256_set1_epi8('"');
-    const auto lf_v = _mm256_set1_epi8('\n');
-    const auto cr_v = _mm256_set1_epi8('\r');
-    size_t block = 0;
-    size_t cursor = 0;
-
-    while (block + 32 <= len) {
-      const auto bytes = _mm256_loadu_si256(
-          reinterpret_cast<const __m256i *>(data + block));
-      auto structural =
-          _mm256_or_si256(_mm256_cmpeq_epi8(bytes, delimiter_v),
-                          _mm256_cmpeq_epi8(bytes, quote_v));
-      structural = _mm256_or_si256(structural,
-                                   _mm256_cmpeq_epi8(bytes, lf_v));
-      structural = _mm256_or_si256(structural,
-                                   _mm256_cmpeq_epi8(bytes, cr_v));
-      uint32_t mask =
-          static_cast<uint32_t>(_mm256_movemask_epi8(structural));
-
-      while (mask != 0) {
-        const size_t event =
-            block + static_cast<size_t>(__builtin_ctz(mask));
-        if (event != cursor) {
-          if (in_quotes_ && pending_quote_) {
-            pending_quote_ = false;
-            in_quotes_ = false;
-          }
-          saw_row_data_ = true;
-          at_field_start_ = false;
-          previous_was_cr_ = false;
-        }
-
-        process_count_structural_byte(data[event]);
-        cursor = event + 1;
-        mask &= mask - 1;
-      }
-      block += 32;
-    }
-
-    for (size_t i = block; i < len; ++i) {
-      const uint8_t byte = data[i];
-      if (byte == delimiter_ || byte == '"' || byte == '\n' || byte == '\r') {
-        if (i != cursor) {
-          if (in_quotes_ && pending_quote_) {
-            pending_quote_ = false;
-            in_quotes_ = false;
-          }
-          saw_row_data_ = true;
-          at_field_start_ = false;
-          previous_was_cr_ = false;
-        }
-        process_count_structural_byte(byte);
-        cursor = i + 1;
-      }
-    }
-
-    if (cursor != len) {
-      if (in_quotes_ && pending_quote_) {
-        pending_quote_ = false;
-        in_quotes_ = false;
-      }
-      saw_row_data_ = true;
-      at_field_start_ = false;
-      previous_was_cr_ = false;
-    }
-  }
-
-  void process_count_structural_byte(uint8_t byte) {
-    if (in_quotes_) {
-      if (pending_quote_) {
-        if (byte == '"') {
-          pending_quote_ = false;
-          saw_row_data_ = true;
-          at_field_start_ = false;
-          previous_was_cr_ = false;
-          return;
-        }
-        pending_quote_ = false;
-        in_quotes_ = false;
-      } else {
-        if (byte == '"') {
-          pending_quote_ = true;
-        } else {
-          saw_row_data_ = true;
-          at_field_start_ = false;
-        }
-        previous_was_cr_ = false;
-        return;
-      }
-    }
-
-    if (previous_was_cr_ && byte == '\n') {
-      previous_was_cr_ = false;
-      return;
-    }
-    previous_was_cr_ = false;
-
-    if (byte == '"' && at_field_start_) {
-      in_quotes_ = true;
-      pending_quote_ = false;
-      saw_row_data_ = true;
-      at_field_start_ = false;
-      return;
-    }
-    if (byte == '\n' || byte == '\r') {
-      ++emitted_rows_;
-      previous_was_cr_ = byte == '\r';
-      saw_row_data_ = false;
-      at_field_start_ = true;
-      current_column_ = 0;
-      return;
-    }
-    if (byte == delimiter_) {
-      saw_row_data_ = true;
-      at_field_start_ = true;
-      return;
-    }
-    saw_row_data_ = true;
-    at_field_start_ = false;
-  }
-#endif
 
   bool parse_trusted_fixed_rows(const uint8_t *data, size_t len, bool final,
                                 uint32_t fixed_columns, bool strict) {
