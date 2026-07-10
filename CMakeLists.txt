@@ -9,6 +9,7 @@ set(CSV_NATIVE_SANITIZER_LIST "address,undefined" CACHE STRING "Comma-separated 
 
 find_package(Catch2 CONFIG REQUIRED)
 find_package(hwy CONFIG REQUIRED)
+find_package(unordered_dense CONFIG REQUIRED)
 find_package(unofficial-vincentlaucsb-csv-parser CONFIG REQUIRED)
 
 add_library(csv_native SHARED
@@ -51,7 +52,7 @@ target_compile_options(csv_native PRIVATE
 target_link_options(csv_native PRIVATE
   $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-exceptions -fno-rtti>
 )
-target_link_libraries(csv_native PRIVATE hwy::hwy)
+target_link_libraries(csv_native PRIVATE hwy::hwy unordered_dense::unordered_dense)
 
 set_target_properties(csv_native PROPERTIES
   CXX_VISIBILITY_PRESET hidden

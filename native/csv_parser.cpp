@@ -1,4 +1,5 @@
 #include <hwy/highway.h>
+#include <ankerl/unordered_dense.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -904,6 +905,9 @@ public:
     strict_expected_columns_ = 0;
     strict_expected_columns_seen_ = false;
     filter_ = row_filter{};
+    in_filter_values_.clear();
+    in_filter_set_.clear();
+    use_in_filter_set_ = false;
     in_quotes_ = false;
     pending_quote_ = false;
     at_field_start_ = true;
@@ -970,6 +974,7 @@ private:
     selected_columns_len_ = selected_columns_len;
     projection_enabled_ = selected_columns != nullptr;
     filter_ = filter;
+    prepare_in_filter(filter);
     selected_column_counts_.clear();
     selected_column_outputs_.clear();
 
@@ -995,6 +1000,52 @@ private:
     }
     direct_projection_ = can_use_direct_projection();
     restore_direct_projection_row();
+  }
+
+  void prepare_in_filter(const row_filter &filter) {
+    constexpr size_t hash_filter_threshold = 8;
+    if (!filter.enabled || filter.kind != row_filter_kind::in ||
+        filter.value_count < hash_filter_threshold) {
+      use_in_filter_set_ = false;
+      return;
+    }
+
+    bool unchanged = in_filter_values_.size() == filter.value_count;
+    for (size_t index = 0; unchanged && index < filter.value_count; ++index) {
+      const uint32_t start = filter.value_offsets[index];
+      const uint32_t end = filter.value_offsets[index + 1];
+      const size_t len = end - start;
+      const auto &cached = in_filter_values_[index];
+      unchanged =
+          cached.size() == len &&
+          (len == 0 ||
+           std::memcmp(cached.data(), filter.values_data + start, len) == 0);
+    }
+    if (unchanged) {
+      use_in_filter_set_ = true;
+      return;
+    }
+
+    in_filter_values_.clear();
+    in_filter_values_.reserve(filter.value_count);
+    for (size_t index = 0; index < filter.value_count; ++index) {
+      const uint32_t start = filter.value_offsets[index];
+      const uint32_t end = filter.value_offsets[index + 1];
+      if (end == start) {
+        in_filter_values_.emplace_back();
+      } else {
+        in_filter_values_.emplace_back(
+            reinterpret_cast<const char *>(filter.values_data + start),
+            end - start);
+      }
+    }
+
+    in_filter_set_.clear();
+    in_filter_set_.reserve(filter.value_count);
+    for (const auto &value : in_filter_values_) {
+      in_filter_set_.insert(value);
+    }
+    use_in_filter_set_ = true;
   }
 
   bool ensure_multi_column_stats(const uint32_t *columns, size_t columns_len,
@@ -1952,6 +2003,9 @@ private:
     if (filter_.value_offsets == nullptr || filter_.values_data == nullptr) {
       return false;
     }
+    if (use_in_filter_set_) {
+      return in_filter_set_.find(field_) != in_filter_set_.end();
+    }
     for (size_t index = 0; index < filter_.value_count; ++index) {
       const uint32_t start = filter_.value_offsets[index];
       const uint32_t end = filter_.value_offsets[index + 1];
@@ -2458,6 +2512,9 @@ private:
       multi_column_stats_hash_ids_;
   std::vector<std::unordered_map<uint64_t, std::vector<uint32_t>>>
       multi_column_stats_hash_collisions_;
+  std::vector<std::string> in_filter_values_;
+  ankerl::unordered_dense::set<std::string> in_filter_set_;
+  bool use_in_filter_set_ = false;
   std::vector<uint32_t> multi_column_stats_row_ids_;
   std::vector<uint8_t> multi_column_stats_row_seen_;
   std::string error_;

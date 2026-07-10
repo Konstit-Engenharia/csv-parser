@@ -4,6 +4,7 @@
   "dependencies": [
     "catch2",
     "highway",
+    "unordered-dense",
     "vincentlaucsb-csv-parser"
   ]
 }

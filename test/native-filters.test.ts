@@ -184,4 +184,38 @@ describe('NativeCsvParser native filters', () => {
       startsWithParser.close();
     }
   });
+
+  test('large in filters use hashed lookup across UTF-8 and Latin1 chunks', () => {
+    const missing = Array.from({ length: 31 }, (_, index) => `missing-${index}`);
+    const values = [...missing, 'SP', ''];
+    const parser = new NativeCsvParser({ delimiter: ';' });
+    try {
+      let count = 0;
+      count += parser.writeCountWhereIn(Buffer.from('1;S'), { column: 1, values });
+      count += parser.writeCountWhereIn(Buffer.from('P\n2;RJ\n3;\n'), { column: 1, values });
+      count += parser.endCountWhereIn({ column: 1, values });
+      expect(count).toBe(2);
+    } finally {
+      parser.close();
+    }
+
+    const latin1Values = [...missing.slice(0, 7), 'João'];
+    const latin1Parser = new NativeCsvParser({ delimiter: ';', encoding: 'latin1' });
+    try {
+      const input = Buffer.from('1;João\n2;Márcia\n', 'latin1');
+      let count = 0;
+      count += latin1Parser.writeCountWhereIn(input.subarray(0, 5), {
+        column: 1,
+        values: latin1Values,
+      });
+      count += latin1Parser.writeCountWhereIn(input.subarray(5), {
+        column: 1,
+        values: latin1Values,
+      });
+      count += latin1Parser.endCountWhereIn({ column: 1, values: latin1Values });
+      expect(count).toBe(1);
+    } finally {
+      latin1Parser.close();
+    }
+  });
 });
