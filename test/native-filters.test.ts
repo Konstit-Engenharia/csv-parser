@@ -84,6 +84,38 @@ describe('NativeCsvParser native filters', () => {
     }
   });
 
+  test('streams ordered and duplicate projections across tiny chunks', () => {
+    const input = Buffer.from('a,b,c\n"x\nx",y,z\n1,2,3');
+
+    for (const selectedColumns of [[0, 2], [2, 0, 2]]) {
+      const parser = new NativeCsvParser();
+      const rows: string[][] = [];
+      try {
+        for (let offset = 0; offset < input.byteLength; ++offset) {
+          const batch = parser.writeProjectedBatch(input.subarray(offset, offset + 1), { selectedColumns });
+          try {
+            rows.push(...batch.rows());
+          } finally {
+            batch.close();
+          }
+        }
+
+        const batch = parser.endProjectedBatch({ selectedColumns });
+        try {
+          rows.push(...batch.rows());
+        } finally {
+          batch.close();
+        }
+
+        expect(rows).toEqual(selectedColumns.length === 2
+          ? [['a', 'c'], ['x\nx', 'z'], ['1', '3']]
+          : [['c', 'a', 'c'], ['z', 'x\nx', 'z'], ['3', '1', '3']]);
+      } finally {
+        parser.close();
+      }
+    }
+  });
+
   test('countCsvFileWhereEquals filters natively by column bytes', async () => {
     const path = join(import.meta.dir, 'tmp-filter.csv');
     await Bun.write(path, '"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n');

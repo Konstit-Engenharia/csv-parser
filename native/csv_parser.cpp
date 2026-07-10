@@ -638,13 +638,14 @@ public:
     batch->reserve(len, encoding_);
     mode_ = output_mode::batch;
     batch_ = batch.get();
-    allow_direct_projection_filter_ = final && !saw_row_data_;
+    allow_direct_projection_ = true;
     configure(selected_columns, selected_columns_len, filter);
     emitted_rows_ = 0;
     parse(data, len);
     if (final) {
       finish_stream();
     } else {
+      spill_unfinished_direct_projection_row();
       spill_unfinished_batch_row();
     }
     batch_ = nullptr;
@@ -922,12 +923,13 @@ public:
     emitted_rows_ = 0;
     field_in_arena_ = false;
     complete_quoted_field_has_escape_ = false;
-    direct_projection_filter_ = false;
-    allow_direct_projection_filter_ = false;
+    direct_projection_ = false;
+    allow_direct_projection_ = false;
     deferred_batch_row_ = false;
     direct_projection_row_started_ = false;
     direct_projection_data_start_ = 0;
     direct_projection_field_offsets_start_ = 0;
+    direct_projection_carry_count_ = 0;
   }
 
   const char *last_error() const {
@@ -943,7 +945,7 @@ private:
     batch->reserve(len, encoding_);
     mode_ = output_mode::batch;
     batch_ = batch.get();
-    allow_direct_projection_filter_ = final && !saw_row_data_;
+    allow_direct_projection_ = final && !saw_row_data_;
     configure(nullptr, 0, row_filter{});
     strict_quote_syntax_ = strict;
     parse_failed_ = false;
@@ -991,7 +993,8 @@ private:
         selected_column_outputs_[column].push_back(checked_u32(i));
       }
     }
-    direct_projection_filter_ = can_use_direct_projection_filter();
+    direct_projection_ = can_use_direct_projection();
+    restore_direct_projection_row();
   }
 
   bool ensure_multi_column_stats(const uint32_t *columns, size_t columns_len,
@@ -1502,14 +1505,22 @@ private:
   bool can_append_complete_plain_field_to_arena(size_t len,
                                                 size_t remaining) const {
     return mode_ == output_mode::batch && encoding_ == csv_encoding::utf8 &&
-           batch_ != nullptr && !use_deferred_rows() && at_field_start_ &&
-           field_.empty() && !field_in_arena_ && len < remaining;
+           batch_ != nullptr &&
+           (!use_deferred_rows() || can_append_direct_projection_to_arena()) &&
+           at_field_start_ && field_.empty() && !field_in_arena_ &&
+           len < remaining;
+  }
+
+  bool can_append_direct_projection_to_arena() const {
+    return direct_projection_ && should_store_current_field() &&
+           (!filter_.enabled || current_column_ != filter_.column);
   }
 
   void append_utf8_span_to_arena(const uint8_t *data, size_t len) {
     saw_row_data_ = true;
     at_field_start_ = false;
     field_in_arena_ = true;
+    ensure_direct_projection_row_started();
     if (len != 0) {
       batch_->data.append(reinterpret_cast<const char *>(data), len);
     }
@@ -1524,8 +1535,9 @@ private:
     }
 
     if (encoding_ == csv_encoding::utf8 && mode_ == output_mode::batch &&
-        batch_ != nullptr && !use_deferred_rows() && field_.empty() &&
-        !field_in_arena_) {
+        batch_ != nullptr &&
+        (!use_deferred_rows() || can_append_direct_projection_to_arena()) &&
+        field_.empty() && !field_in_arena_) {
       append_quoted_field_to_arena(data, close_quote);
       return;
     }
@@ -1535,6 +1547,7 @@ private:
 
   void append_quoted_field_to_arena(const uint8_t *data, size_t close_quote) {
     field_in_arena_ = true;
+    ensure_direct_projection_row_started();
     if (!complete_quoted_field_has_escape_) {
       batch_->data.append(reinterpret_cast<const char *>(data + 1),
                           close_quote - 1);
@@ -1607,14 +1620,14 @@ private:
     const bool emit_row =
         !filter_.enabled || (row_filter_seen_ && row_filter_matched_);
     if (mode_ == output_mode::batch && emit_row) {
-      if (direct_projection_filter_) {
+      if (direct_projection_) {
         finish_batch_row();
       } else if (use_deferred_rows()) {
         commit_deferred_batch_row();
       } else {
         finish_batch_row();
       }
-    } else if (mode_ == output_mode::batch && direct_projection_filter_) {
+    } else if (mode_ == output_mode::batch && direct_projection_) {
       rollback_direct_projection_row();
     }
     if (mode_ == output_mode::dictionary) {
@@ -1676,10 +1689,9 @@ private:
     return !projection_enabled_ || selected_output_count(current_column_) > 0;
   }
 
-  bool can_use_direct_projection_filter() const {
-    if (!allow_direct_projection_filter_ || mode_ != output_mode::batch ||
-        !projection_enabled_ || !filter_.enabled ||
-        selected_columns_len_ == 0) {
+  bool can_use_direct_projection() const {
+    if (!allow_direct_projection_ || mode_ != output_mode::batch ||
+        !projection_enabled_ || selected_columns_len_ == 0) {
       return false;
     }
 
@@ -1701,7 +1713,7 @@ private:
   }
 
   void finish_deferred_field() {
-    if (direct_projection_filter_) {
+    if (direct_projection_) {
       finish_direct_projection_field();
       return;
     }
@@ -1740,14 +1752,22 @@ private:
       return;
     }
 
-    if (!direct_projection_row_started_) {
-      direct_projection_row_started_ = true;
-      direct_projection_data_start_ = batch_->data.size();
-      direct_projection_field_offsets_start_ = batch_->field_offsets.size();
-    }
+    ensure_direct_projection_row_started();
 
-    batch_->data.append(field_);
+    if (!field_in_arena_) {
+      batch_->data.append(field_);
+    }
     batch_->field_offsets.push_back(checked_u32(batch_->data.size()));
+  }
+
+  void ensure_direct_projection_row_started() {
+    if (!direct_projection_ || batch_ == nullptr ||
+        direct_projection_row_started_) {
+      return;
+    }
+    direct_projection_row_started_ = true;
+    direct_projection_data_start_ = batch_->data.size();
+    direct_projection_field_offsets_start_ = batch_->field_offsets.size();
   }
 
   void rollback_direct_projection_row() {
@@ -1756,6 +1776,21 @@ private:
     }
     batch_->data.resize(direct_projection_data_start_);
     batch_->field_offsets.resize(direct_projection_field_offsets_start_);
+  }
+
+  void restore_direct_projection_row() {
+    if (!direct_projection_ || batch_ == nullptr ||
+        direct_projection_carry_count_ == 0) {
+      return;
+    }
+
+    direct_projection_row_started_ = true;
+    direct_projection_data_start_ = batch_->data.size();
+    direct_projection_field_offsets_start_ = batch_->field_offsets.size();
+    for (size_t index = 0; index < direct_projection_carry_count_; ++index) {
+      batch_->data.append(projected_fields_[index]);
+      batch_->field_offsets.push_back(checked_u32(batch_->data.size()));
+    }
   }
 
   bool field_matches_filter() const {
@@ -1953,6 +1988,27 @@ private:
     direct_projection_row_started_ = false;
     direct_projection_data_start_ = 0;
     direct_projection_field_offsets_start_ = 0;
+    direct_projection_carry_count_ = 0;
+  }
+
+  void spill_unfinished_direct_projection_row() {
+    if (batch_ == nullptr || !saw_row_data_ || !direct_projection_ ||
+        !direct_projection_row_started_) {
+      return;
+    }
+
+    const size_t field_count =
+        batch_->field_offsets.size() - direct_projection_field_offsets_start_;
+    for (size_t index = direct_projection_carry_count_; index < field_count;
+         ++index) {
+      const size_t offset_index =
+          direct_projection_field_offsets_start_ + index;
+      const size_t start = batch_->field_offsets[offset_index - 1];
+      const size_t end = batch_->field_offsets[offset_index];
+      projected_fields_[index].assign(batch_->data.data() + start, end - start);
+    }
+    direct_projection_carry_count_ = field_count;
+    rollback_direct_projection_row();
   }
 
   void spill_unfinished_batch_row() {
@@ -2242,7 +2298,7 @@ private:
   std::vector<uint8_t> selected_column_counts_;
   std::vector<std::vector<uint32_t>> selected_column_outputs_;
   bool projection_enabled_ = false;
-  bool direct_projection_filter_ = false;
+  bool direct_projection_ = false;
   bool fixed_columns_enabled_ = false;
   bool strict_quote_syntax_ = false;
   uint32_t fixed_columns_ = 0;
@@ -2252,6 +2308,7 @@ private:
   bool direct_projection_row_started_ = false;
   size_t direct_projection_data_start_ = 0;
   size_t direct_projection_field_offsets_start_ = 0;
+  size_t direct_projection_carry_count_ = 0;
   row_filter filter_;
   std::string field_;
   std::string trusted_row_buffer_;
@@ -2292,7 +2349,7 @@ private:
   bool column_stats_row_seen_ = false;
   bool field_in_arena_ = false;
   mutable bool complete_quoted_field_has_escape_ = false;
-  bool allow_direct_projection_filter_ = false;
+  bool allow_direct_projection_ = false;
   bool deferred_batch_row_ = false;
   uint64_t emitted_rows_ = 0;
 };
