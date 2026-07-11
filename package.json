@@ -6,6 +6,12 @@
     "name": "KONSTIT ENGENHARIA E TECNOLOGIA LTDA",
     "email": "opensource@konstit.com.br"
   },
+  "contributors": [
+    {
+      "name": "diegoalc",
+      "url": "https://www.npmjs.com/~diegoalc"
+    }
+  ],
   "license": "MIT",
   "type": "module",
   "module": "src/index.ts",
