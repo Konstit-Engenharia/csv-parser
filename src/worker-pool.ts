@@ -2,16 +2,17 @@ import type {
   NativeCsvColumnStatsBatch,
   NativeCsvGroupByCountBatch,
 } from './batches.ts';
+import { findCsvSafeShards } from './files.ts';
+import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import type {
   CsvApiFileOptions,
   CsvColumns,
   CsvFieldValue,
   CsvProjectedRow,
   CsvShard,
+  CsvStringCacheOptions,
   CsvWhereFilter,
 } from './types.ts';
-import { DEFAULT_CHUNK_SIZE } from './native.ts';
-import { findCsvSafeShards } from './files.ts';
 import {
   runColumnStatsWithWorkers,
   runGroupByCountWithWorkers,
@@ -54,6 +55,7 @@ interface WorkerRowsMessage {
   encoding?: CsvApiFileOptions['encoding'];
   path: string;
   selectedColumns?: CsvColumns;
+  stringCache?: CsvStringCacheOptions;
   shard: CsvShard;
   shardIndex: number;
   whereEquals?: WorkerEqualsFilterMessage;
@@ -77,7 +79,12 @@ interface WorkerErrorMessage {
   type: 'error';
 }
 
-export class CsvWorkerPool {
+type CsvSelectedColumnsFromOptions<TOptions extends CsvApiFileOptions> = TOptions extends { columns: infer TColumns extends CsvColumns; }
+  ? TColumns
+  : TOptions extends { selectedColumns: infer TColumns extends CsvColumns; } ? TColumns
+  : undefined;
+
+export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> {
   readonly #path: string;
   readonly #options: CsvApiFileOptions;
   #aggregateWorkers: Worker[] | undefined;
@@ -135,6 +142,11 @@ export class CsvWorkerPool {
         };
 
         workers.forEach((worker, shardIndex) => {
+          const shard = shards[shardIndex];
+          if (shard === undefined) {
+            fail(new Error(`missing shard ${String(shardIndex)}`));
+            return;
+          }
           worker.onmessage = (event: MessageEvent<WorkerDoneMessage | WorkerErrorMessage>) => {
             const message = event.data;
             if (message.type === 'error') {
@@ -150,15 +162,17 @@ export class CsvWorkerPool {
           worker.onerror = (event) => {
             fail(event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`));
           };
-          worker.postMessage({
-            chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
-            delimiter: this.#options.delimiter,
-            encoding: this.#options.encoding,
-            path: this.#path,
-            shard: shards[shardIndex]!,
-            shardIndex,
-            where: normalizeCountWhere(this.#options.where),
-          } satisfies WorkerCountMessage);
+          worker.postMessage(
+            {
+              chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
+              delimiter: this.#options.delimiter,
+              encoding: this.#options.encoding,
+              path: this.#path,
+              shard,
+              shardIndex,
+              where: normalizeCountWhere(this.#options.where),
+            } satisfies WorkerCountMessage,
+          );
         });
       });
     } finally {
@@ -166,7 +180,7 @@ export class CsvWorkerPool {
     }
   }
 
-  async *rows<TColumns extends CsvColumns | undefined = undefined>(): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
+  async *rows(): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
     this.#assertOpen();
     rejectWorkerRowsUnsupported(this.#options);
 
@@ -179,15 +193,15 @@ export class CsvWorkerPool {
       const workers = this.#ensureRowsWorkers(shards.length);
       const selected = selectedColumns(this.#options);
 
-      type QueueItem<T extends CsvColumns | undefined> =
+      type QueueItem =
         | { done: true; }
         | { error: Error; }
-        | { rows: CsvProjectedRow<T>[]; };
+        | { rows: CsvProjectedRow<TColumns>[]; };
 
-      const queue: QueueItem<TColumns>[] = [];
+      const queue: QueueItem[] = [];
       let pendingResolve: (() => void) | undefined;
 
-      const push = (item: QueueItem<TColumns>) => {
+      const push = (item: QueueItem) => {
         queue.push(item);
         pendingResolve?.();
         pendingResolve = undefined;
@@ -196,6 +210,11 @@ export class CsvWorkerPool {
       let doneWorkers = 0;
 
       workers.forEach((worker, shardIndex) => {
+        const shard = shards[shardIndex];
+        if (shard === undefined) {
+          push({ error: new Error(`missing shard ${String(shardIndex)}`) });
+          return;
+        }
         worker.onmessage = (event: MessageEvent<WorkerRowsBatchMessage | WorkerDoneMessage | WorkerErrorMessage>) => {
           const message = event.data;
           if (message.type === 'rows') {
@@ -220,16 +239,19 @@ export class CsvWorkerPool {
             error: event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`),
           });
         };
-        worker.postMessage({
-          chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
-          delimiter: this.#options.delimiter,
-          encoding: this.#options.encoding,
-          path: this.#path,
-          selectedColumns: selected,
-          shard: shards[shardIndex]!,
-          shardIndex,
-          whereEquals: normalizeRowsWhere(this.#options.where),
-        } satisfies WorkerRowsMessage);
+        worker.postMessage(
+          {
+            chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
+            delimiter: this.#options.delimiter,
+            encoding: this.#options.encoding,
+            path: this.#path,
+            selectedColumns: selected,
+            stringCache: this.#options.stringCache,
+            shard,
+            shardIndex,
+            whereEquals: normalizeRowsWhere(this.#options.where),
+          } satisfies WorkerRowsMessage,
+        );
       });
 
       while (true) {
@@ -240,7 +262,10 @@ export class CsvWorkerPool {
         }
 
         while (queue.length > 0) {
-          const item = queue.shift()!;
+          const item = queue.shift();
+          if (item === undefined) {
+            continue;
+          }
           if ('error' in item) {
             throw item.error;
           }
@@ -353,10 +378,11 @@ export class CsvWorkerPool {
     if (this.#countWorkers !== undefined) {
       return this.#countWorkers;
     }
-    this.#countWorkers = Array.from({ length: count }, () => new Worker(new URL('./workers/count.worker.ts', import.meta.url).href, {
-      preload: [],
-      type: 'module',
-    }));
+    this.#countWorkers = Array.from({ length: count }, () =>
+      new Worker(new URL('./workers/count.worker.ts', import.meta.url).href, {
+        preload: [],
+        type: 'module',
+      }));
     return this.#countWorkers;
   }
 
@@ -364,10 +390,11 @@ export class CsvWorkerPool {
     if (this.#rowsWorkers !== undefined) {
       return this.#rowsWorkers;
     }
-    this.#rowsWorkers = Array.from({ length: count }, () => new Worker(new URL('./workers/rows.worker.ts', import.meta.url).href, {
-      preload: [],
-      type: 'module',
-    }));
+    this.#rowsWorkers = Array.from({ length: count }, () =>
+      new Worker(new URL('./workers/rows.worker.ts', import.meta.url).href, {
+        preload: [],
+        type: 'module',
+      }));
     return this.#rowsWorkers;
   }
 
@@ -375,15 +402,24 @@ export class CsvWorkerPool {
     if (this.#aggregateWorkers !== undefined) {
       return this.#aggregateWorkers;
     }
-    this.#aggregateWorkers = Array.from({ length: count }, () => new Worker(new URL('./workers/aggregates.worker.ts', import.meta.url).href, {
-      preload: [],
-      type: 'module',
-    }));
+    this.#aggregateWorkers = Array.from(
+      { length: count },
+      () =>
+        new Worker(new URL('./workers/aggregates.worker.ts', import.meta.url).href, {
+          preload: [],
+          type: 'module',
+        }),
+    );
     return this.#aggregateWorkers;
   }
 }
 
-export function createWorkerPool(path: string, options: CsvApiFileOptions): CsvWorkerPool {
+export function createWorkerPool(path: string): CsvWorkerPool;
+export function createWorkerPool<TOptions extends CsvApiFileOptions>(
+  path: string,
+  options: TOptions,
+): CsvWorkerPool<CsvSelectedColumnsFromOptions<TOptions>>;
+export function createWorkerPool(path: string, options: CsvApiFileOptions = {}): CsvWorkerPool {
   return new CsvWorkerPool(path, options);
 }
 

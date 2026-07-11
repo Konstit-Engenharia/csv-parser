@@ -7,13 +7,13 @@ import {
 } from './native.ts';
 import type { CsvStringCache } from './string-cache.ts';
 import type {
-  CsvColumns,
   CsvColumnBytesCallback,
   CsvColumnRangeCallback,
-  CsvScanColumnsCallback,
+  CsvColumns,
   CsvFieldRange,
   CsvGroupByCountEntry,
   CsvRow,
+  CsvScanColumnsCallback,
   NativeCsvRowCallback,
 } from './types.ts';
 
@@ -107,17 +107,25 @@ export class NativeCsvRowView {
     return this.#data.toString('utf8', range.start, range.end);
   }
 
-  get(columnIndex: number): string | null {
+  getPhysical(columnIndex: number): string | null {
     return this.fieldString(columnIndex);
   }
 
-  pick(columns: CsvColumns): string[] {
+  get(columnIndex: number): string | null {
+    return this.getPhysical(columnIndex);
+  }
+
+  pickPhysical(columns: CsvColumns): string[] {
     const values: string[] = [];
     values.length = columns.length;
     for (let index = 0; index < columns.length; ++index) {
       values[index] = this.fieldString(columns[index] ?? 0) ?? '';
     }
     return values;
+  }
+
+  pick(columns: CsvColumns): string[] {
+    return this.pickPhysical(columns);
   }
 }
 
@@ -353,9 +361,14 @@ export class NativeCsvBatch {
     endRow = this.rowCount,
   ): void {
     const data = this.data();
-    this.forEachColumnRange(columnIndex, (rowIndex, start, end) => {
-      callback(rowIndex, data.subarray(start, end));
-    }, startRow, endRow);
+    this.forEachColumnRange(
+      columnIndex,
+      (rowIndex, start, end) => {
+        callback(rowIndex, data.subarray(start, end));
+      },
+      startRow,
+      endRow,
+    );
   }
 
   scanColumns(

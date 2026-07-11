@@ -1,11 +1,11 @@
 import {
-  open,
-  type FileHandle,
-} from 'node:fs/promises';
-import {
   createReadStream,
   statSync,
 } from 'node:fs';
+import {
+  type FileHandle,
+  open,
+} from 'node:fs/promises';
 import { NativeCsvParser } from '../../src/index.ts';
 import {
   native,
@@ -43,7 +43,7 @@ export async function inferFixedColumns(path: string, delimiter: string): Promis
   let line = '';
   try {
     while (true) {
-      const { done, value, } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) {
         break;
       }
@@ -78,7 +78,7 @@ export async function buildNewlineAlignedShards(path: string, shardCount: number
     for (let shardIndex = 1; shardIndex < shardCount; ++shardIndex) {
       const target = Math.floor((size * shardIndex) / shardCount);
       const start = await findNextLineStart(file, target, size);
-      if (start > starts[starts.length - 1]!) {
+      if (start > (starts.at(-1) ?? 0)) {
         starts.push(start);
       }
     }
@@ -122,7 +122,10 @@ export async function buildCsvSafeShards(
     let index = 0;
 
     while (index < bytes.byteLength && targetIndex < targets.length) {
-      const byte = bytes[index]!;
+      const byte = bytes[index];
+      if (byte === undefined) {
+        throw new Error(`missing byte ${String(index)} while scanning ${path}`);
+      }
       const absolute = byteOffset + index;
 
       if (pendingQuote) {
@@ -165,7 +168,11 @@ export async function buildCsvSafeShards(
         atFieldStart = true;
       } else if (byte === NEWLINE) {
         atFieldStart = true;
-        while (targetIndex < targets.length && absolute + 1 >= targets[targetIndex]!) {
+        while (targetIndex < targets.length) {
+          const target = targets[targetIndex];
+          if (target === undefined || absolute + 1 < target) {
+            break;
+          }
           starts.push(absolute + 1);
           ++targetIndex;
         }
@@ -280,7 +287,7 @@ async function findNextLineStart(file: FileHandle, offset: number, size: number)
   while (cursor < size) {
     const remaining = size - cursor;
     const bytesToRead = Math.min(buffer.byteLength, remaining);
-    const { bytesRead, } = await file.read(buffer, 0, bytesToRead, cursor);
+    const { bytesRead } = await file.read(buffer, 0, bytesToRead, cursor);
     if (bytesRead === 0) {
       return size;
     }
@@ -296,8 +303,11 @@ async function findNextLineStart(file: FileHandle, offset: number, size: number)
 function startsToShards(starts: number[]): TrustedShard[] {
   const shards: TrustedShard[] = [];
   for (let index = 0; index < starts.length - 1; ++index) {
-    const start = starts[index]!;
-    const nextStart = starts[index + 1]!;
+    const start = starts[index];
+    const nextStart = starts[index + 1];
+    if (start === undefined || nextStart === undefined) {
+      throw new Error(`missing shard boundary at index ${String(index)}`);
+    }
     if (nextStart <= start) {
       continue;
     }

@@ -8,6 +8,10 @@ import {
   DEFAULT_CHUNK_SIZE,
   native,
 } from './native.ts';
+import {
+  requirePtr,
+  toArrayBuffer,
+} from './native.ts';
 import { normalizeChunk } from './normalize.ts';
 import { NativeCsvParser } from './parser.ts';
 import {
@@ -20,13 +24,9 @@ import type {
   CsvFileOptions,
   CsvNativeProjectionOptions,
   CsvParserOptions,
-  CsvShard,
   CsvRow,
+  CsvShard,
 } from './types.ts';
-import {
-  requirePtr,
-  toArrayBuffer,
-} from './native.ts';
 
 export function parseCsvBuffer(buffer: NodeJS.TypedArray | DataView, options: CsvParserOptions = {}): CsvRow[] {
   const parser = new NativeCsvParser(options);
@@ -77,11 +77,7 @@ export function findCsvSafeSplitOffsets(path: string, shardCount: number, delimi
     }
     const ptr = native.symbols.csv_split_offsets_batch_ptr(batch);
     const offsets = new BigUint64Array(toArrayBuffer(requirePtr(ptr), 0, count * BigUint64Array.BYTES_PER_ELEMENT));
-    const values = new Array<number>(offsets.length);
-    for (let index = 0; index < offsets.length; ++index) {
-      values[index] = Number(offsets[index]);
-    }
-    return values;
+    return Array.from(offsets, (offset) => Number(offset));
   } finally {
     native.symbols.csv_split_offsets_batch_destroy(batch);
   }

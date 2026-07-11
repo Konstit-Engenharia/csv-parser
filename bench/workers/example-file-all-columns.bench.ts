@@ -1,6 +1,12 @@
 import { measure } from 'mitata';
-import { createReadStream, statSync } from 'node:fs';
-import { csv, NativeCsvParser } from '../../src/index.ts';
+import {
+  createReadStream,
+  statSync,
+} from 'node:fs';
+import {
+  csv,
+  NativeCsvParser,
+} from '../../src/index.ts';
 
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);

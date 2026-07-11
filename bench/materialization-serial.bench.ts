@@ -1,8 +1,11 @@
 import { measure } from 'mitata';
-import { createReadStream, statSync } from 'node:fs';
 import {
-  type CsvRowView,
+  createReadStream,
+  statSync,
+} from 'node:fs';
+import {
   csv,
+  type CsvRowView,
   NativeCsvParser,
 } from '../src/index.ts';
 import {
@@ -10,6 +13,7 @@ import {
   DELIMITER,
   FILE,
   SELECTED_COLUMNS,
+  STRING_CACHE_COLUMNS,
 } from './example/config.ts';
 
 interface BenchResult {
@@ -23,7 +27,9 @@ const BYTES = statSync(FILE).size;
 const WORKERS = Number(Bun.env['CSV_BENCH_WORKERS'] ?? 4);
 const CASES = [
   ['csv.rows projected selected columns', () => consumeMaterializedRowsFromApi()],
+  ['csv.rows projected selected columns(cached strings)', () => consumeMaterializedRowsFromApiCached()],
   ['csv.rows projected selected columns(workers)', () => consumeMaterializedRowsFromApiWorkers()],
+  ['csv.rows projected selected columns(workers cached strings)', () => consumeMaterializedRowsFromApiWorkersCached()],
   ['native projected rowsInto(reused js arrays)', () => consumeMaterializedRowsFromRowsInto()],
   ['csv.withColumnarBatches projected selected columns(scanColumns)', () => consumeScannedColumns()],
   ['csv.withColumnarBatches projected selected columns(ranges)', () => consumeColumnarBatchRanges()],
@@ -42,6 +48,7 @@ console.log(JSON.stringify({
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   selectedColumns: SELECTED_COLUMNS,
+  stringCacheColumns: STRING_CACHE_COLUMNS,
   projectedColumns: PROJECTED_COLUMNS,
   workers: WORKERS,
 }));
@@ -71,11 +78,28 @@ for (const [name, fn,] of CASES) {
 
 async function consumeMaterializedRowsFromApi(): Promise<BenchResult> {
   const result = emptyResult();
-  for await (const rows of csv.rows(FILE, {
-    chunkSize: CHUNK_SIZE,
-    delimiter: DELIMITER,
-    columns: SELECTED_COLUMNS,
-  })) {
+  for await (
+    const rows of csv.rows(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      columns: SELECTED_COLUMNS,
+    })
+  ) {
+    consumeMaterializedRows(rows, result);
+  }
+  return result;
+}
+
+async function consumeMaterializedRowsFromApiCached(): Promise<BenchResult> {
+  const result = emptyResult();
+  for await (
+    const rows of csv.rows(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      columns: SELECTED_COLUMNS,
+      stringCache: { columns: STRING_CACHE_COLUMNS },
+    })
+  ) {
     consumeMaterializedRows(rows, result);
   }
   return result;
@@ -83,12 +107,30 @@ async function consumeMaterializedRowsFromApi(): Promise<BenchResult> {
 
 async function consumeMaterializedRowsFromApiWorkers(): Promise<BenchResult> {
   const result = emptyResult();
-  for await (const rows of csv.rows(FILE, {
-    chunkSize: CHUNK_SIZE,
-    delimiter: DELIMITER,
-    columns: SELECTED_COLUMNS,
-    workerCount: WORKERS,
-  })) {
+  for await (
+    const rows of csv.rows(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      columns: SELECTED_COLUMNS,
+      workerCount: WORKERS,
+    })
+  ) {
+    consumeMaterializedRows(rows, result);
+  }
+  return result;
+}
+
+async function consumeMaterializedRowsFromApiWorkersCached(): Promise<BenchResult> {
+  const result = emptyResult();
+  for await (
+    const rows of csv.rows(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      columns: SELECTED_COLUMNS,
+      stringCache: { columns: STRING_CACHE_COLUMNS },
+      workerCount: WORKERS,
+    })
+  ) {
     consumeMaterializedRows(rows, result);
   }
   return result;
@@ -226,7 +268,7 @@ async function consumeProjectedRowViewsStrings(): Promise<BenchResult> {
   return result;
 }
 
-async function withProjectedRowViews(callback: (row: CsvRowView) => void): Promise<void> {
+async function withProjectedRowViews(callback: (row: CsvRowView<typeof SELECTED_COLUMNS>) => void): Promise<void> {
   // Future high-level row-view integration belongs here if API shape changes.
   await csv.withRowViews(
     FILE,

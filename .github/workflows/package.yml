@@ -1,0 +1,81 @@
+name: Package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  native:
+    name: Native ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install native toolchain
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y cmake ninja-build pkg-config
+          else
+            brew install cmake ninja pkg-config
+          fi
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cache/vcpkg
+            .cache/vcpkg-binary
+          key: package-vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}
+      - name: Bootstrap vcpkg
+        run: |
+          if [ ! -d "$VCPKG_ROOT/.git" ]; then
+            rm -rf "$VCPKG_ROOT"
+            git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
+          fi
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+      - run: bun install --frozen-lockfile
+      - run: bun run build:native
+      - run: bun run stage:native
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}
+          path: prebuilds
+          if-no-files-found: error
+
+  package:
+    name: Assemble package
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: prebuilds
+          merge-multiple: true
+      - run: bun run verify:native-package
+      - id: pack
+        name: Pack verified artifact
+        run: |
+          mkdir -p artifacts
+          tarball="$(bun pm pack --destination artifacts --quiet | tail -n 1)"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+      - run: bun scripts/test-package.ts "${{ steps.pack.outputs.tarball }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bun-csv-parser-package
+          path: artifacts/*.tgz
+          if-no-files-found: error

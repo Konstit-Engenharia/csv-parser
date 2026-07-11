@@ -1,51 +1,177 @@
 import { createReadStream } from 'node:fs';
-import {
-  NativeCsvRowView,
-} from './batches.ts';
+import { NativeCsvRowView } from './batches.ts';
 import type {
   NativeCsvBatch,
   NativeCsvColumnStatsBatch,
   NativeCsvDictionaryBatch,
   NativeCsvGroupByCountBatch,
 } from './batches.ts';
+import {
+  findCsvSafeShards as findCsvSafeShardsNative,
+  findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
+} from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import { NativeCsvParser } from './parser.ts';
 import {
   rejectStrictSchemaUnsupported,
   strictSchemaValidator,
 } from './strict-schema.ts';
+import { CsvStringCache } from './string-cache.ts';
 import type {
+  CsvAggregateOptions,
   CsvApiFileOptions,
+  CsvBatchesOptions,
   CsvColumnarBatchCallback,
+  CsvColumnarBatchOptions,
   CsvColumnarBatchView,
   CsvColumns,
+  CsvColumnSelection,
+  CsvCountOptions,
+  CsvDictionaryOptions,
   CsvEncoding,
   CsvFieldValue,
   CsvFileOptions,
-  CsvRowView,
-  CsvRowViewCallback,
+  CsvParallelAggregateOptions,
+  CsvParallelCountOptions,
+  CsvParallelRowsOptions,
+  CsvParseOptions,
   CsvParserOptions,
   CsvProjectedRow,
+  CsvRowsOptions,
+  CsvRowView,
+  CsvRowViewCallback,
+  CsvRowViewsOptions,
   CsvShard,
+  CsvWhereEqualsFilter,
   CsvWhereFilter,
+  CsvWhereInFilter,
+  CsvWhereStartsWithFilter,
+  CsvWorkerPoolOptions,
 } from './types.ts';
-import {
-  findCsvSafeShards as findCsvSafeShardsNative,
-  findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
-} from './files.ts';
-import { parallelCount } from './worker-count.ts';
 import {
   parallelColumnStats,
   parallelGroupByCount,
   parallelMultiColumnStats,
 } from './worker-aggregates.ts';
+import { parallelCount } from './worker-count.ts';
 import {
   createWorkerPool,
   CsvWorkerPool,
 } from './worker-pool.ts';
 import { parallelRows } from './worker-rows.ts';
 
-export class CsvFileBuilder {
+type CsvWhereState = 'none' | 'equals' | 'in' | 'startsWith';
+type CsvRowsWhereState = 'none' | 'equals';
+type CsvSelectedColumnsState = CsvColumns | undefined;
+
+type CsvWhereStateFromFilter<TWhere> = [Exclude<TWhere, undefined>] extends [never] ? 'none'
+  : Exclude<TWhere, undefined> extends CsvWhereEqualsFilter ? 'equals'
+  : Exclude<TWhere, undefined> extends CsvWhereInFilter ? 'in'
+  : Exclude<TWhere, undefined> extends CsvWhereStartsWithFilter ? 'startsWith'
+  : CsvWhereState;
+
+type CsvSelectedColumnsFromOptions<TOptions extends CsvApiFileOptions> = TOptions extends { columns: infer TColumns extends CsvColumns; }
+  ? TColumns
+  : TOptions extends { selectedColumns: infer TColumns extends CsvColumns; } ? TColumns
+  : undefined;
+
+type CsvHasColumns<TSelectedColumns extends CsvSelectedColumnsState> = [TSelectedColumns] extends [undefined] ? false : true;
+
+type CsvWorkersStateFromOptions<TOptions extends CsvApiFileOptions> = TOptions extends { workerCount: infer TWorkerCount extends number; }
+  ? TWorkerCount extends 0 | 1 ? false
+  : true
+  : false;
+
+type CsvStrictStateFromOptions<TOptions extends CsvApiFileOptions> = TOptions extends { strict: infer TStrict extends boolean; } ? TStrict
+  : false;
+
+type CsvBuilderFromOptions<TOptions extends CsvApiFileOptions> = CsvFileBuilder<
+  TOptions extends { where: infer TWhere; } ? CsvWhereStateFromFilter<TWhere> : 'none',
+  CsvSelectedColumnsFromOptions<TOptions>,
+  CsvStrictStateFromOptions<TOptions>,
+  CsvWorkersStateFromOptions<TOptions>
+>;
+
+type CsvPoolFromBuilder<TSelectedColumns extends CsvSelectedColumnsState> = CsvWorkerPool<TSelectedColumns>;
+
+type CsvRowsCapableBuilder<
+  TWhere extends CsvWhereState,
+  TSelectedColumns extends CsvSelectedColumnsState,
+  TStrict extends boolean,
+  TWorkers extends boolean,
+> = TWhere extends 'none' ? TWorkers extends true ? TStrict extends false ? CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>
+    : never
+  : CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>
+  : TWhere extends 'equals' ? TStrict extends false ? CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>
+    : never
+  : never;
+
+type CsvBuilderOperationOptions<TOptions> = TOptions extends unknown ? Omit<TOptions, 'strict' | 'workerCount' | 'where'> : never;
+
+type CsvBatchesCapableBuilder<
+  TWhere extends CsvWhereState,
+  TSelectedColumns extends CsvSelectedColumnsState,
+  TStrict extends boolean,
+> = CsvRowsCapableBuilder<TWhere, TSelectedColumns, TStrict, false>;
+
+type CsvRowViewsCapableBuilder<
+  TWhere extends CsvWhereState,
+  TSelectedColumns extends CsvSelectedColumnsState,
+  TStrict extends boolean,
+> = CsvRowsCapableBuilder<TWhere, TSelectedColumns, TStrict, false>;
+
+type CsvColumnarCapableBuilder<
+  TWhere extends CsvWhereState,
+  TSelectedColumns extends CsvSelectedColumnsState,
+  TStrict extends boolean,
+> = TWhere extends CsvRowsWhereState ? TStrict extends false ? CsvFileBuilder<TWhere, TSelectedColumns, TStrict, false>
+  : TWhere extends 'none' ? CsvHasColumns<TSelectedColumns> extends true ? never
+    : CsvFileBuilder<TWhere, TSelectedColumns, TStrict, false>
+  : never
+  : never;
+
+type CsvCountCapableBuilder<
+  TWhere extends CsvWhereState,
+  TSelectedColumns extends CsvSelectedColumnsState,
+  TStrict extends boolean,
+  TWorkers extends boolean,
+> = TWhere extends 'none' ? TWorkers extends true ? TStrict extends false ? CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>
+    : never
+  : CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>
+  : TStrict extends false ? CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>
+  : never;
+
+type CsvWorkerPoolCapableBuilder<
+  TWhere extends CsvWhereState,
+  TSelectedColumns extends CsvSelectedColumnsState,
+  TStrict extends boolean,
+> = TWhere extends CsvRowsWhereState ? TStrict extends false ? CsvFileBuilder<TWhere, TSelectedColumns, TStrict, true>
+  : never
+  : never;
+
+type CsvDictionaryCapableBuilder<TSelectedColumns extends CsvSelectedColumnsState> = CsvFileBuilder<
+  'none',
+  TSelectedColumns,
+  false,
+  false
+>;
+
+type CsvAggregateCapableBuilder<
+  TSelectedColumns extends CsvSelectedColumnsState,
+  TWorkers extends boolean,
+> = CsvFileBuilder<'none', TSelectedColumns, false, TWorkers>;
+
+export class CsvFileBuilder<
+  TWhere extends CsvWhereState = 'none',
+  TSelectedColumns extends CsvSelectedColumnsState = undefined,
+  TStrict extends boolean = false,
+  TWorkers extends boolean = false,
+> {
+  declare readonly __state:
+    & { where: TWhere; }
+    & { selectedColumns: TSelectedColumns; }
+    & { strict: TStrict; }
+    & { workers: TWorkers; };
   readonly #path: string;
   readonly #options: CsvApiFileOptions;
 
@@ -54,132 +180,160 @@ export class CsvFileBuilder {
     this.#options = { ...options };
   }
 
-  delimiter(delimiter: string): this {
-    this.#options.delimiter = delimiter;
-    return this;
+  delimiter(delimiter: string): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ delimiter });
   }
 
-  encoding(encoding: CsvEncoding): this {
-    this.#options.encoding = encoding;
-    return this;
+  encoding(encoding: CsvEncoding): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ encoding });
   }
 
-  chunkSize(chunkSize: number): this {
-    this.#options.chunkSize = chunkSize;
-    return this;
+  chunkSize(chunkSize: number): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ chunkSize });
   }
 
-  workers(workerCount: number): this {
-    this.#options.workerCount = workerCount;
-    return this;
+  workers(workerCount: number): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, true> {
+    if (!Number.isInteger(workerCount) || workerCount <= 1) {
+      throw new RangeError(`workers requires workerCount > 1: ${String(workerCount)}`);
+    }
+    return this.#clone<TWhere, TSelectedColumns, TStrict, true>({ workerCount });
   }
 
-  pool(): CsvWorkerPool {
-    return createWorkerPool(this.#path, this.#options);
+  pool(this: CsvWorkerPoolCapableBuilder<TWhere, TSelectedColumns, TStrict>): CsvPoolFromBuilder<TSelectedColumns> {
+    return createWorkerPool(this.#path, this.#options) as CsvPoolFromBuilder<TSelectedColumns>;
   }
 
-  strict(enabled = true): this {
-    this.#options.strict = enabled;
-    return this;
+  strict(): CsvFileBuilder<TWhere, TSelectedColumns, true, TWorkers>;
+  strict<TEnabled extends boolean>(
+    enabled: TEnabled,
+  ): CsvFileBuilder<TWhere, TSelectedColumns, TEnabled, TWorkers>;
+  strict(enabled = true): CsvFileBuilder<TWhere, TSelectedColumns, boolean, TWorkers> {
+    return this.#clone<TWhere, TSelectedColumns, boolean, TWorkers>({ strict: enabled });
   }
 
-  select(columns: CsvColumns): this {
-    this.#options.columns = columns;
-    return this;
+  select<TColumns extends CsvColumns>(columns: TColumns): CsvFileBuilder<TWhere, TColumns, TStrict, TWorkers> {
+    return this.#clone<TWhere, TColumns, TStrict, TWorkers>({ columns });
   }
 
-  fixedColumns(count: number): this {
-    this.#options.fixedColumns = count;
-    return this;
+  fixedColumns(count: number): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ fixedColumns: count });
   }
 
-  trustedFixedColumns(count: number): this {
-    this.#options.trustedFixedColumns = count;
-    return this;
+  trustedFixedColumns(count: number): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ trustedFixedColumns: count });
   }
 
-  expectedHeaders(headers: readonly string[]): this {
-    this.#options.expectedHeaders = headers;
-    return this;
+  expectedHeaders(headers: readonly string[]): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ expectedHeaders: headers });
   }
 
-  requireHeader(required = true): this {
-    this.#options.requireHeader = required;
-    return this;
+  requireHeader(required = true): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ requireHeader: required });
   }
 
-  minDataRows(rows: number): this {
-    this.#options.minDataRows = rows;
-    return this;
+  minDataRows(rows: number): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({ minDataRows: rows });
   }
 
-  where(where: CsvWhereFilter): this {
-    this.#options.where = where;
-    return this;
+  where(where: CsvWhereEqualsFilter): CsvFileBuilder<'equals', TSelectedColumns, TStrict, TWorkers>;
+  where(where: CsvWhereInFilter): CsvFileBuilder<'in', TSelectedColumns, TStrict, TWorkers>;
+  where(where: CsvWhereStartsWithFilter): CsvFileBuilder<'startsWith', TSelectedColumns, TStrict, TWorkers>;
+  where(where: CsvWhereFilter): CsvFileBuilder<CsvWhereState, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone<CsvWhereState, TSelectedColumns, TStrict, TWorkers>({ where });
   }
 
-  whereEquals(column: number, value: CsvFieldValue): this {
-    this.#options.where = { column, equals: value };
-    return this;
+  whereEquals(column: number, value: CsvFieldValue): CsvFileBuilder<'equals', TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone<'equals', TSelectedColumns, TStrict, TWorkers>({ where: { column, equals: value } });
   }
 
-  whereIn(column: number, values: readonly CsvFieldValue[]): this {
-    this.#options.where = { column, in: values };
-    return this;
+  whereIn(column: number, values: readonly CsvFieldValue[]): CsvFileBuilder<'in', TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone<'in', TSelectedColumns, TStrict, TWorkers>({ where: { column, in: values } });
   }
 
-  whereStartsWith(column: number, prefix: CsvFieldValue): this {
-    this.#options.where = { column, startsWith: prefix };
-    return this;
+  whereStartsWith(column: number, prefix: CsvFieldValue): CsvFileBuilder<'startsWith', TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone<'startsWith', TSelectedColumns, TStrict, TWorkers>({ where: { column, startsWith: prefix } });
   }
 
-  rows<TColumns extends CsvColumns | undefined = undefined>(
-    options: CsvApiFileOptions & { columns?: TColumns; } = {},
+  stringCache(columns: CsvColumns, maxEntriesPerColumn?: number): CsvFileBuilder<TWhere, TSelectedColumns, TStrict, TWorkers> {
+    return this.#clone({
+      stringCache: {
+        columns,
+        maxEntriesPerColumn,
+      },
+    });
+  }
+
+  rows<TColumns extends CsvColumns | undefined = TSelectedColumns>(
+    this: CsvRowsCapableBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>,
+    options: CsvBuilderOperationOptions<CsvRowsOptions<TColumns>> = {},
   ): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
-    return rows(this.#path, mergeOptions(this.#options, options));
+    return rows(this.#path, mergeRowsOptions(this.#options, options as CsvRowsOptions<TColumns>));
   }
 
-  batches(options: CsvApiFileOptions = {}): AsyncGenerator<NativeCsvBatch, void> {
-    return batches(this.#path, mergeOptions(this.#options, options));
+  batches(
+    this: CsvBatchesCapableBuilder<TWhere, TSelectedColumns, TStrict>,
+    options: CsvBuilderOperationOptions<CsvBatchesOptions> = {},
+  ): AsyncGenerator<NativeCsvBatch, void> {
+    return batches(this.#path, mergeBatchesOptions(this.#options, options as CsvBatchesOptions));
   }
 
   withBatches(
+    this: CsvBatchesCapableBuilder<TWhere, TSelectedColumns, TStrict>,
     callback: (batch: NativeCsvBatch) => void | Promise<void>,
-    options: CsvApiFileOptions = {},
+    options: CsvBuilderOperationOptions<CsvBatchesOptions> = {},
   ): Promise<void> {
-    return withBatches(this.#path, mergeOptions(this.#options, options), callback);
+    return withBatches(this.#path, mergeBatchesOptions(this.#options, options as CsvBatchesOptions), callback);
   }
 
-  forEachColumnarBatches(
-    callback: CsvColumnarBatchCallback,
-    options: CsvApiFileOptions = {},
+  forEachColumnarBatches<TColumns extends CsvColumns | undefined = TSelectedColumns>(
+    this: CsvColumnarCapableBuilder<TWhere, TSelectedColumns, TStrict>,
+    callback: CsvColumnarBatchCallback<NoInfer<TColumns>>,
+    options: CsvBuilderOperationOptions<CsvColumnarBatchOptions<TColumns>> & CsvColumnSelection<TColumns> = {} as
+      & CsvBuilderOperationOptions<CsvColumnarBatchOptions<TColumns>>
+      & CsvColumnSelection<TColumns>,
   ): Promise<void> {
-    return forEachColumnarBatches(this.#path, mergeOptions(this.#options, options), callback);
+    return forEachColumnarBatches(
+      this.#path,
+      mergeColumnarBatchOptions(this.#options, options as CsvColumnarBatchOptions<TColumns>),
+      callback,
+    );
   }
 
-  withColumnarBatches(
-    callback: CsvColumnarBatchCallback,
-    options: CsvApiFileOptions = {},
+  withColumnarBatches<TColumns extends CsvColumns | undefined = TSelectedColumns>(
+    this: CsvColumnarCapableBuilder<TWhere, TSelectedColumns, TStrict>,
+    callback: CsvColumnarBatchCallback<NoInfer<TColumns>>,
+    options: CsvBuilderOperationOptions<CsvColumnarBatchOptions<TColumns>> & CsvColumnSelection<TColumns> = {} as
+      & CsvBuilderOperationOptions<CsvColumnarBatchOptions<TColumns>>
+      & CsvColumnSelection<TColumns>,
   ): Promise<void> {
-    return forEachColumnarBatches(this.#path, mergeOptions(this.#options, options), callback);
+    return forEachColumnarBatches(
+      this.#path,
+      mergeColumnarBatchOptions(this.#options, options as CsvColumnarBatchOptions<TColumns>),
+      callback,
+    );
   }
 
-  forEachRowViews(
-    callback: CsvRowViewCallback,
-    options: CsvApiFileOptions = {},
+  forEachRowViews<TColumns extends CsvColumns | undefined = TSelectedColumns>(
+    this: CsvRowViewsCapableBuilder<TWhere, TSelectedColumns, TStrict>,
+    callback: CsvRowViewCallback<TColumns>,
+    options: CsvBuilderOperationOptions<CsvRowViewsOptions<TColumns>> = {},
   ): Promise<void> {
-    return forEachRowViews(this.#path, mergeOptions(this.#options, options), callback);
+    return forEachRowViews(this.#path, mergeRowViewsOptions(this.#options, options as CsvRowViewsOptions<TColumns>), callback);
   }
 
-  withRowViews(
-    callback: CsvRowViewCallback,
-    options: CsvApiFileOptions = {},
+  withRowViews<TColumns extends CsvColumns | undefined = TSelectedColumns>(
+    this: CsvRowViewsCapableBuilder<TWhere, TSelectedColumns, TStrict>,
+    callback: CsvRowViewCallback<TColumns>,
+    options: CsvBuilderOperationOptions<CsvRowViewsOptions<TColumns>> = {},
   ): Promise<void> {
-    return forEachRowViews(this.#path, mergeOptions(this.#options, options), callback);
+    return forEachRowViews(this.#path, mergeRowViewsOptions(this.#options, options as CsvRowViewsOptions<TColumns>), callback);
   }
 
-  count(options: CsvApiFileOptions = {}): Promise<number> {
-    return count(this.#path, mergeOptions(this.#options, options));
+  count(
+    this: CsvCountCapableBuilder<TWhere, TSelectedColumns, TStrict, TWorkers>,
+    options: CsvBuilderOperationOptions<CsvCountOptions> = {},
+  ): Promise<number> {
+    return count(this.#path, mergeCountOptions(this.#options, options as CsvCountOptions));
   }
 
   splitOffsets(shardCount: number, options: CsvFileOptions = {}): number[] {
@@ -192,40 +346,78 @@ export class CsvFileBuilder {
     return findCsvSafeShardsNative(this.#path, shardCount, merged.delimiter ?? ',');
   }
 
-  dictionary(column: number, options: CsvFileOptions = {}): AsyncGenerator<NativeCsvDictionaryBatch, void> {
-    return dictionary(this.#path, column, mergeOptions(this.#options, options));
+  dictionary(
+    this: CsvDictionaryCapableBuilder<TSelectedColumns>,
+    column: number,
+    options: CsvBuilderOperationOptions<CsvDictionaryOptions> = {},
+  ): AsyncGenerator<NativeCsvDictionaryBatch, void> {
+    return dictionary(this.#path, column, mergeDictionaryOptions(this.#options, options as CsvDictionaryOptions));
   }
 
-  groupByCount(column: number, options: CsvFileOptions = {}): Promise<NativeCsvGroupByCountBatch> {
-    return groupByCount(this.#path, column, mergeOptions(this.#options, options));
+  groupByCount(
+    this: CsvAggregateCapableBuilder<TSelectedColumns, TWorkers>,
+    column: number,
+    options: CsvBuilderOperationOptions<CsvAggregateOptions> = {},
+  ): Promise<NativeCsvGroupByCountBatch> {
+    return groupByCount(this.#path, column, mergeAggregateOptions(this.#options, options as CsvAggregateOptions));
   }
 
-  columnStats(column: number, options: CsvFileOptions = {}): Promise<NativeCsvColumnStatsBatch> {
-    return columnStats(this.#path, column, mergeOptions(this.#options, options));
+  columnStats(
+    this: CsvAggregateCapableBuilder<TSelectedColumns, TWorkers>,
+    column: number,
+    options: CsvBuilderOperationOptions<CsvAggregateOptions> = {},
+  ): Promise<NativeCsvColumnStatsBatch> {
+    return columnStats(this.#path, column, mergeAggregateOptions(this.#options, options as CsvAggregateOptions));
   }
 
-  multiColumnStats(columns: CsvColumns, options: CsvFileOptions = {}): Promise<NativeCsvColumnStatsBatch[]> {
-    return multiColumnStats(this.#path, columns, mergeOptions(this.#options, options));
+  multiColumnStats(
+    this: CsvAggregateCapableBuilder<TSelectedColumns, TWorkers>,
+    columns: CsvColumns,
+    options: CsvBuilderOperationOptions<CsvAggregateOptions> = {},
+  ): Promise<NativeCsvColumnStatsBatch[]> {
+    return multiColumnStats(this.#path, columns, mergeAggregateOptions(this.#options, options as CsvAggregateOptions));
+  }
+
+  #clone<
+    TNextWhere extends CsvWhereState = TWhere,
+    TNextSelectedColumns extends CsvSelectedColumnsState = TSelectedColumns,
+    TNextStrict extends boolean = TStrict,
+    TNextWorkers extends boolean = TWorkers,
+  >(override: CsvApiFileOptions): CsvFileBuilder<TNextWhere, TNextSelectedColumns, TNextStrict, TNextWorkers> {
+    return new CsvFileBuilder<TNextWhere, TNextSelectedColumns, TNextStrict, TNextWorkers>(
+      this.#path,
+      mergeOptions(this.#options, override),
+    );
   }
 }
 
+export function file(path: string): CsvFileBuilder;
+export function file<TOptions extends CsvApiFileOptions>(path: string, options: TOptions): CsvBuilderFromOptions<TOptions>;
 export function file(path: string, options: CsvApiFileOptions = {}): CsvFileBuilder {
   return new CsvFileBuilder(path, options);
 }
 
+/**
+ * Parse one in-memory chunk into materialized rows.
+ *
+ * Use this when you already own buffering and still want the high-level row API.
+ * Accepts only single-thread row options, so `where` is limited to `where.equals`
+ * and `workerCount` is intentionally unavailable.
+ */
 export async function parse<TColumns extends CsvColumns | undefined = undefined>(
   buffer: NodeJS.TypedArray | DataView,
-  options: CsvApiFileOptions & { columns?: TColumns; } = {},
+  options: CsvParseOptions<TColumns> = {},
 ): Promise<CsvProjectedRow<TColumns>[]> {
   rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
+  const stringCache = createStringCache(options);
   try {
     const batch = writeMaterializeBatch(parser, buffer, options, true);
     try {
       validator?.validateBatch(batch);
       validator?.finish();
-      return materializeRows(batch, options);
+      return materializeRows(batch, options, stringCache);
     } finally {
       batch.close();
     }
@@ -234,25 +426,33 @@ export async function parse<TColumns extends CsvColumns | undefined = undefined>
   }
 }
 
+/**
+ * Stream materialized rows from a CSV file.
+ *
+ * Use this for the most direct high-level API. With `workerCount > 1`, the work
+ * fans out across Bun workers. `where` is intentionally limited to `where.equals`
+ * because the other predicates are currently count-only fast paths.
+ */
 export async function* rows<TColumns extends CsvColumns | undefined = undefined>(
   path: string,
-  options: CsvApiFileOptions & { columns?: TColumns; } = {},
+  options: CsvRowsOptions<TColumns> = {},
 ): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
   if ((options.workerCount ?? 1) > 1) {
-    yield* parallelRows(path, options);
+    yield* parallelRows(path, options as CsvParallelRowsOptions<TColumns>);
     return;
   }
 
   rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
+  const stringCache = createStringCache(options);
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
       const batch = writeMaterializeBatch(parser, chunk as Buffer, options);
       if (batch.rowCount > 0) {
         try {
           validator?.validateBatch(batch);
-          const values = materializeRows(batch, options);
+          const values = materializeRows(batch, options, stringCache);
           if (values.length > 0) {
             yield values;
           }
@@ -269,7 +469,7 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
       try {
         validator?.validateBatch(batch);
         validator?.finish();
-        const values = materializeRows(batch, options);
+        const values = materializeRows(batch, options, stringCache);
         if (values.length > 0) {
           yield values;
         }
@@ -287,13 +487,15 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
 
 export { parallelRows };
 export { CsvWorkerPool };
-export {
-  parallelColumnStats,
-  parallelGroupByCount,
-  parallelMultiColumnStats,
-};
+export { parallelColumnStats, parallelGroupByCount, parallelMultiColumnStats };
 
-export async function* batches(path: string, options: CsvApiFileOptions = {}): AsyncGenerator<NativeCsvBatch, void> {
+/**
+ * Stream native batches with explicit lifetime control.
+ *
+ * Use this when you want low-allocation access to row views or byte ranges and
+ * are comfortable closing each batch yourself.
+ */
+export async function* batches(path: string, options: CsvBatchesOptions = {}): AsyncGenerator<NativeCsvBatch, void> {
   ensureRowsWhereSupported(options.where);
   rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
@@ -335,7 +537,7 @@ export async function* batches(path: string, options: CsvApiFileOptions = {}): A
 
 export async function withBatches(
   path: string,
-  options: CsvApiFileOptions,
+  options: CsvBatchesOptions,
   callback: (batch: NativeCsvBatch) => void | Promise<void>,
 ): Promise<void> {
   for await (const batch of batches(path, options)) {
@@ -347,13 +549,29 @@ export async function withBatches(
   }
 }
 
-export async function forEachColumnarBatches(
+/**
+ * Stream reusable columnar batch views without materializing one JS string per field.
+ *
+ * When `columns` is defined, batch column indexes are relative to the projected
+ * output order. This API is synchronous by design so the view can be safely reused.
+ */
+export function forEachColumnarBatches<TColumns extends CsvColumns | undefined = undefined>(
   path: string,
-  options: CsvApiFileOptions = {},
+  options: CsvColumnarBatchOptions<TColumns>,
+  callback: CsvColumnarBatchCallback<TColumns>,
+): Promise<void>;
+export function forEachColumnarBatches(
+  path: string,
+  options: CsvColumnarBatchOptions | undefined,
   callback: CsvColumnarBatchCallback,
+): Promise<void>;
+export async function forEachColumnarBatches<TColumns extends CsvColumns | undefined = undefined>(
+  path: string,
+  options: CsvColumnarBatchOptions<TColumns> = {} as CsvColumnarBatchOptions<TColumns>,
+  callback: CsvColumnarBatchCallback<TColumns>,
 ): Promise<void> {
   ensureColumnarBatchesSupported(options);
-  const scopedBatch = new ScopedCsvColumnarBatchView(selectedColumns(options));
+  const scopedBatch = new ScopedCsvColumnarBatchView(selectedColumns(options) as TColumns);
   let batchIndex = 0;
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
@@ -407,21 +625,43 @@ export async function forEachColumnarBatches(
   }
 }
 
+export function withColumnarBatches<TColumns extends CsvColumns | undefined = undefined>(
+  path: string,
+  options: CsvColumnarBatchOptions<TColumns>,
+  callback: CsvColumnarBatchCallback<TColumns>,
+): Promise<void>;
 export function withColumnarBatches(
   path: string,
-  options: CsvApiFileOptions = {},
+  options: CsvColumnarBatchOptions | undefined,
   callback: CsvColumnarBatchCallback,
 ): Promise<void> {
   return forEachColumnarBatches(path, options, callback);
 }
 
-export async function forEachRowViews(
+/**
+ * Stream reusable row views without materializing row arrays.
+ *
+ * `selectedColumns` on the row view is metadata only. Row accessors still use
+ * physical CSV column indexes; use `row.getPhysical()` for explicit call sites.
+ * This API is synchronous by design so the view can be safely reused.
+ */
+export function forEachRowViews<TColumns extends CsvColumns | undefined = undefined>(
   path: string,
-  options: CsvApiFileOptions = {},
+  options: CsvRowViewsOptions<TColumns>,
+  callback: CsvRowViewCallback<TColumns>,
+): Promise<void>;
+export function forEachRowViews(
+  path: string,
+  options: CsvRowViewsOptions | undefined,
   callback: CsvRowViewCallback,
+): Promise<void>;
+export async function forEachRowViews<TColumns extends CsvColumns | undefined = undefined>(
+  path: string,
+  options: CsvRowViewsOptions<TColumns> = {} as CsvRowViewsOptions<TColumns>,
+  callback: CsvRowViewCallback<TColumns>,
 ): Promise<void> {
   ensureRowViewsSupported(options);
-  const scopedRowView = new ScopedCsvRowView();
+  const scopedRowView = new ScopedCsvRowView(selectedColumns(options) as TColumns);
   for await (const batch of batches(path, options)) {
     try {
       const rowCount = batch.rowCount;
@@ -446,17 +686,28 @@ export async function forEachRowViews(
   }
 }
 
+export function withRowViews<TColumns extends CsvColumns | undefined = undefined>(
+  path: string,
+  options: CsvRowViewsOptions<TColumns>,
+  callback: CsvRowViewCallback<TColumns>,
+): Promise<void>;
 export function withRowViews(
   path: string,
-  options: CsvApiFileOptions = {},
+  options: CsvRowViewsOptions | undefined,
   callback: CsvRowViewCallback,
 ): Promise<void> {
   return forEachRowViews(path, options, callback);
 }
 
-export async function count(path: string, options: CsvApiFileOptions = {}): Promise<number> {
+/**
+ * Count rows without materializing them.
+ *
+ * Full filter support exists here because count has native fast paths for
+ * `where.equals`, `where.in`, and `where.startsWith`.
+ */
+export async function count(path: string, options: CsvCountOptions = {}): Promise<number> {
   if ((options.workerCount ?? 1) > 1) {
-    return parallelCount(path, options);
+    return parallelCount(path, options as CsvParallelCountOptions);
   }
 
   rejectStrictSchemaUnsupported(options, 'count');
@@ -501,10 +752,13 @@ export function findCsvSafeShards(path: string, shardCount: number, options: Csv
   return findCsvSafeShardsNative(path, shardCount, options.delimiter ?? ',');
 }
 
+/**
+ * Stream dictionary batches for one column.
+ */
 export async function* dictionary(
   path: string,
   column: number,
-  options: CsvFileOptions = {},
+  options: CsvDictionaryOptions = {},
 ): AsyncGenerator<NativeCsvDictionaryBatch, void> {
   const parser = new NativeCsvParser(toParserOptions(options));
   try {
@@ -528,13 +782,16 @@ export async function* dictionary(
   }
 }
 
+/**
+ * Aggregate value counts for one column.
+ */
 export async function groupByCount(
   path: string,
   column: number,
-  options: CsvApiFileOptions = {},
+  options: CsvAggregateOptions = {},
 ): Promise<NativeCsvGroupByCountBatch> {
   if ((options.workerCount ?? 1) > 1) {
-    return parallelGroupByCount(path, column, options);
+    return parallelGroupByCount(path, column, options as CsvParallelAggregateOptions);
   }
   const parser = new NativeCsvParser(toParserOptions(options));
   try {
@@ -547,13 +804,16 @@ export async function groupByCount(
   }
 }
 
+/**
+ * Aggregate stats for one column.
+ */
 export async function columnStats(
   path: string,
   column: number,
-  options: CsvApiFileOptions = {},
+  options: CsvAggregateOptions = {},
 ): Promise<NativeCsvColumnStatsBatch> {
   if ((options.workerCount ?? 1) > 1) {
-    return parallelColumnStats(path, column, options);
+    return parallelColumnStats(path, column, options as CsvParallelAggregateOptions);
   }
   const parser = new NativeCsvParser(toParserOptions(options));
   try {
@@ -566,13 +826,16 @@ export async function columnStats(
   }
 }
 
+/**
+ * Aggregate stats for multiple columns in one pass.
+ */
 export async function multiColumnStats(
   path: string,
   columns: CsvColumns,
-  options: CsvApiFileOptions = {},
+  options: CsvAggregateOptions = {},
 ): Promise<NativeCsvColumnStatsBatch[]> {
   if ((options.workerCount ?? 1) > 1) {
-    return parallelMultiColumnStats(path, columns, options);
+    return parallelMultiColumnStats(path, columns, options as CsvParallelAggregateOptions);
   }
   if (columns.length === 0) {
     return [];
@@ -594,6 +857,15 @@ export const stats = {
   multi: multiColumnStats,
 };
 
+export function workerPool<TColumns extends CsvColumns | undefined = undefined>(
+  path: string,
+  options: CsvWorkerPoolOptions<TColumns>,
+): CsvWorkerPool<TColumns>;
+/**
+ * Create a reusable worker pool for repeated row and aggregate operations.
+ *
+ * Use this when one-off worker startup becomes noticeable across repeated calls.
+ */
 export function workerPool(path: string, options: CsvApiFileOptions): CsvWorkerPool {
   return createWorkerPool(path, options);
 }
@@ -625,7 +897,55 @@ export const csv = {
 };
 
 function mergeOptions<TOptions extends CsvApiFileOptions>(base: CsvApiFileOptions, override: TOptions): TOptions {
-  return { ...base, ...override };
+  return mergeApiOptions(base, override) as TOptions;
+}
+
+function mergeRowsOptions<TColumns extends CsvColumns | undefined>(
+  base: CsvApiFileOptions,
+  override: CsvRowsOptions<TColumns>,
+): CsvRowsOptions<TColumns> {
+  return mergeApiOptions(base, override) as CsvRowsOptions<TColumns>;
+}
+
+function mergeBatchesOptions(base: CsvApiFileOptions, override: CsvBatchesOptions): CsvBatchesOptions {
+  return mergeApiOptions(base, override) as CsvBatchesOptions;
+}
+
+function mergeRowViewsOptions<TColumns extends CsvColumns | undefined>(
+  base: CsvApiFileOptions,
+  override: CsvRowViewsOptions<TColumns>,
+): CsvRowViewsOptions<TColumns> {
+  return mergeApiOptions(base, override) as CsvRowViewsOptions<TColumns>;
+}
+
+function mergeColumnarBatchOptions<TColumns extends CsvColumns | undefined>(
+  base: CsvApiFileOptions,
+  override: CsvColumnarBatchOptions<TColumns>,
+): CsvColumnarBatchOptions<TColumns> {
+  return mergeApiOptions(base, override) as CsvColumnarBatchOptions<TColumns>;
+}
+
+function mergeCountOptions(base: CsvApiFileOptions, override: CsvCountOptions): CsvCountOptions {
+  return mergeApiOptions(base, override) as CsvCountOptions;
+}
+
+function mergeDictionaryOptions(base: CsvApiFileOptions, override: CsvDictionaryOptions): CsvDictionaryOptions {
+  return mergeApiOptions(base, override) as CsvDictionaryOptions;
+}
+
+function mergeAggregateOptions(base: CsvApiFileOptions, override: CsvAggregateOptions): CsvAggregateOptions {
+  return mergeApiOptions(base, override) as CsvAggregateOptions;
+}
+
+function mergeApiOptions(base: CsvApiFileOptions, override: CsvApiFileOptions): CsvApiFileOptions {
+  const merged = { ...base, ...override };
+  if (override.columns !== undefined) {
+    delete merged.selectedColumns;
+  }
+  if (override.selectedColumns !== undefined) {
+    delete merged.columns;
+  }
+  return merged;
 }
 
 function toParserOptions(options: CsvApiFileOptions | CsvFileOptions): CsvParserOptions {
@@ -673,12 +993,52 @@ function selectedColumns(options: CsvApiFileOptions): CsvColumns | undefined {
 function materializeRows<TColumns extends CsvColumns | undefined>(
   batch: NativeCsvBatch,
   options: CsvApiFileOptions & { columns?: TColumns; },
+  stringCache?: CsvStringCache,
 ): CsvProjectedRow<TColumns>[] {
   const columns = selectedColumns(options);
   if (usesProjectedMaterialization(options)) {
+    if (stringCache !== undefined && columns !== undefined) {
+      return materializeProjectedRows(batch, columns, stringCache) as CsvProjectedRow<TColumns>[];
+    }
     return batch.rowsInto([]) as CsvProjectedRow<TColumns>[];
   }
-  return batch.rowsInto([], columns) as CsvProjectedRow<TColumns>[];
+  return batch.rowsInto([], columns, stringCache) as CsvProjectedRow<TColumns>[];
+}
+
+function materializeProjectedRows(batch: NativeCsvBatch, columns: CsvColumns, stringCache: CsvStringCache): string[][] {
+  const rows: string[][] = [];
+  rows.length = batch.rowCount;
+  const projectedColumns = projectedColumnIndexes(columns);
+  batch.scanColumns(projectedColumns, (rowIndex, ranges, data) => {
+    const row: string[] = [];
+    row.length = columns.length;
+    for (let columnIndex = 0; columnIndex < columns.length; ++columnIndex) {
+      const rangeIndex = columnIndex * 2;
+      const start = ranges[rangeIndex] ?? -1;
+      const end = ranges[rangeIndex + 1] ?? -1;
+      row[columnIndex] = start === -1 || end === -1
+        ? ''
+        : stringCache.decode(data, start, end, columns[columnIndex] ?? 0);
+    }
+    rows[rowIndex] = row;
+  });
+  return rows;
+}
+
+function projectedColumnIndexes(columns: CsvColumns): CsvColumns {
+  const projected: number[] = [];
+  projected.length = columns.length;
+  for (let index = 0; index < columns.length; ++index) {
+    projected[index] = index;
+  }
+  return projected;
+}
+
+function createStringCache(options: CsvApiFileOptions): CsvStringCache | undefined {
+  if (options.stringCache === undefined) {
+    return undefined;
+  }
+  return new CsvStringCache(options.stringCache);
 }
 
 function usesProjectedMaterialization(options: CsvApiFileOptions): boolean {
@@ -841,19 +1201,25 @@ function ensureRowsWhereSupported(where: CsvWhereFilter | undefined): void {
   if (where === undefined || 'equals' in where) {
     return;
   }
-  throw new Error('rows() supports only where.equals; use count() for where.in or where.startsWith');
+  throw new Error(
+    'rows() supports only where.equals; use count() for where.in or where.startsWith, or pre-filter inside withBatches()/withRowViews()',
+  );
 }
 
 function ensureRowViewsSupported(options: CsvApiFileOptions): void {
   if ((options.workerCount ?? 1) > 1) {
-    throw new Error('row view callbacks do not support workerCount; use rows() or withBatches() instead');
+    throw new Error(
+      'row view callbacks do not support workerCount; use rows()/parallelRows() for materialized rows or withBatches() for low-level streaming',
+    );
   }
 }
 
 function ensureColumnarBatchesSupported(options: CsvApiFileOptions): void {
   ensureRowViewsSupported(options);
   if (options.strict === true && selectedColumns(options) !== undefined) {
-    throw new Error('columnar batch callbacks do not support strict selectedColumns; use withBatches() instead');
+    throw new Error(
+      'columnar batch callbacks do not support strict selectedColumns; use rows() for projected validation or withBatches() for manual low-level handling',
+    );
   }
 }
 
@@ -867,8 +1233,13 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return typeof value === 'object' && value !== null && 'then' in value && typeof value.then === 'function';
 }
 
-class ScopedCsvRowView implements CsvRowView {
+class ScopedCsvRowView<TSelectedColumns extends CsvColumns | undefined = undefined> implements CsvRowView<TSelectedColumns> {
+  readonly #selectedColumns: TSelectedColumns;
   #rowView: NativeCsvRowView | null = null;
+
+  constructor(selectedColumns: TSelectedColumns) {
+    this.#selectedColumns = selectedColumns;
+  }
 
   bind(rowView: NativeCsvRowView): this {
     this.#rowView = rowView;
@@ -885,6 +1256,10 @@ class ScopedCsvRowView implements CsvRowView {
 
   get fieldCount(): number {
     return this.#requireRowView().fieldCount;
+  }
+
+  get selectedColumns(): TSelectedColumns {
+    return this.#selectedColumns;
   }
 
   fieldRange(columnIndex: number) {
@@ -915,8 +1290,16 @@ class ScopedCsvRowView implements CsvRowView {
     return this.#requireRowView().fieldString(columnIndex);
   }
 
+  getPhysical(columnIndex: number) {
+    return this.#requireRowView().getPhysical(columnIndex);
+  }
+
   get(columnIndex: number) {
     return this.#requireRowView().get(columnIndex);
+  }
+
+  pickPhysical(columns: CsvColumns): string[] {
+    return this.#requireRowView().pickPhysical(columns);
   }
 
   pick(columns: CsvColumns): string[] {
@@ -931,11 +1314,12 @@ class ScopedCsvRowView implements CsvRowView {
   }
 }
 
-class ScopedCsvColumnarBatchView implements CsvColumnarBatchView {
-  readonly #selectedColumns: CsvColumns | undefined;
+class ScopedCsvColumnarBatchView<TSelectedColumns extends CsvColumns | undefined = undefined>
+  implements CsvColumnarBatchView<TSelectedColumns> {
+  readonly #selectedColumns: TSelectedColumns;
   #batch: NativeCsvBatch | null = null;
 
-  constructor(selectedColumns: CsvColumns | undefined) {
+  constructor(selectedColumns: TSelectedColumns) {
     this.#selectedColumns = selectedColumns;
   }
 
@@ -960,7 +1344,7 @@ class ScopedCsvColumnarBatchView implements CsvColumnarBatchView {
     return this.#requireBatch().dataLength;
   }
 
-  get selectedColumns(): CsvColumns | undefined {
+  get selectedColumns(): TSelectedColumns {
     return this.#selectedColumns;
   }
 
@@ -996,7 +1380,12 @@ class ScopedCsvColumnarBatchView implements CsvColumnarBatchView {
     return this.#requireBatch().fieldBuffer(rowIndex, columnIndex);
   }
 
-  forEachColumnRange(columnIndex: number, callback: (rowIndex: number, start: number, end: number) => void, startRow?: number, endRow?: number) {
+  forEachColumnRange(
+    columnIndex: number,
+    callback: (rowIndex: number, start: number, end: number) => void,
+    startRow?: number,
+    endRow?: number,
+  ) {
     return this.#requireBatch().forEachColumnRange(columnIndex, callback, startRow, endRow);
   }
 
@@ -1004,7 +1393,12 @@ class ScopedCsvColumnarBatchView implements CsvColumnarBatchView {
     return this.#requireBatch().forEachColumnBytes(columnIndex, callback, startRow, endRow);
   }
 
-  scanColumns(columns: CsvColumns, callback: (rowIndex: number, ranges: Int32Array, data: Buffer) => void, startRow?: number, endRow?: number) {
+  scanColumns(
+    columns: CsvColumns,
+    callback: (rowIndex: number, ranges: Int32Array, data: Buffer) => void,
+    startRow?: number,
+    endRow?: number,
+  ) {
     return this.#requireBatch().scanColumns(columns, callback, startRow, endRow);
   }
 

@@ -35,11 +35,13 @@ const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
 const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 const WORKERS = Number(Bun.env['CSV_BENCH_WORKERS'] ?? 4);
 const SPLITTER = Bun.env['CSV_BENCH_WORKER_SPLITTER'] ?? 'native-csv-safe';
-const FIXED_COLUMNS = Number(Bun.env['CSV_BENCH_FIXED_COLUMNS'] ?? (
-  Bun.env['CSV_BENCH_FILE'] === undefined
-    ? 5
-    : await inferFixedColumns(FILE, DELIMITER)
-));
+const FIXED_COLUMNS = Number(
+  Bun.env['CSV_BENCH_FIXED_COLUMNS'] ?? (
+    Bun.env['CSV_BENCH_FILE'] === undefined
+      ? 5
+      : await inferFixedColumns(FILE, DELIMITER)
+  ),
+);
 const bytes = fileSize(FILE);
 const shardStartedAt = performance.now();
 const shards = await loadShards();
@@ -121,10 +123,12 @@ async function countShardedWorkers(mode: WorkerMode, trustedShards: TrustedShard
     ? new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * trustedShards.length)
     : undefined;
 
-  const workers = trustedShards.map(() => new Worker(new URL('./count.worker.ts', import.meta.url).href, {
-    preload: [],
-    type: 'module',
-  }));
+  const workers = trustedShards.map(() =>
+    new Worker(new URL('./count.worker.ts', import.meta.url).href, {
+      preload: [],
+      type: 'module',
+    })
+  );
 
   try {
     return await new Promise<number>((resolve, reject) => {
@@ -170,7 +174,11 @@ async function countShardedWorkers(mode: WorkerMode, trustedShards: TrustedShard
           if (mode === 'message-final') {
             rows += message.rows;
           } else if (mode === 'shared-progress') {
-            rows = sumSharedCounts(sharedCounts!, trustedShards.length);
+            if (sharedCounts === undefined) {
+              fail(new Error(`missing shared counts for mode ${mode}`));
+              return;
+            }
+            rows = sumSharedCounts(sharedCounts, trustedShards.length);
           }
 
           if (doneWorkers === workers.length) {
@@ -217,7 +225,7 @@ async function ensureTrustedFixture(rows: number): Promise<string> {
 
   const writer = file.writer();
   for (let index = 0; index < rows; ++index) {
-    writer.write(`${index};name${index % 100};city${index % 50};state${index % 27};email${index}@example.com\n`);
+    await writer.write(`${index};name${index % 100};city${index % 50};state${index % 27};email${index}@example.com\n`);
   }
   await writer.end();
   return path;

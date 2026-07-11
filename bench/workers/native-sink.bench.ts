@@ -112,10 +112,12 @@ async function sinkWorkers(trustedShards: TrustedShard[]): Promise<NativeSinkRes
     return { cells: 0, dataBytes: 0, rows: 0 };
   }
 
-  const workers = trustedShards.map(() => new Worker(new URL('./native-sink.worker.ts', import.meta.url).href, {
-    preload: [],
-    type: 'module',
-  }));
+  const workers = trustedShards.map(() =>
+    new Worker(new URL('./native-sink.worker.ts', import.meta.url).href, {
+      preload: [],
+      type: 'module',
+    })
+  );
 
   try {
     return await new Promise<NativeSinkResult>((resolve, reject) => {

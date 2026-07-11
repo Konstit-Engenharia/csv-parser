@@ -78,10 +78,107 @@ export interface CsvNativeProjectionOptions {
 
 export interface CsvApiFileOptions extends CsvFileOptions {
   columns?: CsvColumns;
+  stringCache?: CsvStringCacheOptions;
   trustedFixedColumns?: number;
   workerCount?: number;
   where?: CsvWhereFilter;
 }
+
+export type CsvColumnSelection<TColumns extends CsvColumns | undefined> =
+  | {
+    columns?: TColumns;
+    selectedColumns?: never;
+  }
+  | {
+    columns?: never;
+    selectedColumns?: TColumns;
+  };
+
+type CsvApiOptionsWithoutSelection = Omit<CsvApiFileOptions, 'columns' | 'selectedColumns'>;
+type CsvDistributiveOmit<T, TKeys extends PropertyKey> = T extends unknown ? Omit<T, TKeys> : never;
+
+type CsvOptionsWithoutWhereWorkerCount<TColumns extends CsvColumns | undefined> =
+  & Omit<
+    CsvApiOptionsWithoutSelection,
+    'where' | 'workerCount'
+  >
+  & CsvColumnSelection<TColumns>;
+
+export type CsvSingleThreadRowsOptions<TColumns extends CsvColumns | undefined = undefined> =
+  | (CsvDistributiveOmit<CsvOptionsWithoutWhereWorkerCount<TColumns>, 'strict'> & {
+    strict?: false | undefined;
+    where?: CsvWhereEqualsFilter | undefined;
+    workerCount?: 1 | undefined;
+  })
+  | (CsvDistributiveOmit<CsvOptionsWithoutWhereWorkerCount<TColumns>, 'strict'> & {
+    strict: true;
+    where?: undefined;
+    workerCount?: 1 | undefined;
+  });
+
+export type CsvParallelRowsOptions<TColumns extends CsvColumns | undefined = undefined> =
+  & Omit<
+    CsvApiOptionsWithoutSelection,
+    'where' | 'workerCount' | 'strict'
+  >
+  & CsvColumnSelection<TColumns>
+  & {
+    where?: CsvWhereEqualsFilter | undefined;
+    workerCount: number;
+    strict?: false | undefined;
+  };
+
+export type CsvParseOptions<TColumns extends CsvColumns | undefined = undefined> = CsvSingleThreadRowsOptions<TColumns>;
+
+export type CsvRowsOptions<TColumns extends CsvColumns | undefined = undefined> =
+  | CsvSingleThreadRowsOptions<TColumns>
+  | CsvParallelRowsOptions<TColumns>;
+
+export type CsvBatchesOptions = CsvSingleThreadRowsOptions<CsvColumns | undefined>;
+
+export type CsvRowViewsOptions<TColumns extends CsvColumns | undefined = undefined> = CsvSingleThreadRowsOptions<TColumns>;
+
+export type CsvColumnarBatchOptions<TColumns extends CsvColumns | undefined = undefined> = [TColumns] extends [undefined]
+  ? CsvSingleThreadRowsOptions<TColumns>
+  : CsvDistributiveOmit<CsvSingleThreadRowsOptions<TColumns>, 'strict'> & { strict?: false | undefined; };
+
+type CsvCountSingleThreadOptions =
+  | (Omit<CsvApiOptionsWithoutSelection, 'where' | 'workerCount' | 'strict'> & CsvColumnSelection<CsvColumns | undefined> & {
+    strict?: false | undefined;
+    where?: CsvWhereFilter | undefined;
+    workerCount?: 1 | undefined;
+  })
+  | (Omit<CsvApiOptionsWithoutSelection, 'where' | 'workerCount' | 'strict'> & CsvColumnSelection<CsvColumns | undefined> & {
+    strict: true;
+    where?: undefined;
+    workerCount?: 1 | undefined;
+  });
+
+export type CsvParallelCountOptions =
+  & Omit<CsvApiOptionsWithoutSelection, 'where' | 'workerCount' | 'strict'>
+  & CsvColumnSelection<CsvColumns | undefined>
+  & {
+    where?: CsvWhereFilter | undefined;
+    workerCount: number;
+    strict?: false | undefined;
+  };
+
+export type CsvCountOptions =
+  | CsvCountSingleThreadOptions
+  | CsvParallelCountOptions;
+
+export type CsvDictionaryOptions = Omit<CsvFileOptions, 'strict'> & {
+  strict?: false | undefined;
+};
+
+export type CsvAggregateOptions = Omit<CsvApiFileOptions, 'where' | 'strict'> & {
+  where?: undefined;
+  strict?: false | undefined;
+};
+
+export type CsvParallelAggregateOptions = CsvAggregateOptions & { workerCount: number; };
+
+export type CsvWorkerPoolOptions<TColumns extends CsvColumns | undefined = undefined> = CsvParallelRowsOptions<TColumns>;
 
 export type CsvProjectedRow<TColumns extends CsvColumns | undefined> = TColumns extends readonly unknown[]
   ? { -readonly [Index in keyof TColumns]: string; }
@@ -105,32 +202,52 @@ export interface CsvGroupByCountEntry {
   count: number;
 }
 
-export type CsvRowView = Pick<
-  NativeCsvRowView,
-  | 'rowIndex'
-  | 'fieldCount'
-  | 'fieldRange'
-  | 'range'
-  | 'fieldBytes'
-  | 'bytes'
-  | 'fieldBuffer'
-  | 'buffer'
-  | 'fieldString'
-  | 'get'
-  | 'pick'
->;
+export type CsvRowView<TSelectedColumns extends CsvColumns | undefined = undefined> =
+  & Pick<
+    NativeCsvRowView,
+    | 'rowIndex'
+    | 'fieldCount'
+    | 'fieldRange'
+    | 'range'
+    | 'fieldBytes'
+    | 'bytes'
+    | 'fieldBuffer'
+    | 'buffer'
+    | 'fieldString'
+    | 'getPhysical'
+    | 'get'
+    | 'pickPhysical'
+    | 'pick'
+  >
+  & {
+    /**
+     * Selected output columns requested for the stream, when present.
+     *
+     * `CsvRowView` still reads physical CSV column indexes through `get()`, `fieldString()`,
+     * `bytes()`, `range()`, and `pick()`. This metadata is useful when you need to map projected
+     * output positions back to source column indexes.
+     */
+    readonly selectedColumns: TSelectedColumns;
+  };
 
-export type CsvRowViewCallback = (row: CsvRowView, rowIndex: number) => void;
+export type CsvRowViewCallback<TSelectedColumns extends CsvColumns | undefined = undefined> = (
+  row: CsvRowView<TSelectedColumns>,
+  rowIndex: number,
+) => void;
 export type NativeCsvRowCallback = (row: NativeCsvRowView, rowIndex: number) => void;
 export type CsvColumnRangeCallback = (rowIndex: number, start: number, end: number) => void;
 export type CsvColumnBytesCallback = (rowIndex: number, bytes: Uint8Array) => void;
 export type CsvScanColumnsCallback = (rowIndex: number, ranges: Int32Array, data: Buffer) => void;
 
-export interface CsvColumnarBatchView {
+export interface CsvColumnarBatchView<TSelectedColumns extends CsvColumns | undefined = undefined> {
   readonly rowCount: number;
   readonly totalFields: number;
   readonly dataLength: number;
-  readonly selectedColumns: CsvColumns | undefined;
+  /**
+   * Selected output columns requested for this batch. Unlike `CsvRowView`, column indexes on the
+   * batch are relative to the projected output when `selectedColumns` is defined.
+   */
+  readonly selectedColumns: TSelectedColumns;
   data(): Buffer;
   dataView(): Uint8Array;
   rowOffsets(): Uint32Array;
@@ -144,4 +261,7 @@ export interface CsvColumnarBatchView {
   scanColumns(columns: CsvColumns, callback: CsvScanColumnsCallback, startRow?: number, endRow?: number): void;
 }
 
-export type CsvColumnarBatchCallback = (batch: CsvColumnarBatchView, batchIndex: number) => void;
+export type CsvColumnarBatchCallback<TSelectedColumns extends CsvColumns | undefined = undefined> = (
+  batch: CsvColumnarBatchView<TSelectedColumns>,
+  batchIndex: number,
+) => void;

@@ -7,8 +7,20 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "files": [
+    "src",
+    "prebuilds",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build:native": "bun scripts/build-native.ts",
+    "stage:native": "bun scripts/stage-native.ts",
+    "verify:native-package": "bun scripts/verify-native-package.ts",
+    "prepack": "bun run verify:native-package",
     "test": "bun test",
     "test:native": "bun run build:native && bun scripts/test-native.ts",
     "test:native:sanitize": "bun scripts/test-native-sanitizers.ts",
@@ -52,27 +64,22 @@
     "profile:heap:csv-parser": "bun run build:native && mkdir -p profiles && bun --heap-prof-md --heap-prof-dir profiles bench/csv-parser/profile-runtime.ts",
     "profile:native-memory": "bun run build:native && MIMALLOC_SHOW_STATS=1 bun bench/profile-runtime.ts",
     "tsc": "bunx --bun tsc --noEmit",
-    "lint:biome": "bunx --bun @biomejs/biome check",
-    "lint:oxlint": "bunx --bun oxlint --type-aware",
+    "lint:biome": "bunx @biomejs/biome check",
+    "lint:oxlint": "bunx oxlint --type-aware",
     "lint": "bun run tsc && bun run lint:biome && bun run lint:oxlint",
-    "fmt": "bunx --bun dprint fmt",
+    "fmt": "bunx dprint fmt",
     "fmt:native": "find native bench test -type f -name '*.cpp' -print0 | xargs -0 clang-format -i"
-  },
-  "dependencies": {
-    "@drizzle-team/brocli": "^0.12.0",
-    "csv-parser": "^3.2.1",
-    "iconv-lite": "^0.7.2"
-  },
-  "peerDependencies": {
-    "typescript": "5.9.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.1",
     "@types/bun": "1.3.14",
     "csv-spectrum": "^2.0.0",
+    "csv-parser": "^3.2.1",
     "dprint": "^0.55.1",
     "mitata": "^1.0.34",
-    "oxlint": "^1.72.0"
+    "iconv-lite": "^0.7.2",
+    "oxlint": "^1.72.0",
+    "typescript": "5.9.3"
   },
   "engines": {
     "bun": "^1.3.14"

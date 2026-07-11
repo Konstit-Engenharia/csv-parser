@@ -1,4 +1,7 @@
-import { countTrustedShardRows, type TrustedShard } from './common.ts';
+import {
+  countTrustedShardRows,
+  type TrustedShard,
+} from './common.ts';
 
 type WorkerMode = 'message-final' | 'message-progress' | 'shared-progress';
 

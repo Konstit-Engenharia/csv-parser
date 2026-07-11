@@ -1,6 +1,9 @@
 import { measure } from 'mitata';
 import { csv } from '../../src/index.ts';
-import type { CsvColumns, CsvGroupByCountEntry } from '../../src/types.ts';
+import type {
+  CsvColumns,
+  CsvGroupByCountEntry,
+} from '../../src/types.ts';
 import { fileSize } from './common.ts';
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
@@ -157,11 +160,13 @@ function summarizeEntries(rowCount: number, entries: readonly CsvGroupByCountEnt
   };
 }
 
-function summarizeMultiColumn(columns: Array<{
-  column: number;
-  entries: readonly CsvGroupByCountEntry[];
-  rowCount: number;
-}>): MultiColumnBenchResult {
+function summarizeMultiColumn(
+  columns: Array<{
+    column: number;
+    entries: readonly CsvGroupByCountEntry[];
+    rowCount: number;
+  }>,
+): MultiColumnBenchResult {
   const summaries = columns
     .map((column) => ({
       column: column.column,
@@ -171,8 +176,7 @@ function summarizeMultiColumn(columns: Array<{
 
   let checksum = FNV_OFFSET;
   let totalDictionaries = 0;
-  for (let index = 0; index < summaries.length; ++index) {
-    const column = summaries[index]!;
+  for (const column of summaries) {
     const summary = column.summary;
     totalDictionaries += summary.dictionaryCount;
     checksum = hashValue(checksum, `${column.column}\u0000${summary.checksum}\n`);

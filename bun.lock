@@ -3,21 +3,16 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "bun-project",
-      "dependencies": {
-        "@drizzle-team/brocli": "^0.12.0",
-        "csv-parser": "^3.2.1",
-        "iconv-lite": "^0.7.2",
-      },
+      "name": "bun-csv-parser",
       "devDependencies": {
         "@biomejs/biome": "2.5.1",
         "@types/bun": "1.3.14",
+        "csv-parser": "^3.2.1",
         "csv-spectrum": "^2.0.0",
         "dprint": "^0.55.1",
+        "iconv-lite": "^0.7.2",
         "mitata": "^1.0.34",
         "oxlint": "^1.72.0",
-      },
-      "peerDependencies": {
         "typescript": "5.9.3",
       },
     },
@@ -70,8 +65,6 @@
     "@dprint/win32-arm64": ["@dprint/win32-arm64@0.55.1", "", { "os": "win32", "cpu": "arm64" }, "sha512-9jiZWZ2AkaaXIkaOpOoiP6v0XxuBFp1Hyi3kUMUAY4NVCmvlSEDQhr+UZgnDhozYygDbAV13iNMLERDeoUa0nA=="],
 
     "@dprint/win32-x64": ["@dprint/win32-x64@0.55.1", "", { "os": "win32", "cpu": "x64" }, "sha512-+RmeJL8zzlEWTcrvyFN51rz0S98tV43Socs7xeVGE2S/EH5dG2fG2/fBe6RB3kuyZSfGqByApYeicIdshYIAgw=="],
-
-    "@drizzle-team/brocli": ["@drizzle-team/brocli@0.12.0", "", {}, "sha512-mlUE+rZ8CatQekLhnaiN91Iemdd+e2gFKooGlnRB3oPTL3VghLfX24dx7HrzMNeC1JrIB/0kpsfyty3f5HNfxQ=="],
 
     "@oxlint/binding-android-arm-eabi": ["@oxlint/binding-android-arm-eabi@1.72.0", "", { "os": "android", "cpu": "arm" }, "sha512-zhCmvn+1Mj3UchAc/90i99S0t7jJUsHmFVSPg4UWrjO8b8eaSGwscgO6QAUtvHBstkjQwBttQNswEnAF1mIQdA=="],
 

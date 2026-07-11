@@ -74,11 +74,13 @@ addEventListener('message', async (event: MessageEvent<WorkerRunMessage>) => {
       }
     }
   } catch (error) {
-    postMessage({
-      error: error instanceof Error ? error.message : String(error),
-      type: 'error',
-      workerIndex: message.workerIndex,
-    } satisfies WorkerErrorMessage);
+    postMessage(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        type: 'error',
+        workerIndex: message.workerIndex,
+      } satisfies WorkerErrorMessage,
+    );
   }
 });
 

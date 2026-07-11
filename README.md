@@ -6,6 +6,10 @@ Use it when large CSV files need streaming rows, selected columns, simple filter
 
 ## Setup
 
+Packaged release artifacts include native libraries for macOS 13+ ARM64/x64 and Linux x64. No compiler is needed for these targets.
+
+For repository development:
+
 ```sh
 bun install
 bun run build:native
@@ -21,6 +25,10 @@ If no matching library exists, imports fail with:
 ```txt
 native library not found. Run: bun run build:native
 ```
+
+Package assembly is separate from publication. The `Package` workflow builds portable native libraries on macOS and
+Linux, verifies every required target, creates the tarball, and installs that tarball in a clean smoke-test project.
+Publication must use this verified artifact; `prepack` rejects packages missing any required native library.
 
 ## Quick Start
 
@@ -141,6 +149,41 @@ Strict mode currently covers row batches, `count()` without filters, `fixedColum
 and row schema metadata. Projected batches, dictionary batches, count filters, and aggregate APIs reject `strict: true`
 explicitly until they have strict native variants.
 
+## Typed Options
+
+Use the option factories when you want literal-preserving inference without repeating `satisfies` everywhere:
+
+```ts
+import {
+  csv,
+  defineCountOptions,
+  defineRowsOptions,
+} from 'bun-csv-parser';
+
+const columns = [0, 2] as const;
+
+const rowOptions = defineRowsOptions({
+  columns,
+  delimiter: ';',
+  where: { column: 1, equals: 'SP' },
+});
+
+const countOptions = defineCountOptions({
+  strict: true,
+});
+
+for await (const rows of csv.rows('data.csv', rowOptions)) {
+  console.log(rows);
+}
+
+console.log(await csv.count('data.csv', countOptions));
+```
+
+The public option types reject combinations unsupported by the native path, including strict validation with filters or
+workers. `columns` and the legacy `selectedColumns` alias are mutually exclusive. Fluent builder operations keep
+`strict`, worker, and filter state in the chain; change those through `.strict()`, `.workers()`, or `.where*()` instead
+of operation-level overrides.
+
 ## Batch API
 
 Use batches when you need low allocation row access or byte ranges.
@@ -155,15 +198,19 @@ await csv.withBatches(
     batch.forEachRow((row) => {
       console.log({
         rowIndex: row.rowIndex,
-        first: row.get(0),
+        first: row.getPhysical(0),
         bytes: row.bytes(0),
         range: row.range(0),
-        selected: row.pick([0, 2]),
+        selected: row.pickPhysical([0, 2]),
       });
     });
   },
 );
 ```
+
+`row.get()`, `row.getPhysical()`, `row.pick()`, and `row.pickPhysical()` all read physical CSV column indexes.
+If you requested projected columns elsewhere in the API, `row.selectedColumns` is metadata that lets you map projected
+positions back to source columns.
 
 If you use `csv.batches()` directly, close each batch:
 

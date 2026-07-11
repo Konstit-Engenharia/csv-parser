@@ -1,8 +1,8 @@
-import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import { findCsvSafeShards } from './files.ts';
+import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import type {
-  CsvApiFileOptions,
   CsvFieldValue,
+  CsvParallelCountOptions,
   CsvWhereFilter,
 } from './types.ts';
 
@@ -29,7 +29,7 @@ type WorkerCountFilterMessage =
 interface WorkerCountMessage {
   chunkSize?: number;
   delimiter?: string;
-  encoding?: CsvApiFileOptions['encoding'];
+  encoding?: CsvParallelCountOptions['encoding'];
   path: string;
   shard: {
     start: number;
@@ -51,13 +51,13 @@ interface WorkerErrorMessage {
   type: 'error';
 }
 
-export async function parallelCount(path: string, options: CsvApiFileOptions = {}): Promise<number> {
+export async function parallelCount(path: string, options: CsvParallelCountOptions): Promise<number> {
   const workerCount = options.workerCount ?? 1;
   if (!Number.isInteger(workerCount) || workerCount <= 1) {
     throw new RangeError(`parallel count require workerCount > 1: ${workerCount}`);
   }
-  if (options.strict === true) {
-    throw new Error('parallel count does not support strict CSV validation');
+  if ((options as { strict?: boolean; }).strict === true) {
+    throw new Error('parallel count does not support strict CSV validation; use count() without workers for strict schema checks');
   }
 
   const shards = findCsvSafeShards(path, workerCount, options.delimiter ?? ',');
@@ -65,10 +65,12 @@ export async function parallelCount(path: string, options: CsvApiFileOptions = {
     return 0;
   }
 
-  const workers = shards.map(() => new Worker(new URL('./workers/count.worker.ts', import.meta.url).href, {
-    preload: [],
-    type: 'module',
-  }));
+  const workers = shards.map(() =>
+    new Worker(new URL('./workers/count.worker.ts', import.meta.url).href, {
+      preload: [],
+      type: 'module',
+    })
+  );
 
   try {
     return await new Promise<number>((resolve, reject) => {
@@ -99,6 +101,11 @@ export async function parallelCount(path: string, options: CsvApiFileOptions = {
       };
 
       workers.forEach((worker, shardIndex) => {
+        const shard = shards[shardIndex];
+        if (shard === undefined) {
+          fail(new Error(`missing shard ${String(shardIndex)}`));
+          return;
+        }
         worker.onmessage = (event: MessageEvent<WorkerDoneMessage | WorkerErrorMessage>) => {
           const message = event.data;
           if (message.type === 'error') {
@@ -114,15 +121,17 @@ export async function parallelCount(path: string, options: CsvApiFileOptions = {
         worker.onerror = (event) => {
           fail(event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`));
         };
-        worker.postMessage({
-          chunkSize: options.chunkSize ?? DEFAULT_CHUNK_SIZE,
-          delimiter: options.delimiter,
-          encoding: options.encoding,
-          path,
-          shard: shards[shardIndex]!,
-          shardIndex,
-          where: normalizeWhere(options.where),
-        } satisfies WorkerCountMessage);
+        worker.postMessage(
+          {
+            chunkSize: options.chunkSize ?? DEFAULT_CHUNK_SIZE,
+            delimiter: options.delimiter,
+            encoding: options.encoding,
+            path,
+            shard,
+            shardIndex,
+            where: normalizeWhere(options.where),
+          } satisfies WorkerCountMessage,
+        );
       });
     });
   } finally {

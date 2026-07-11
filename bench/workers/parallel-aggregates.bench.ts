@@ -1,14 +1,14 @@
 import { measure } from 'mitata';
 import {
-  columnStats,
-  groupByCount,
-} from '../../src/index.ts';
-import {
   createNativeCsvColumnStatsBatch,
   createNativeCsvGroupByCountBatch,
   type NativeCsvColumnStatsBatch,
   type NativeCsvGroupByCountBatch,
 } from '../../src/batches.ts';
+import {
+  columnStats,
+  groupByCount,
+} from '../../src/index.ts';
 import {
   buildNativeCsvSafeShards,
   fileSize,
@@ -271,14 +271,17 @@ async function parallelColumnStatsBatchLocal(): Promise<NativeCsvColumnStatsBatc
 async function runWorkers<TMessage extends GroupByCountWorkerDoneMessage | ColumnStatsWorkerDoneMessage>(options: {
   createMessage: (shard: TrustedShard, workerIndex: number) => WorkerRunMessage;
 }): Promise<TMessage[]> {
-  const workers = SHARDS.map(() => new Worker(new URL('./aggregate.worker.ts', import.meta.url).href, {
-    preload: [],
-    type: 'module',
-  }));
+  const workers = SHARDS.map(() =>
+    new Worker(new URL('./aggregate.worker.ts', import.meta.url).href, {
+      preload: [],
+      type: 'module',
+    })
+  );
 
   try {
     return await new Promise<TMessage[]>((resolve, reject) => {
-      const results = new Array<TMessage>(workers.length);
+      const results: TMessage[] = [];
+      results.length = workers.length;
       let doneWorkers = 0;
       let settled = false;
 
@@ -321,7 +324,12 @@ async function runWorkers<TMessage extends GroupByCountWorkerDoneMessage | Colum
         worker.onerror = (event) => {
           fail(event.error ?? new Error(`worker ${workerIndex} failed`));
         };
-        worker.postMessage(options.createMessage(SHARDS[workerIndex]!, workerIndex));
+        const shard = SHARDS[workerIndex];
+        if (shard === undefined) {
+          fail(new Error(`missing shard ${String(workerIndex)}`));
+          return;
+        }
+        worker.postMessage(options.createMessage(shard, workerIndex));
       });
     });
   } finally {
@@ -352,7 +360,7 @@ function summarizeEntries(
   const sortedByValue = entries.slice().sort(compareEntryValue);
   let hash = FNV_OFFSET;
   let totalCount = 0;
-  for (const [value, count] of sortedByValue) {
+  for (const [value, count,] of sortedByValue) {
     totalCount += count;
     hash = hashValue(hash, value);
     hash = hashValue(hash, '\u0000');
@@ -463,10 +471,11 @@ function encodeDictionaryCounts(values: ReadonlyMap<string, bigint>): {
 } {
   const entries = Array.from(values.entries()).sort(compareStringTuple);
   const counts = new BigUint64Array(entries.length);
-  const dictionaryValues = new Array<string>(entries.length);
-  for (let index = 0; index < entries.length; ++index) {
-    dictionaryValues[index] = entries[index]![0];
-    counts[index] = entries[index]![1];
+  const dictionaryValues: string[] = [];
+  dictionaryValues.length = entries.length;
+  for (const [index, [value, count,],] of entries.entries()) {
+    dictionaryValues[index] = value;
+    counts[index] = count;
   }
   const encoded = encodeDictionaryValues(dictionaryValues);
   return {
@@ -483,9 +492,9 @@ function encodeDictionaryValues(values: readonly string[]): {
   const encoded = values.map((value) => Buffer.from(value, 'utf8'));
   const dictionaryOffsets = new Uint32Array(values.length + 1);
   let totalBytes = 0;
-  for (let index = 0; index < encoded.length; ++index) {
+  for (const [index, value,] of encoded.entries()) {
     dictionaryOffsets[index] = totalBytes;
-    totalBytes += encoded[index]!.byteLength;
+    totalBytes += value.byteLength;
   }
   dictionaryOffsets[values.length] = totalBytes;
 

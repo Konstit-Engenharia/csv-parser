@@ -30,11 +30,13 @@ function configure(target: NativeBuildTarget): void {
     '-G',
     'Ninja',
     '-DCMAKE_BUILD_TYPE=Release',
+    '-DCSV_NATIVE_PORTABLE=ON',
     `-DCMAKE_TOOLCHAIN_FILE=${resolve(vcpkgRoot, 'scripts/buildsystems/vcpkg.cmake')}`,
   ];
 
   if (target.osxArchitecture !== undefined) {
     args.push(`-DCMAKE_OSX_ARCHITECTURES=${target.osxArchitecture}`);
+    args.push('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0');
   }
 
   if (target.vcpkgTriplet !== undefined) {

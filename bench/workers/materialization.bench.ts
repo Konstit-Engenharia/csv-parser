@@ -137,10 +137,12 @@ async function materializeWorkers(
     ? new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * trustedShards.length)
     : undefined;
 
-  const workers = trustedShards.map(() => new Worker(new URL('./materialize.worker.ts', import.meta.url).href, {
-    preload: [],
-    type: 'module',
-  }));
+  const workers = trustedShards.map(() =>
+    new Worker(new URL('./materialize.worker.ts', import.meta.url).href, {
+      preload: [],
+      type: 'module',
+    })
+  );
 
   try {
     return await new Promise<number>((resolve, reject) => {
@@ -182,7 +184,11 @@ async function materializeWorkers(
           if (mode === 'message-final') {
             rows += message.rows;
           } else {
-            rows = sumSharedCounts(sharedCounts!, trustedShards.length);
+            if (sharedCounts === undefined) {
+              fail(new Error(`missing shared counts for mode ${mode}`));
+              return;
+            }
+            rows = sumSharedCounts(sharedCounts, trustedShards.length);
           }
 
           if (doneWorkers === workers.length) {
@@ -238,10 +244,10 @@ async function ensureMaterializeFixture(rows: number): Promise<string> {
 
   const writer = file.writer();
   for (let index = 0; index < rows; ++index) {
-    writer.write(
-      `${index};0001;0${index % 99};1;;02;20251111;00;;;20251111;1412602;1340501,5813100;RUA;NOME ${index};18;` +
-      `"ANDAR ${index % 20};APT ${index % 500};BLOCO ${index % 40}";BAIRRO ${index % 1000};74370455;SP;9373;66;99148283;;;;;` +
-      `email${index}@example.com;;\n`,
+    await writer.write(
+      `${index};0001;0${index % 99};1;;02;20251111;00;;;20251111;1412602;1340501,5813100;RUA;NOME ${index};18;`
+        + `"ANDAR ${index % 20};APT ${index % 500};BLOCO ${index % 40}";BAIRRO ${index % 1000};74370455;SP;9373;66;99148283;;;;;`
+        + `email${index}@example.com;;\n`,
     );
   }
   await writer.end();

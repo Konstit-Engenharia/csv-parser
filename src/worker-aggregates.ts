@@ -10,6 +10,7 @@ import type {
   CsvApiFileOptions,
   CsvColumns,
   CsvEncoding,
+  CsvParallelAggregateOptions,
   CsvShard,
 } from './types.ts';
 
@@ -93,7 +94,7 @@ interface WorkerExecutionOptions {
 export async function parallelGroupByCount(
   path: string,
   column: number,
-  options: CsvApiFileOptions = {},
+  options: CsvParallelAggregateOptions,
 ): Promise<NativeCsvGroupByCountBatch> {
   const shards = workerShards(path, options);
   if (shards.length === 0) {
@@ -115,7 +116,7 @@ export async function parallelGroupByCount(
 export async function parallelColumnStats(
   path: string,
   column: number,
-  options: CsvApiFileOptions = {},
+  options: CsvParallelAggregateOptions,
 ): Promise<NativeCsvColumnStatsBatch> {
   const shards = workerShards(path, options);
   if (shards.length === 0) {
@@ -138,20 +139,22 @@ export async function parallelColumnStats(
 export async function parallelMultiColumnStats(
   path: string,
   columns: CsvColumns,
-  options: CsvApiFileOptions = {},
+  options: CsvParallelAggregateOptions,
 ): Promise<NativeCsvColumnStatsBatch[]> {
   if (columns.length === 0) {
     return [];
   }
   const shards = workerShards(path, options);
   if (shards.length === 0) {
-    return columns.map((column) => createNativeCsvColumnStatsBatch({
-      column,
-      counts: new BigUint64Array(0),
-      dictionaryData: new Uint8Array(0),
-      dictionaryOffsets: new Uint32Array([0]),
-      ids: new Uint32Array(0),
-    }));
+    return columns.map((column) =>
+      createNativeCsvColumnStatsBatch({
+        column,
+        counts: new BigUint64Array(0),
+        dictionaryData: new Uint8Array(0),
+        dictionaryOffsets: new Uint32Array([0]),
+        ids: new Uint32Array(0),
+      })
+    );
   }
   const workers = createAggregateWorkers(shards.length);
   try {
@@ -239,8 +242,7 @@ export async function runMultiColumnStatsWithWorkers(
 
   const batches: NativeCsvColumnStatsBatch[] = [];
   batches.length = columns.length;
-  for (let columnIndex = 0; columnIndex < columns.length; ++columnIndex) {
-    const column = columns[columnIndex]!;
+  for (const [columnIndex, column,] of columns.entries()) {
     const shardPayloads = results.map((result) => {
       const payload = result.results[columnIndex];
       if (payload === undefined) {
@@ -262,10 +264,11 @@ function workerShards(path: string, options: CsvApiFileOptions): CsvShard[] {
 }
 
 function createAggregateWorkers(count: number): Worker[] {
-  return Array.from({ length: count }, () => new Worker(new URL('./workers/aggregates.worker.ts', import.meta.url).href, {
-    preload: [],
-    type: 'module',
-  }));
+  return Array.from({ length: count }, () =>
+    new Worker(new URL('./workers/aggregates.worker.ts', import.meta.url).href, {
+      preload: [],
+      type: 'module',
+    }));
 }
 
 function terminateWorkers(workers: readonly Worker[]): void {
@@ -331,7 +334,12 @@ async function runWorkerJob<TDone extends WorkerAggregateDoneMessage>(
         worker.onerror = (event) => {
           fail(event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`));
         };
-        worker.postMessage(makeMessage(shards[shardIndex]!, shardIndex));
+        const shard = shards[shardIndex];
+        if (shard === undefined) {
+          fail(new Error(`missing shard ${String(shardIndex)}`));
+          return;
+        }
+        worker.postMessage(makeMessage(shard, shardIndex));
       });
     });
   } finally {
@@ -458,6 +466,6 @@ function toBigUint64Array(values: readonly bigint[]): BigUint64Array {
 
 function rejectWorkerAggregatesUnsupported(options: CsvApiFileOptions, name: string): void {
   if (options.strict === true) {
-    throw new Error(`parallel ${name} does not support strict CSV validation`);
+    throw new Error(`parallel ${name} does not support strict CSV validation; use the single-thread ${name} API for strict schema checks`);
   }
 }

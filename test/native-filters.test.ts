@@ -107,9 +107,11 @@ describe('NativeCsvParser native filters', () => {
           batch.close();
         }
 
-        expect(rows).toEqual(selectedColumns.length === 2
-          ? [['a', 'c'], ['x\nx', 'z'], ['1', '3']]
-          : [['c', 'a', 'c'], ['z', 'x\nx', 'z'], ['3', '1', '3']]);
+        expect(rows).toEqual(
+          selectedColumns.length === 2
+            ? [['a', 'c'], ['x\nx', 'z'], ['1', '3']]
+            : [['c', 'a', 'c'], ['z', 'x\nx', 'z'], ['3', '1', '3']],
+        );
       } finally {
         parser.close();
       }

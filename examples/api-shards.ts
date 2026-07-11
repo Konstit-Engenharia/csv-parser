@@ -7,10 +7,14 @@ const SHARDS = Number(Bun.env['CSV_SHARD_COUNT'] ?? 4);
 const offsets = csv.findCsvSafeSplitOffsets(FILE, SHARDS, { delimiter: DELIMITER });
 const shards = csv.findCsvSafeShards(FILE, SHARDS, { delimiter: DELIMITER });
 
-console.log(JSON.stringify({
-  delimiter: DELIMITER,
-  file: FILE,
-  offsets,
-  shardCount: SHARDS,
-  shards,
-}, null, 2));
+console.log(JSON.stringify(
+  {
+    delimiter: DELIMITER,
+    file: FILE,
+    offsets,
+    shardCount: SHARDS,
+    shards,
+  },
+  null,
+  2,
+));

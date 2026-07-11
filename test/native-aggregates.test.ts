@@ -4,13 +4,13 @@ import {
   test,
 } from 'bun:test';
 import {
-  type CsvGroupByCountEntry,
-  NativeCsvParser,
-} from '../src/index.ts';
-import {
   createNativeCsvColumnStatsBatch,
   createNativeCsvGroupByCountBatch,
 } from '../src/batches.ts';
+import {
+  type CsvGroupByCountEntry,
+  NativeCsvParser,
+} from '../src/index.ts';
 
 describe('NativeCsvParser native aggregates', () => {
   test('encodes one selected column as native dictionary ids', () => {

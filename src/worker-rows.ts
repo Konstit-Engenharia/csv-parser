@@ -1,13 +1,15 @@
+import { findCsvSafeShards } from './files.ts';
+import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import type {
   CsvApiFileOptions,
   CsvColumns,
   CsvEncoding,
   CsvFieldValue,
+  CsvParallelRowsOptions,
   CsvProjectedRow,
+  CsvStringCacheOptions,
   CsvWhereFilter,
 } from './types.ts';
-import { DEFAULT_CHUNK_SIZE } from './native.ts';
-import { findCsvSafeShards } from './files.ts';
 
 interface WorkerEqualsFilterMessage {
   column: number;
@@ -20,6 +22,7 @@ interface WorkerRowsMessage {
   encoding?: CsvEncoding;
   path: string;
   selectedColumns?: CsvColumns;
+  stringCache?: CsvStringCacheOptions;
   shard: {
     start: number;
     end: number;
@@ -45,9 +48,15 @@ interface WorkerErrorMessage {
   type: 'error';
 }
 
+/**
+ * Stream materialized rows through Bun workers.
+ *
+ * Use this when the main cost is parsing/materialization and you want explicit
+ * worker fan-out. `workerCount` is required here by design.
+ */
 export async function* parallelRows<TColumns extends CsvColumns | undefined = undefined>(
   path: string,
-  options: CsvApiFileOptions & { columns?: TColumns; } = {},
+  options: CsvParallelRowsOptions<TColumns>,
 ): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
   const workerCount = options.workerCount ?? 1;
   if (!Number.isInteger(workerCount) || workerCount <= 1) {
@@ -61,10 +70,12 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
     return;
   }
 
-  const workers = shards.map(() => new Worker(new URL('./workers/rows.worker.ts', import.meta.url).href, {
-    preload: [],
-    type: 'module',
-  }));
+  const workers = shards.map(() =>
+    new Worker(new URL('./workers/rows.worker.ts', import.meta.url).href, {
+      preload: [],
+      type: 'module',
+    })
+  );
 
   type QueueItem<T extends CsvColumns | undefined> =
     | { done: true; }
@@ -84,6 +95,11 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
 
   try {
     workers.forEach((worker, shardIndex) => {
+      const shard = shards[shardIndex];
+      if (shard === undefined) {
+        push({ error: new Error(`missing shard ${String(shardIndex)}`) });
+        return;
+      }
       worker.onmessage = (event: MessageEvent<WorkerRowsBatchMessage | WorkerDoneMessage | WorkerErrorMessage>) => {
         const message = event.data;
         if (message.type === 'rows') {
@@ -110,16 +126,19 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
         });
       };
 
-      worker.postMessage({
-        chunkSize: options.chunkSize ?? DEFAULT_CHUNK_SIZE,
-        delimiter: options.delimiter,
-        encoding: options.encoding,
-        path,
-        selectedColumns: selected,
-        shard: shards[shardIndex]!,
-        shardIndex,
-        whereEquals: whereEqualsFilter(options.where),
-      } satisfies WorkerRowsMessage);
+      worker.postMessage(
+        {
+          chunkSize: options.chunkSize ?? DEFAULT_CHUNK_SIZE,
+          delimiter: options.delimiter,
+          encoding: options.encoding,
+          path,
+          selectedColumns: selected,
+          stringCache: options.stringCache,
+          shard,
+          shardIndex,
+          whereEquals: whereEqualsFilter(options.where),
+        } satisfies WorkerRowsMessage,
+      );
     });
 
     while (true) {
@@ -130,7 +149,10 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
       }
 
       while (queue.length > 0) {
-        const item = queue.shift()!;
+        const item = queue.shift();
+        if (item === undefined) {
+          continue;
+        }
         if ('error' in item) {
           throw item.error;
         }
@@ -167,7 +189,9 @@ function ensureRowsWhereSupported(where: CsvWhereFilter | undefined): void {
   if (where === undefined || 'equals' in where) {
     return;
   }
-  throw new Error('parallel rows support only where.equals; use count() for where.in or where.startsWith');
+  throw new Error(
+    'parallel rows support only where.equals; use count() for where.in or where.startsWith, or pre-filter inside the worker consumer',
+  );
 }
 
 function whereEqualsFilter(where: CsvWhereFilter | undefined): WorkerEqualsFilterMessage | undefined {
