@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "bun-csv-parser",
+      "name": "@konstit/csv-parser",
       "devDependencies": {
         "@biomejs/biome": "2.5.1",
         "@types/bun": "1.3.14",

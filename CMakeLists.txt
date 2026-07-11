@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(bun_csv_parser LANGUAGES CXX)
+project(konstit_csv_parser LANGUAGES CXX)
 
 include(CTest)
 

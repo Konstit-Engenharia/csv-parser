@@ -1,4 +1,4 @@
-# bun-csv-parser
+# @konstit/csv-parser
 
 Bun-native CSV parser using `bun:ffi` and the shared library built from `native/csv_parser.cpp`.
 
@@ -33,7 +33,7 @@ Publication must use this verified artifact; `prepack` rejects packages missing 
 ## Quick Start
 
 ```ts
-import { csv } from 'bun-csv-parser';
+import { csv } from '@konstit/csv-parser';
 
 const path = 'example.csv';
 
@@ -57,7 +57,7 @@ In this repo, `example.csv` is semicolon-delimited. Pass `delimiter: ';'` for ex
 Import the `csv` namespace for file-oriented helpers:
 
 ```ts
-import { csv } from 'bun-csv-parser';
+import { csv } from '@konstit/csv-parser';
 
 const rows = await csv.count('data.csv', { delimiter: ';' });
 
@@ -87,7 +87,7 @@ Supported helpers:
 `csv.file(path)` builds reusable file options:
 
 ```ts
-import { csv } from 'bun-csv-parser';
+import { csv } from '@konstit/csv-parser';
 
 const query = csv
   .file('data.csv')
@@ -158,7 +158,7 @@ import {
   csv,
   defineCountOptions,
   defineRowsOptions,
-} from 'bun-csv-parser';
+} from '@konstit/csv-parser';
 
 const columns = [0, 2] as const;
 
@@ -189,7 +189,7 @@ of operation-level overrides.
 Use batches when you need low allocation row access or byte ranges.
 
 ```ts
-import { csv } from 'bun-csv-parser';
+import { csv } from '@konstit/csv-parser';
 
 await csv.withBatches(
   'data.csv',
@@ -245,7 +245,7 @@ for await (const batch of csv.batches('data.csv', { delimiter: ';' })) {
 Use `NativeCsvParser` when you already own chunking:
 
 ```ts
-import { NativeCsvParser } from 'bun-csv-parser';
+import { NativeCsvParser } from '@konstit/csv-parser';
 
 const parser = new NativeCsvParser({ delimiter: ';' });
 const rowsBuffer: string[][] = [];

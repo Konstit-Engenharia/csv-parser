@@ -13,14 +13,14 @@ if (tarball === undefined) {
   throw new Error('usage: bun scripts/test-package.ts <package.tgz>');
 }
 
-const directory = await mkdtemp(join(tmpdir(), 'bun-csv-parser-package-'));
+const directory = await mkdtemp(join(tmpdir(), 'konstit-csv-parser-package-'));
 try {
   await Bun.write(join(directory, 'package.json'), '{"private":true,"type":"module"}\n');
   run(['bun', 'add', resolve(tarball)], directory);
   run([
     'bun',
     '-e',
-    'import { csv } from \'bun-csv-parser\'; const rows = await csv.parse(Buffer.from(\'id,name\\n1,Ada\\n\')); if (rows.length !== 2 || rows[1]?.[1] !== \'Ada\') throw new Error(\'package smoke test failed\');',
+    'import { csv } from \'@konstit/csv-parser\'; const rows = await csv.parse(Buffer.from(\'id,name\\n1,Ada\\n\')); if (rows.length !== 2 || rows[1]?.[1] !== \'Ada\') throw new Error(\'package smoke test failed\');',
   ], directory);
   console.log('package import and native parse smoke passed');
 } finally {
