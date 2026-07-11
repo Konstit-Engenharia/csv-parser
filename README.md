@@ -310,3 +310,8 @@ Small correctness/performance smoke:
 bun run bench:regression-smoke
 bun run bench:csv-parser:guard
 ```
+
+## License
+
+MIT © 2026 KONSTIT ENGENHARIA E TECNOLOGIA LTDA. See [`LICENSE`](./LICENSE) and
+[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
