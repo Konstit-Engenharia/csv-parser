@@ -1,6 +1,5 @@
 # Instruções do projeto
 
-- Sempre usar a skill `caveman`.
 - Após alterações em TypeScript ou JavaScript, executar separadamente:
   - `bun run tsc`
   - `bun run lint:biome`
