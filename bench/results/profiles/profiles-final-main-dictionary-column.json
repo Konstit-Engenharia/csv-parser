@@ -1,0 +1,40 @@
+{
+  "mode": "dictionary-column",
+  "file": "example.csv",
+  "bytes": 6780467695,
+  "chunkSize": 8388608,
+  "delimiter": ";",
+  "selectedColumns": [
+    0,
+    4,
+    19
+  ],
+  "filterColumn": 19,
+  "filterValue": "SP",
+  "dictionaryColumn": 19,
+  "groupByColumn": 19,
+  "stringCacheColumns": [
+    19
+  ],
+  "rows": 29093533,
+  "seconds": 6.650221125,
+  "mibPerSecond": 972.35231316369,
+  "heapBefore": {
+    "heapSize": 1252634,
+    "heapCapacity": 2191642,
+    "extraMemorySize": 405786,
+    "objectCount": 12199,
+    "arrayCount": 50,
+    "stringCount": 1901,
+    "objectTypeCount": 152
+  },
+  "heapAfter": {
+    "heapSize": 1423615,
+    "heapCapacity": 2442527,
+    "extraMemorySize": 476431,
+    "objectCount": 12950,
+    "arrayCount": 62,
+    "stringCount": 1753,
+    "objectTypeCount": 344
+  }
+}

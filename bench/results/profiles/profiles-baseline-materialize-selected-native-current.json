@@ -1,0 +1,39 @@
+{
+  "mode": "materialize-selected-native",
+  "file": "example.csv",
+  "bytes": 6780467695,
+  "chunkSize": 8388608,
+  "delimiter": ";",
+  "selectedColumns": [
+    0,
+    4,
+    19
+  ],
+  "filterColumn": 19,
+  "filterValue": "SP",
+  "dictionaryColumn": 19,
+  "stringCacheColumns": [
+    19
+  ],
+  "rows": 29093533,
+  "seconds": 11.562305917,
+  "mibPerSecond": 559.2619621347618,
+  "heapBefore": {
+    "heapSize": 1229433,
+    "heapCapacity": 2129913,
+    "extraMemorySize": 393209,
+    "objectCount": 11984,
+    "arrayCount": 41,
+    "stringCount": 1858,
+    "objectTypeCount": 142
+  },
+  "heapAfter": {
+    "heapSize": 1484870,
+    "heapCapacity": 2535110,
+    "extraMemorySize": 536246,
+    "objectCount": 12821,
+    "arrayCount": 53,
+    "stringCount": 1723,
+    "objectTypeCount": 336
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "mode": "count",
+  "file": "example.csv",
+  "bytes": 6780467695,
+  "chunkSize": 8388608,
+  "delimiter": ";",
+  "selectedColumns": [
+    0,
+    4,
+    19
+  ],
+  "filterColumn": 19,
+  "filterValue": "SP",
+  "rows": 29093533,
+  "seconds": 6.362232875000001,
+  "mibPerSecond": 1016.3661124937659,
+  "heapBefore": {
+    "heapSize": 1200913,
+    "heapCapacity": 2104961,
+    "extraMemorySize": 384641,
+    "objectCount": 11670,
+    "arrayCount": 31,
+    "stringCount": 1805,
+    "objectTypeCount": 131
+  },
+  "heapAfter": {
+    "heapSize": 1239866,
+    "heapCapacity": 2208874,
+    "extraMemorySize": 341082,
+    "objectCount": 12258,
+    "arrayCount": 43,
+    "stringCount": 1601,
+    "objectTypeCount": 321
+  }
+}

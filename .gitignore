@@ -47,8 +47,7 @@ bower_components
 build/Release
 build/
 prebuilds/
-profiles/
-profiles-*.json
+/profiles/
 example.csv
 
 # Dependency directories

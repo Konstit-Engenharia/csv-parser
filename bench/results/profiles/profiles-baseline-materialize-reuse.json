@@ -1,0 +1,35 @@
+{
+  "mode": "materialize-reuse",
+  "file": "example.csv",
+  "bytes": 6780467695,
+  "chunkSize": 8388608,
+  "delimiter": ";",
+  "selectedColumns": [
+    0,
+    4,
+    19
+  ],
+  "filterColumn": 19,
+  "filterValue": "SP",
+  "rows": 29093533,
+  "seconds": 44.336221249999994,
+  "mibPerSecond": 145.84819616181855,
+  "heapBefore": {
+    "heapSize": 1192885,
+    "heapCapacity": 2054741,
+    "extraMemorySize": 383573,
+    "objectCount": 11558,
+    "arrayCount": 27,
+    "stringCount": 1784,
+    "objectTypeCount": 127
+  },
+  "heapAfter": {
+    "heapSize": 1679148,
+    "heapCapacity": 2701244,
+    "extraMemorySize": 368844,
+    "objectCount": 12182,
+    "arrayCount": 40,
+    "stringCount": 1608,
+    "objectTypeCount": 316
+  }
+}
