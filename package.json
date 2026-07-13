@@ -8,8 +8,14 @@
   },
   "contributors": [
     {
-      "name": "diegoalc",
-      "url": "https://www.npmjs.com/~diegoalc"
+      "name": "Diego Alcântara",
+      "url": "https://github.com/dgoalcantara",
+      "email": "diego.alcantara@konstit.com.br"
+    },
+    {
+      "name": "Marcelo Marchioro",
+      "url": "https://github.com/Sprayscelo",
+      "email": "marcelo.marchioro@konstit.com.br"
     }
   ],
   "license": "MIT",
