@@ -1,9 +1,9 @@
-# Instruções do projeto
+# Project instructions
 
-- Após alterações em TypeScript ou JavaScript, executar separadamente:
+- After TypeScript or JavaScript changes, run separately:
   - `bun run tsc`
   - `bun run lint:biome`
   - `bun run lint:oxlint`
-- Não considerar `bun run lint` evidência suficiente no relatório final: informar explicitamente o resultado de Biome e Oxlint.
-- Não declarar lint limpo quando algum comando retornar erro. Informar também warnings restantes.
-- Antes de concluir mudanças de código, executar `bunx dprint check` e os testes relevantes.
+- Do not consider `bun run lint` sufficient evidence in the final report: explicitly report the Biome and Oxlint results.
+- Do not declare lint clean when any command returns an error. Also report any remaining warnings.
+- Before completing code changes, run `bunx dprint check` and the relevant tests.
