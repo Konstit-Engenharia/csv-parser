@@ -39,10 +39,9 @@
     "stage:native": "bun scripts/stage-native.ts",
     "verify:native-package": "bun scripts/verify-native-package.ts",
     "prepack": "bun run verify:native-package",
-    "test": "bun test",
     "test:native": "bun run build:native && bun scripts/test-native.ts",
     "test:native:sanitize": "bun scripts/test-native-sanitizers.ts",
-    "bench": "bun run build:native && bun bench/csv.bench.ts",
+    "bench:native-csv-parser": "bun run build:native && bun bench/csv.bench.ts",
     "bench:csv-parser:example": "bun run build:native && bun bench/csv-parser/example-file.bench.ts",
     "bench:csv-parser:worker-materialize": "bun run build:native && bun bench/csv-parser/example-file-worker-materialize.bench.ts",
     "bench:csv-parser:guard": "bun run build:native && bun bench/csv-parser/regression-guard.ts",
@@ -86,7 +85,8 @@
     "lint:oxlint": "bunx oxlint --type-aware",
     "lint": "bun run tsc && bun run lint:biome && bun run lint:oxlint",
     "fmt": "bunx dprint fmt",
-    "fmt:native": "find native bench test -type f -name '*.cpp' -print0 | xargs -0 clang-format -i"
+    "fmt:native": "find native bench test -type f -name '*.cpp' -print0 | xargs -0 clang-format -i",
+    "bench": "bun run scripts/bench.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.3",
