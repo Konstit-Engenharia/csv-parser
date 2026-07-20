@@ -1,5 +1,11 @@
 # Engineering Guidelines
 
+## Native Code (C++)
+
+- Assume clang as the default and only supported compiler.
+- Use C++20 as the default standard.
+- Use cmake as the default build system.
+
 ## Interpretation
 
 - Security and correctness take precedence over minimizing diff size or preserving a flawed convention.
