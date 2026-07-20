@@ -5,6 +5,9 @@
 - Assume clang as the default and only supported compiler.
 - Use C++20 as the default standard.
 - Use cmake as the default build system.
+- Assume little-endian (x86-64, aarch64) architectures.
+- Assume AVX2 and NEON instruction sets are available.
+- Do not use x86-32 or other legacy architectures.
 
 ## Interpretation
 
