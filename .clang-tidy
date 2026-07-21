@@ -24,7 +24,6 @@ Checks: >
   modernize-replace-auto-ptr,
   modernize-replace-disallow-copy-and-assign-macro,
   modernize-return-braced-init-list,
-  modernize-use-auto,
   modernize-use-bool-literals,
   modernize-use-equals-default,
   modernize-use-emplace,
