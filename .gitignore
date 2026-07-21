@@ -6,6 +6,10 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
+
+.DS_Store
+.codegraph/
+
 # database
 *.sqlite
 
