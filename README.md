@@ -6,13 +6,15 @@ Use it when large CSV files need streaming rows, selected columns, simple filter
 
 ## Setup
 
-Packaged release artifacts include native libraries for macOS 13+ ARM64/x64 and Linux x64. No compiler is needed for these targets.
+The repository and packaged release artifacts include native libraries for macOS 13+ ARM64/x64 and Linux x64. After
+`bun install`, a fresh clone can run the Bun API, examples, and tests without compiling native code.
 
-For repository development:
+To rebuild the native libraries while developing C++ code:
 
 ```sh
 bun install
 bun run build:native
+bun run stage:native
 ```
 
 Native development requires CMake 3.25+, Ninja, Git, and Clang/AppleClang. CMake downloads pinned Highway and

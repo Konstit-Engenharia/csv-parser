@@ -8,9 +8,13 @@ jobs:
     name: Native ${{ matrix.os }}
     strategy:
       matrix:
-        os:
-          - macos-latest
-          - ubuntu-latest
+        include:
+          - os: macos-latest
+            artifact_paths: |
+              prebuilds/darwin-arm64
+              prebuilds/darwin-x64
+          - os: ubuntu-latest
+            artifact_paths: prebuilds/linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +42,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ runner.os }}
-          path: prebuilds
+          path: ${{ matrix.artifact_paths }}
           if-no-files-found: error
 
   package:
