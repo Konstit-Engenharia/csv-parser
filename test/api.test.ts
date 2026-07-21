@@ -58,11 +58,11 @@ describe('csv high-level API', () => {
     const rows: string[][] = [];
 
     for await (
-      const batch of csv.file(path)
-        .delimiter(';')
-        .select([0, 2] as const)
-        .stringCache([2])
-        .rows()
+      const batch of csv.rows(path, {
+        columns: [0, 2] as const,
+        delimiter: ';',
+        stringCache: { columns: [2] },
+      })
     ) {
       rows.push(...batch);
     }
@@ -75,18 +75,17 @@ describe('csv high-level API', () => {
     ]);
   });
 
-  test('keeps builder immutable across divergent chains', async () => {
+  test('reuses base options across operations', async () => {
     const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Bia";"RJ"\n');
-    const base = csv.file(path).delimiter(';');
-    const selected = base.select([0, 2] as const);
+    const base = { delimiter: ';' } as const;
     const baseRows: string[][] = [];
     const selectedRows: string[][] = [];
 
-    for await (const batch of base.rows()) {
+    for await (const batch of csv.rows(path, base)) {
       baseRows.push(...batch);
     }
 
-    for await (const batch of selected.rows()) {
+    for await (const batch of csv.rows(path, { ...base, columns: [0, 2] as const })) {
       selectedRows.push(...batch);
     }
 
@@ -102,24 +101,9 @@ describe('csv high-level API', () => {
     ]);
   });
 
-  test('replaces column aliases without leaving conflicting builder state', async () => {
-    const path = await writeFixture('id,name,uf\n1,Ada,SP\n');
-    const builder = csv.file(path, { selectedColumns: [0, 2] as const }).select([1] as const);
-    const rows: string[][] = [];
-
-    for await (const batch of builder.rows()) {
-      rows.push(...batch);
-    }
-
-    expect(rows).toEqual([
-      ['name'],
-      ['Ada'],
-    ]);
-  });
-
-  test('rejects invalid worker counts at builder configuration time', () => {
-    expect(() => csv.file('unused.csv').workers(1)).toThrow('workers requires workerCount > 1: 1');
-    expect(() => csv.file('unused.csv').workers(1.5)).toThrow('workers requires workerCount > 1: 1.5');
+  test('rejects invalid worker pool sizes at configuration time', () => {
+    expect(() => csv.workerPool('unused.csv', { workerCount: 1 })).toThrow('worker pool requires workerCount > 1: 1');
+    expect(() => csv.workerPool('unused.csv', { workerCount: 1.5 })).toThrow('worker pool requires workerCount > 1: 1.5');
   });
 
   test('rejects invalid projections before parsing or starting workers', async () => {
@@ -138,10 +122,13 @@ describe('csv high-level API', () => {
     expect(workerError).toBeInstanceOf(RangeError);
     expect((workerError as Error).message).toContain('selected column out of range: 2025');
 
-    const filterError = await rejectedError(csv.file(path).workers(2).whereEquals(2025, 'a').count());
+    const filterError = await rejectedError(csv.count(path, {
+      workerCount: 2,
+      where: { column: 2025, equals: 'a' },
+    }));
     expect(filterError.message).toContain('filter column out of range: 2025');
 
-    const aggregateError = await rejectedError(csv.file(path).workers(2).groupByCount(2025));
+    const aggregateError = await rejectedError(csv.groupByCount(path, 2025, { workerCount: 2 }));
     expect(aggregateError.message).toContain('groupBy count column out of range: 2025');
   });
 
@@ -150,11 +137,11 @@ describe('csv high-level API', () => {
     const rows: string[][] = [];
 
     for await (
-      const batch of csv.file(path)
-        .delimiter(';')
-        .select([0, 2] as const)
-        .workers(2)
-        .rows()
+      const batch of csv.rows(path, {
+        columns: [0, 2] as const,
+        delimiter: ';',
+        workerCount: 2,
+      })
     ) {
       rows.push(...batch);
     }
@@ -173,12 +160,12 @@ describe('csv high-level API', () => {
     const rows: string[][] = [];
 
     for await (
-      const batch of csv.file(path)
-        .delimiter(';')
-        .select([0, 1] as const)
-        .whereEquals(2, 'SP')
-        .workers(2)
-        .rows()
+      const batch of csv.rows(path, {
+        columns: [0, 1] as const,
+        delimiter: ';',
+        workerCount: 2,
+        where: { column: 2, equals: 'SP' },
+      })
     ) {
       rows.push(...batch);
     }
@@ -194,12 +181,12 @@ describe('csv high-level API', () => {
     const rows: string[][] = [];
 
     for await (
-      const batch of csv.file(path)
-        .delimiter(';')
-        .select([0, 2] as const)
-        .stringCache([2])
-        .workers(2)
-        .rows()
+      const batch of csv.rows(path, {
+        columns: [0, 2] as const,
+        delimiter: ';',
+        stringCache: { columns: [2] },
+        workerCount: 2,
+      })
     ) {
       rows.push(...batch);
     }
@@ -212,27 +199,27 @@ describe('csv high-level API', () => {
     ]);
   });
 
-  test('counts rows with fluent filters and trusted fixed-column shortcut', async () => {
+  test('counts rows with filters and trusted fixed-column shortcut', async () => {
     const path = await writeFixture('id;name;uf\n1;Ana;SP\n2;Joao;RJ\n3;Bia;SP\n');
 
-    expect(await csv.file(path).delimiter(';').trustedFixedColumns(3).count()).toBe(4);
-    expect(await csv.file(path).delimiter(';').whereEquals(2, 'SP').count()).toBe(2);
-    expect(await csv.file(path).delimiter(';').whereIn(2, ['SP', 'RJ']).count()).toBe(3);
-    expect(await csv.file(path).delimiter(';').whereStartsWith(1, 'A').count()).toBe(1);
+    expect(await csv.count(path, { delimiter: ';', trustedFixedColumns: 3 })).toBe(4);
+    expect(await csv.count(path, { delimiter: ';', where: { column: 2, equals: 'SP' } })).toBe(2);
+    expect(await csv.count(path, { delimiter: ';', where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
+    expect(await csv.count(path, { delimiter: ';', where: { column: 1, startsWith: 'A' } })).toBe(1);
   });
 
   test('counts rows through workers with native shard splitting', async () => {
     const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"S\nP"\n"4";"Caio";"SP"\n');
 
-    expect(await csv.file(path).delimiter(';').workers(2).count()).toBe(5);
-    expect(await csv.file(path).delimiter(';').workers(2).whereEquals(2, 'SP').count()).toBe(2);
-    expect(await csv.file(path).delimiter(';').workers(2).whereIn(2, ['SP', 'RJ']).count()).toBe(3);
-    expect(await csv.file(path).delimiter(';').workers(2).whereStartsWith(1, 'A').count()).toBe(1);
+    expect(await csv.count(path, { delimiter: ';', workerCount: 2 })).toBe(5);
+    expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, equals: 'SP' } })).toBe(2);
+    expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
+    expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 1, startsWith: 'A' } })).toBe(1);
   });
 
   test('aggregates groupBy count through workers with shard-safe splitting', async () => {
     const path = await writeFixture('"id";"uf"\n"1";"SP"\n"2";"RJ"\n"3";"S\nP"\n"4";"SP"\n');
-    const batch = await csv.file(path).delimiter(';').workers(2).groupByCount(1);
+    const batch = await csv.groupByCount(path, 1, { delimiter: ';', workerCount: 2 });
     try {
       expect(batch.rowCount).toBe(5);
       expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
@@ -250,7 +237,7 @@ describe('csv high-level API', () => {
 
   test('aggregates column stats through workers preserving row order', async () => {
     const path = await writeFixture('"id";"uf"\n"1";"SP"\n"2";"RJ"\n"3";"S\nP"\n"4";"SP"\n');
-    const batch = await csv.file(path).delimiter(';').workers(2).columnStats(1);
+    const batch = await csv.columnStats(path, 1, { delimiter: ';', workerCount: 2 });
     try {
       expect(batch.rowCount).toBe(5);
       expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
@@ -269,7 +256,7 @@ describe('csv high-level API', () => {
 
   test('aggregates multi-column stats through workers', async () => {
     const path = await writeFixture('"id";"uf";"kind"\n"1";"SP";"A"\n"2";"RJ";"B"\n"3";"SP";"A"\n');
-    const batches = await csv.file(path).delimiter(';').workers(2).multiColumnStats([1, 2]);
+    const batches = await csv.multiColumnStats(path, [1, 2], { delimiter: ';', workerCount: 2 });
     try {
       expect(batches.map((batch) => batch.column)).toEqual([1, 2]);
       expect(batches[0]?.entries()).toEqual([
@@ -291,11 +278,11 @@ describe('csv high-level API', () => {
 
   test('reuses worker pool across repeated count and rows calls', async () => {
     const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n');
-    using pool = csv.file(path)
-      .delimiter(';')
-      .workers(2)
-      .select([0, 1] as const)
-      .pool();
+    using pool = csv.workerPool(path, {
+      columns: [0, 1] as const,
+      delimiter: ';',
+      workerCount: 2,
+    });
 
     expect(await pool.count()).toBe(4);
     expect(await pool.count()).toBe(4);
@@ -321,7 +308,7 @@ describe('csv high-level API', () => {
 
   test('reuses worker pool across aggregate calls', async () => {
     const path = await writeFixture('"id";"uf";"kind"\n"1";"SP";"A"\n"2";"RJ";"B"\n"3";"SP";"A"\n');
-    using pool = csv.file(path).delimiter(';').workers(2).pool();
+    using pool = csv.workerPool(path, { delimiter: ';', workerCount: 2 });
 
     const groupA = await pool.groupByCount(1);
     const groupB = await pool.groupByCount(1);
@@ -363,7 +350,7 @@ describe('csv high-level API', () => {
     }
   });
 
-  test('runs safe row view callbacks through builder and top-level alias', async () => {
+  test('runs safe row view callbacks through both aliases', async () => {
     const path = await writeFixture('1;Ana;SP\n2;Joao;RJ\n');
     const seen: string[][] = [];
     const aliasSeen: string[][] = [];
@@ -371,7 +358,7 @@ describe('csv high-level API', () => {
     let firstRowView: unknown;
     let escapedRowView: Parameters<Parameters<typeof csv.withRowViews>[2]>[0] | undefined;
 
-    await csv.file(path).delimiter(';').forEachRowViews((row, rowIndex) => {
+    await csv.forEachRowViews(path, { delimiter: ';' }, (row, rowIndex) => {
       if (rowIndex === 0) {
         firstRowView = row;
       } else {
@@ -408,7 +395,7 @@ describe('csv high-level API', () => {
     const seen: string[] = [];
     const selectedColumnsSeen: Array<readonly number[] | undefined> = [];
 
-    await csv.file(path).delimiter(';').select([0, 2] as const).withRowViews((row) => {
+    await csv.withRowViews(path, { columns: [0, 2] as const, delimiter: ';' }, (row) => {
       selectedColumnsSeen.push(row.selectedColumns);
       seen.push(`${row.get(0)}|${row.get(2)}`);
     });
@@ -433,7 +420,7 @@ describe('csv high-level API', () => {
     const partial: string[] = [];
     let retained: unknown;
 
-    await csv.file(path).delimiter(';').select([0, 2] as const).withColumnarBatches((batch) => {
+    await csv.withColumnarBatches(path, { columns: [0, 2] as const, delimiter: ';' }, (batch) => {
       retained = batch;
       expect(batch.selectedColumns).toEqual([0, 2]);
       expect(batch.rowCount).toBeGreaterThan(0);
@@ -491,13 +478,14 @@ describe('csv high-level API', () => {
 
   test('keeps unsupported row filters explicit', async () => {
     const path = await writeFixture('1;Ana;SP\n');
-    const invalidRowsBuilder = csv.file(path).delimiter(';').whereIn(2, ['SP']) as unknown as {
-      rows(): AsyncGenerator<string[][], void>;
-    };
+    const invalidOptions = {
+      delimiter: ';',
+      where: { column: 2, in: ['SP'] },
+    } as unknown as CsvRowsOptions;
 
     let error: unknown;
     try {
-      for await (const _rows of invalidRowsBuilder.rows()) {
+      for await (const _rows of csv.rows(path, invalidOptions)) {
         throw new Error('unreachable');
       }
     } catch (caught) {
@@ -510,16 +498,20 @@ describe('csv high-level API', () => {
 
   test('keeps unsupported worker row modes explicit', async () => {
     const path = await writeFixture('1;Ana;SP\n');
-    const invalidWorkerWhereBuilder = csv.file(path).delimiter(';').whereIn(2, ['SP']).workers(2) as unknown as {
-      rows(): AsyncGenerator<string[][], void>;
-    };
-    const invalidStrictBuilder = csv.file(path).delimiter(';').strict().workers(2) as unknown as {
-      rows(): AsyncGenerator<string[][], void>;
-    };
+    const invalidWorkerWhereOptions = {
+      delimiter: ';',
+      workerCount: 2,
+      where: { column: 2, in: ['SP'] },
+    } as unknown as CsvRowsOptions;
+    const invalidStrictOptions = {
+      delimiter: ';',
+      strict: true,
+      workerCount: 2,
+    } as unknown as CsvRowsOptions;
 
     let strictError: unknown;
     try {
-      for await (const _rows of invalidStrictBuilder.rows()) {
+      for await (const _rows of csv.rows(path, invalidStrictOptions)) {
         throw new Error('unreachable');
       }
     } catch (caught) {
@@ -530,7 +522,7 @@ describe('csv high-level API', () => {
 
     let whereInError: unknown;
     try {
-      for await (const _rows of invalidWorkerWhereBuilder.rows()) {
+      for await (const _rows of csv.rows(path, invalidWorkerWhereOptions)) {
         throw new Error('unreachable');
       }
     } catch (caught) {
@@ -542,12 +534,10 @@ describe('csv high-level API', () => {
 
   test('keeps row view callback limits explicit', async () => {
     const path = await writeFixture('1;Ana;SP\n');
-    const invalidRowViewsBuilder = csv.file(path).delimiter(';').workers(2) as unknown as {
-      forEachRowViews(callback: () => void): Promise<void>;
-    };
+    const invalidOptions = { delimiter: ';', workerCount: 2 } as unknown as Parameters<typeof csv.forEachRowViews>[1];
 
     const workerError = await rejectedError(
-      invalidRowViewsBuilder.forEachRowViews(() => {
+      csv.forEachRowViews(path, invalidOptions, () => {
       }),
     );
     expect(workerError.message).toContain('row view callbacks do not support workerCount');
@@ -563,13 +553,11 @@ describe('csv high-level API', () => {
 
   test('keeps unsupported worker count modes explicit', async () => {
     const path = await writeFixture('1;Ana;SP\n');
-    const invalidCountBuilder = csv.file(path).delimiter(';').strict().workers(2) as unknown as {
-      count(): Promise<number>;
-    };
+    const invalidOptions = { delimiter: ';', strict: true, workerCount: 2 } as unknown as CsvCountOptions;
 
     let strictError: unknown;
     try {
-      await invalidCountBuilder.count();
+      await csv.count(path, invalidOptions);
     } catch (caught) {
       strictError = caught;
     }
@@ -579,13 +567,13 @@ describe('csv high-level API', () => {
 
   test('keeps unsupported worker aggregate modes explicit', async () => {
     const path = await writeFixture('1;Ana;SP\n');
-    const invalidGroupByBuilder = csv.file(path).delimiter(';').strict().workers(2) as unknown as {
-      groupByCount(column: number): Promise<unknown>;
-    };
+    const invalidOptions = { delimiter: ';', strict: true, workerCount: 2 } as unknown as Parameters<
+      typeof csv.groupByCount
+    >[2];
 
     let strictGroupByError: unknown;
     try {
-      await invalidGroupByBuilder.groupByCount(2);
+      await csv.groupByCount(path, 2, invalidOptions);
     } catch (caught) {
       strictGroupByError = caught;
     }
@@ -595,7 +583,7 @@ describe('csv high-level API', () => {
 
   test('rejects use after worker pool close', async () => {
     const path = await writeFixture('id;name\n1;Ana\n');
-    const pool = csv.file(path).delimiter(';').workers(2).pool();
+    const pool = csv.workerPool(path, { delimiter: ';', workerCount: 2 });
     pool.close();
 
     const error = await rejectedError(pool.count());
@@ -618,12 +606,12 @@ describe('csv high-level API', () => {
     const rows: string[][] = [];
 
     for await (
-      const batch of csv.file(path)
-        .delimiter(';')
-        .strict()
-        .expectedHeaders(['id', 'name', 'uf'])
-        .minDataRows(1)
-        .rows()
+      const batch of csv.rows(path, {
+        delimiter: ';',
+        expectedHeaders: ['id', 'name', 'uf'],
+        minDataRows: 1,
+        strict: true,
+      })
     ) {
       rows.push(...batch);
     }
@@ -639,7 +627,13 @@ describe('csv high-level API', () => {
 
     let error: unknown;
     try {
-      for await (const _rows of csv.file(path).delimiter(';').strict().expectedHeaders(['id', 'name', 'uf']).rows()) {
+      for await (
+        const _rows of csv.rows(path, {
+          delimiter: ';',
+          expectedHeaders: ['id', 'name', 'uf'],
+          strict: true,
+        })
+      ) {
         throw new Error('unreachable');
       }
     } catch (caught) {

@@ -133,13 +133,13 @@ describe('NativeCsvParser file streams', () => {
     try {
       const offsets = findCsvSafeSplitOffsets(path, 3, { delimiter: ';' });
       const shards = findCsvSafeShards(path, 3, { delimiter: ';' });
-      const builderOffsets = csv.file(path).delimiter(';').splitOffsets(3);
-      const builderShards = csv.file(path).delimiter(';').shards(3);
+      const namespaceOffsets = csv.findCsvSafeSplitOffsets(path, 3, { delimiter: ';' });
+      const namespaceShards = csv.findCsvSafeShards(path, 3, { delimiter: ';' });
 
       expect(offsets[0]).toBe(0);
       expect(offsets[offsets.length - 1]).toBe((await Bun.file(path).arrayBuffer()).byteLength);
-      expect(offsets).toEqual(builderOffsets);
-      expect(shards).toEqual(builderShards);
+      expect(offsets).toEqual(namespaceOffsets);
+      expect(shards).toEqual(namespaceShards);
       expect(shards.length).toBeGreaterThan(0);
       for (const shard of shards) {
         expect(shard.end).toBeGreaterThanOrEqual(shard.start);

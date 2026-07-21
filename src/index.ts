@@ -10,6 +10,7 @@ export type {
   CsvColumns,
   CsvColumnSelection,
   CsvCountOptions,
+  CsvDelimiter,
   CsvDictionaryOptions,
   CsvEncoding,
   CsvEqualsFilter,
@@ -48,7 +49,6 @@ export type {
 export {
   columnStats,
   csv,
-  CsvFileBuilder,
   CsvWorkerPool,
   findCsvSafeShards,
   findCsvSafeSplitOffsets,

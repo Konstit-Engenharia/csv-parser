@@ -105,11 +105,11 @@ async function materializeSingleThread(): Promise<{ cells: number; chars: number
 }
 
 async function materializeWorkers(): Promise<{ cells: number; chars: number; rows: number; }> {
-  using pool = csv.file(FILE)
-    .delimiter(DELIMITER)
-    .chunkSize(CHUNK_SIZE)
-    .workers(WORKERS)
-    .pool();
+  using pool = csv.workerPool(FILE, {
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+    workerCount: WORKERS,
+  });
 
   let rows = 0;
   let cells = 0;

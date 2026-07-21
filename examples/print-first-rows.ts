@@ -6,8 +6,8 @@ import { NativeCsvParser } from '../src/index.ts';
  * Compare the low-level native streaming API with the `csv-parser` package.
  *
  * This example intentionally drives `NativeCsvParser` directly. Most callers
- * should prefer `csv.rows()` or the fluent builder, which manage file reads,
- * parser finalization, and native batch cleanup automatically.
+ * should prefer `csv.rows()`, which manages file reads, parser finalization,
+ * and native batch cleanup automatically.
  */
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
 // The stream chunk size controls I/O granularity. Neither parser assumes that a

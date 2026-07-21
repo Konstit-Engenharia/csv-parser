@@ -51,10 +51,10 @@ const workerMulti = await runBenchCase('workers multiColumnStats', runWorkerMult
 validateMulti(serialMulti, workerMulti);
 
 async function runSerialGroupByCount(): Promise<GroupByBenchResult> {
-  const batch = await csv.file(FILE)
-    .delimiter(DELIMITER)
-    .chunkSize(CHUNK_SIZE)
-    .groupByCount(GROUP_BY_COLUMN);
+  const batch = await csv.groupByCount(FILE, GROUP_BY_COLUMN, {
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+  });
   try {
     return summarizeEntries(batch.rowCount, batch.entries());
   } finally {
@@ -63,11 +63,11 @@ async function runSerialGroupByCount(): Promise<GroupByBenchResult> {
 }
 
 async function runWorkerGroupByCount(): Promise<GroupByBenchResult> {
-  const batch = await csv.file(FILE)
-    .delimiter(DELIMITER)
-    .chunkSize(CHUNK_SIZE)
-    .workers(WORKERS)
-    .groupByCount(GROUP_BY_COLUMN);
+  const batch = await csv.groupByCount(FILE, GROUP_BY_COLUMN, {
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+    workerCount: WORKERS,
+  });
   try {
     return summarizeEntries(batch.rowCount, batch.entries());
   } finally {
@@ -76,10 +76,10 @@ async function runWorkerGroupByCount(): Promise<GroupByBenchResult> {
 }
 
 async function runSerialMultiColumnStats(): Promise<MultiColumnBenchResult> {
-  const batches = await csv.file(FILE)
-    .delimiter(DELIMITER)
-    .chunkSize(CHUNK_SIZE)
-    .multiColumnStats(MULTI_COLUMNS);
+  const batches = await csv.multiColumnStats(FILE, MULTI_COLUMNS, {
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+  });
   try {
     return summarizeMultiColumn(
       batches.map((batch, index) => ({
@@ -96,11 +96,11 @@ async function runSerialMultiColumnStats(): Promise<MultiColumnBenchResult> {
 }
 
 async function runWorkerMultiColumnStats(): Promise<MultiColumnBenchResult> {
-  const batches = await csv.file(FILE)
-    .delimiter(DELIMITER)
-    .chunkSize(CHUNK_SIZE)
-    .workers(WORKERS)
-    .multiColumnStats(MULTI_COLUMNS);
+  const batches = await csv.multiColumnStats(FILE, MULTI_COLUMNS, {
+    chunkSize: CHUNK_SIZE,
+    delimiter: DELIMITER,
+    workerCount: WORKERS,
+  });
   try {
     return summarizeMultiColumn(
       batches.map((batch, index) => ({

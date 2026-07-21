@@ -18,19 +18,15 @@ import {
  */
 const WORKERS = Number(Bun.env['CSV_WORKERS'] ?? 4);
 
-const baseQuery = csv
-  .file(FILE)
-  .delimiter(DELIMITER)
-  .chunkSize(CHUNK_SIZE)
-  .workers(WORKERS)
-  .select(COLUMNS);
-
-// Worker-row filtering currently supports equality. Calling `rows()` in each
-// branch preserves the builder's precise type state. The physical filter column
+// Worker-row filtering currently supports equality. The physical filter column
 // does not have to appear in the selected output columns.
-const rowBatches = FILTER_VALUE === undefined
-  ? baseQuery.rows()
-  : baseQuery.whereEquals(FILTER_COLUMN, FILTER_VALUE).rows();
+const rowBatches = csv.rows(FILE, {
+  chunkSize: CHUNK_SIZE,
+  columns: COLUMNS,
+  delimiter: DELIMITER,
+  workerCount: WORKERS,
+  where: FILTER_VALUE === undefined ? undefined : { column: FILTER_COLUMN, equals: FILTER_VALUE },
+});
 
 let printed = 0;
 // Worker messages already contain materialized strings; the main thread does

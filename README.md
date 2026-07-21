@@ -95,46 +95,15 @@ Supported helpers:
 - `csv.groupByCount(path, column, options)` returns grouped counts for one column.
 - `csv.columnStats(path, column, options)` returns dictionary/count stats for one column.
 - `csv.multiColumnStats(path, columns, options)` returns stats for multiple columns.
+- `csv.withRowViews(path, options, callback)` streams reusable row views with managed lifetimes.
+- `csv.withColumnarBatches(path, options, callback)` streams reusable columnar batch views.
+- `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
+- `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
 `rows()` only supports `where.equals`. Use `count()` for `where.in` and `where.startsWith`.
 
-## Fluent File API
-
-`csv.file(path)` builds reusable file options:
-
-```ts
-import { csv } from '@konstit/csv-parser';
-
-const query = csv
-  .file('data.csv')
-  .delimiter(';')
-  .chunkSize(8 * 1024 * 1024)
-  .select([0, 1])
-  .whereEquals(2, 'SP');
-
-console.log(await query.count());
-
-for await (const rows of query.rows()) {
-  console.log(rows);
-}
-```
-
-Useful builder methods:
-
-- `delimiter(value)`
-- `encoding('utf8' | 'latin1' | 'iso88591' | 'iso-8859-1')`
-- `chunkSize(bytes)`
-- `strict()`
-- `select(columns)`
-- `fixedColumns(count)`
-- `trustedFixedColumns(count)`
-- `expectedHeaders(headers)`
-- `requireHeader()`
-- `minDataRows(count)`
-- `whereEquals(column, value)`
-- `whereIn(column, values)`
-- `whereStartsWith(column, prefix)`
-- `rows()`, `batches()`, `withBatches()`, `count()`, `dictionary()`, `groupByCount()`, `columnStats()`, `multiColumnStats()`
+`delimiter` suggests common CSV delimiters in TypeScript while accepting any string. Runtime parsing still requires
+exactly one character.
 
 `trustedFixedColumns(count)` enables the fastest fixed-column path for trusted input with no newlines in quoted fields.
 
@@ -196,9 +165,8 @@ console.log(await csv.count('data.csv', countOptions));
 ```
 
 The public option types reject combinations unsupported by the native path, including strict validation with filters or
-workers. `columns` and the legacy `selectedColumns` alias are mutually exclusive. Fluent builder operations keep
-`strict`, worker, and filter state in the chain; change those through `.strict()`, `.workers()`, or `.where*()` instead
-of operation-level overrides.
+workers. `columns` and the legacy `selectedColumns` alias are mutually exclusive. Each operation accepts only the
+options supported by its native path.
 
 Column indexes are integers from `0` through `2024`. A projection may contain at most 2024 columns and must not repeat
 an index; invalid selections fail before parsing begins.
@@ -304,7 +272,6 @@ bun run example:api:rows
 bun run example:api:batches
 bun run example:api:count
 bun run example:api:aggregates
-bun run example:api:builder
 bun run example:first-rows
 ```
 

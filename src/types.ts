@@ -1,6 +1,15 @@
 import type { NativeCsvRowView } from './batches.ts';
 
 export type CsvEncoding = 'utf8' | 'latin1' | 'iso88591' | 'iso-8859-1';
+export type CsvDelimiter =
+  | ','
+  | ';'
+  | '\t'
+  | '|'
+  | ':'
+  | '^'
+  | '~'
+  | (string & {});
 export type CsvRow = string[];
 export type CsvColumns = readonly number[];
 export type CsvFieldValue = string | Buffer | Uint8Array;
@@ -17,7 +26,7 @@ export interface CsvShard {
 
 export interface CsvParserOptions {
   encoding?: CsvEncoding;
-  delimiter?: string;
+  delimiter?: CsvDelimiter;
   selectedColumns?: CsvColumns;
   fixedColumns?: number;
   strict?: boolean;

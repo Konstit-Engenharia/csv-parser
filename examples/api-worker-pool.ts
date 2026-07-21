@@ -15,12 +15,11 @@ const WORKERS = Number(Bun.env['CSV_WORKERS'] ?? 4);
 // `using` invokes `pool[Symbol.dispose]()` when this scope exits, including on
 // an exception. Disposal terminates the Bun workers and is safe to call once
 // the final awaited operation has completed.
-using pool = csv
-  .file(FILE)
-  .delimiter(DELIMITER)
-  .chunkSize(CHUNK_SIZE)
-  .workers(WORKERS)
-  .pool();
+using pool = csv.workerPool(FILE, {
+  chunkSize: CHUNK_SIZE,
+  delimiter: DELIMITER,
+  workerCount: WORKERS,
+});
 
 // The second call reuses the pool's record-safe shards and count workers. Pool
 // operations are intentionally serialized; starting another while one is busy

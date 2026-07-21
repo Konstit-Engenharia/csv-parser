@@ -2,6 +2,7 @@ import {
   csv,
   type CsvColumnarBatchOptions,
   type CsvCountOptions,
+  type CsvDelimiter,
   type CsvRowsOptions,
   type CsvRowViewsOptions,
   defineRowsOptions,
@@ -9,6 +10,14 @@ import {
 
 const path = 'example.csv';
 const columns = [0, 2] as const;
+const commonDelimiter: CsvDelimiter = ';';
+const arbitraryDelimiter: CsvDelimiter = '@';
+void commonDelimiter;
+void arbitraryDelimiter;
+
+// @ts-expect-error delimiters must be strings
+const invalidDelimiter: CsvDelimiter = 1;
+void invalidDelimiter;
 
 const projectedRowsOptions = {
   chunkSize: 64 * 1024,
