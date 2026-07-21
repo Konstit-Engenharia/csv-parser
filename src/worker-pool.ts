@@ -4,6 +4,10 @@ import type {
 } from './batches.ts';
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
+import {
+  normalizeColumns,
+  normalizeFilterColumn,
+} from './normalize.ts';
 import type {
   CsvApiFileOptions,
   CsvColumns,
@@ -115,6 +119,7 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
 
     this.#busy = true;
     try {
+      const where = normalizeCountWhere(this.#options.where);
       const shards = this.#ensureShards();
       if (shards.length === 0) {
         return 0;
@@ -154,6 +159,10 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
               return;
             }
             total += message.rows ?? 0;
+            if (!Number.isSafeInteger(total)) {
+              fail(new RangeError(`parallel row count exceeds Number.MAX_SAFE_INTEGER: ${total}`));
+              return;
+            }
             ++doneWorkers;
             if (doneWorkers === workers.length) {
               finish(total);
@@ -170,7 +179,7 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
               path: this.#path,
               shard,
               shardIndex,
-              where: normalizeCountWhere(this.#options.where),
+              where,
             } satisfies WorkerCountMessage,
           );
         });
@@ -427,7 +436,9 @@ function selectedColumns(options: CsvApiFileOptions): CsvColumns | undefined {
   if (options.columns !== undefined && options.selectedColumns !== undefined) {
     throw new Error('use columns or selectedColumns, not both');
   }
-  return options.columns ?? options.selectedColumns;
+  const columns = options.columns ?? options.selectedColumns;
+  normalizeColumns(columns);
+  return columns;
 }
 
 function rejectWorkerRowsUnsupported(options: CsvApiFileOptions): void {
@@ -445,7 +456,7 @@ function normalizeRowsWhere(where: CsvWhereFilter | undefined): WorkerEqualsFilt
     return undefined;
   }
   return {
-    column: where.column,
+    column: normalizeFilterColumn(where.column),
     value: normalizeFieldValue(where.equals),
   };
 }
@@ -457,7 +468,7 @@ function normalizeCountWhere(where: CsvWhereFilter | undefined): WorkerCountFilt
   if ('equals' in where) {
     return {
       equals: {
-        column: where.column,
+        column: normalizeFilterColumn(where.column),
         value: normalizeFieldValue(where.equals),
       },
     };
@@ -465,14 +476,14 @@ function normalizeCountWhere(where: CsvWhereFilter | undefined): WorkerCountFilt
   if ('in' in where) {
     return {
       in: {
-        column: where.column,
+        column: normalizeFilterColumn(where.column),
         values: where.in.map((value) => normalizeFieldValue(value)),
       },
     };
   }
   return {
     startsWith: {
-      column: where.column,
+      column: normalizeFilterColumn(where.column),
       prefix: normalizeFieldValue(where.startsWith),
     },
   };

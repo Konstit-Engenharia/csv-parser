@@ -6,8 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 export interface NativeBuildTarget {
   name: string;
-  osxArchitecture?: string;
-  vcpkgTriplet?: string;
+  releasePreset: string;
 }
 
 export const packagedNativeTargets = [
@@ -52,18 +51,21 @@ export function nativeBuildTargets(): NativeBuildTarget[] {
     return [
       {
         name: 'darwin-arm64',
-        osxArchitecture: 'arm64',
-        vcpkgTriplet: 'arm64-osx',
+        releasePreset: 'darwin-arm64-release',
       },
       {
         name: 'darwin-x64',
-        osxArchitecture: 'x86_64',
-        vcpkgTriplet: 'x64-osx',
+        releasePreset: 'darwin-x64-release',
       },
     ];
   }
 
-  return [{
-    name: currentNativeTargetName(),
-  }];
+  if (process.platform === 'linux' && process.arch === 'x64') {
+    return [{
+      name: 'linux-x64',
+      releasePreset: 'linux-x64-release',
+    }];
+  }
+
+  throw new Error(`unsupported native build host: ${process.platform}-${process.arch}`);
 }

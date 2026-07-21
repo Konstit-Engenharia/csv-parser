@@ -237,7 +237,7 @@ export type CsvRowViewCallback<TSelectedColumns extends CsvColumns | undefined =
 export type NativeCsvRowCallback = (row: NativeCsvRowView, rowIndex: number) => void;
 export type CsvColumnRangeCallback = (rowIndex: number, start: number, end: number) => void;
 export type CsvColumnBytesCallback = (rowIndex: number, bytes: Uint8Array) => void;
-export type CsvScanColumnsCallback = (rowIndex: number, ranges: Int32Array, data: Buffer) => void;
+export type CsvScanColumnsCallback = (rowIndex: number, ranges: Float64Array, data: Buffer) => void;
 
 export interface CsvColumnarBatchView<TSelectedColumns extends CsvColumns | undefined = undefined> {
   readonly rowCount: number;
@@ -250,8 +250,8 @@ export interface CsvColumnarBatchView<TSelectedColumns extends CsvColumns | unde
   readonly selectedColumns: TSelectedColumns;
   data(): Buffer;
   dataView(): Uint8Array;
-  rowOffsets(): Uint32Array;
-  fieldOffsets(): Uint32Array;
+  rowOffsets(): BigUint64Array;
+  fieldOffsets(): BigUint64Array;
   rowFieldCount(rowIndex: number): number;
   fieldRange(rowIndex: number, columnIndex: number): CsvFieldRange | null;
   fieldBytes(rowIndex: number, columnIndex: number): Uint8Array | null;

@@ -26,7 +26,7 @@ type WorkerRunMessage = GroupByCountWorkerRunMessage | ColumnStatsWorkerRunMessa
 interface GroupByCountBatchParts {
   counts: BigUint64Array;
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
   rowCount: number;
 }
 
@@ -34,7 +34,7 @@ interface ColumnStatsBatchParts {
   column: number;
   counts: BigUint64Array;
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
   ids: Uint32Array;
 }
 
@@ -97,7 +97,7 @@ async function runGroupByCount(message: GroupByCountWorkerRunMessage): Promise<G
         batch: {
           counts: BigUint64Array.from(batch.counts()),
           dictionaryData: Uint8Array.from(batch.dictionaryData()),
-          dictionaryOffsets: Uint32Array.from(batch.dictionaryOffsets()),
+          dictionaryOffsets: batch.dictionaryOffsets().slice(),
           rowCount: batch.rowCount,
         },
         kind: 'groupByCount',
@@ -126,7 +126,7 @@ async function runColumnStats(message: ColumnStatsWorkerRunMessage): Promise<Col
           column: message.column,
           counts: BigUint64Array.from(batch.counts()),
           dictionaryData: Uint8Array.from(batch.dictionaryData()),
-          dictionaryOffsets: Uint32Array.from(batch.dictionaryOffsets()),
+          dictionaryOffsets: batch.dictionaryOffsets().slice(),
           ids: Uint32Array.from(batch.ids()),
         },
         kind: 'columnStats',

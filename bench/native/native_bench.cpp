@@ -1,5 +1,4 @@
 #include <mitata.hpp>
-#include <vincentlaucsb-csv-parser/csv.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -63,7 +62,6 @@ constexpr uint32_t selected_columns[] = {0, 4, 19};
 constexpr uint64_t default_bytes = 256ull * 1024ull * 1024ull;
 
 std::vector<uint8_t> g_input;
-std::string g_input_path;
 volatile uint64_t g_sink = 0;
 
 [[noreturn]] void fail(const std::string &message) {
@@ -128,60 +126,6 @@ void *new_parser() {
 
 void consume(uint64_t value) {
   g_sink ^= value + 0x9e3779b97f4a7c15ull + (g_sink << 6) + (g_sink >> 2);
-}
-
-csv::CSVFormat vincent_format(bool threading) {
-  csv::CSVFormat format;
-  format.delimiter(static_cast<char>(delimiter))
-      .no_header()
-      .variable_columns(csv::VariableColumnPolicy::KEEP)
-      .threading(threading);
-  return format;
-}
-
-void bench_vincent_count_memory_with_threading(bool threading) {
-  auto format = vincent_format(threading);
-  auto reader = csv::parse_unsafe(
-      csv::string_view(reinterpret_cast<const char *>(g_input.data()),
-                       g_input.size()),
-      format);
-
-  uint64_t rows = 0;
-  uint64_t fields = 0;
-  for (auto &row : reader) {
-    ++rows;
-    fields += row.size();
-  }
-  if (rows == 0) {
-    fail("vincent csv parser returned 0 rows");
-  }
-  consume(rows);
-  consume(fields);
-}
-
-void bench_vincent_count_memory() {
-  bench_vincent_count_memory_with_threading(true);
-}
-
-void bench_vincent_count_memory_single() {
-  bench_vincent_count_memory_with_threading(false);
-}
-
-void bench_vincent_count_mmap() {
-  auto format = vincent_format(true);
-  csv::CSVReader reader(csv::string_view(g_input_path), format);
-
-  uint64_t rows = 0;
-  uint64_t fields = 0;
-  for (auto &row : reader) {
-    ++rows;
-    fields += row.size();
-  }
-  if (rows == 0) {
-    fail("vincent csv parser mmap returned 0 rows");
-  }
-  consume(rows);
-  consume(fields);
 }
 
 void bench_count() {
@@ -317,7 +261,6 @@ int main() {
       parse_u64_env("CSV_NATIVE_BENCH_BYTES", default_bytes);
   const auto filter = string_env("CSV_NATIVE_BENCH_FILTER", ".*");
   const auto format = string_env("CSV_NATIVE_BENCH_FORMAT", "mitata");
-  g_input_path = path;
   g_input = read_input(path, byte_limit);
   if (g_input.empty()) {
     fail("input is empty");
@@ -338,13 +281,6 @@ int main() {
                bench_dictionary_then_group_by);
   runner.bench("native column stats", bench_column_stats);
   runner.bench("native projected filter", bench_project_filter);
-  runner.bench("vincent row count memory", bench_vincent_count_memory);
-  runner.bench("vincent row count memory single",
-               bench_vincent_count_memory_single);
-  if (byte_limit == 0) {
-    runner.bench("vincent row count mmap", bench_vincent_count_mmap);
-  }
-
   mitata::k_run options;
   options.colors = std::getenv("NO_COLOR") == nullptr;
   options.format = format;

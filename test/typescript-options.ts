@@ -71,7 +71,11 @@ void csv.withRowViews(path, rowViewOptions, (row) => {
 
 void csv.withColumnarBatches(path, columnarBatchOptions, (batch) => {
   const selectedColumns: readonly [0, 2] = batch.selectedColumns;
+  const rowOffsets: BigUint64Array = batch.rowOffsets();
+  const fieldOffsets: BigUint64Array = batch.fieldOffsets();
   void selectedColumns;
+  void rowOffsets;
+  void fieldOffsets;
 });
 
 // @ts-expect-error strict rows stay single-threaded

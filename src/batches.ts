@@ -4,7 +4,12 @@ import {
   native,
   requirePtr,
   toArrayBuffer,
+  u64ToSafeNumber,
 } from './native.ts';
+import {
+  normalizeColumns,
+  normalizeFilterColumn,
+} from './normalize.ts';
 import type { CsvStringCache } from './string-cache.ts';
 import type {
   CsvColumnBytesCallback,
@@ -19,11 +24,11 @@ import type {
 
 export class NativeCsvRowView {
   #data: Buffer;
-  #rowOffsets: Uint32Array;
-  #fieldOffsets: Uint32Array;
+  #rowOffsets: BigUint64Array;
+  #fieldOffsets: BigUint64Array;
   #rowIndex: number;
 
-  constructor(data: Buffer, rowOffsets: Uint32Array, fieldOffsets: Uint32Array, rowIndex = 0) {
+  constructor(data: Buffer, rowOffsets: BigUint64Array, fieldOffsets: BigUint64Array, rowIndex = 0) {
     this.#data = data;
     this.#rowOffsets = rowOffsets;
     this.#fieldOffsets = fieldOffsets;
@@ -35,30 +40,18 @@ export class NativeCsvRowView {
   }
 
   get fieldCount(): number {
-    const rowStart = this.#rowOffsets[this.#rowIndex];
-    const rowEnd = this.#rowOffsets[this.#rowIndex + 1];
-    if (rowStart === undefined || rowEnd === undefined) {
-      throw new RangeError(`row index out of range: ${this.#rowIndex}`);
-    }
+    const [rowStart, rowEnd,] = this.#rowRange(this.#rowIndex);
     return rowEnd - rowStart;
   }
 
   moveTo(rowIndex: number): this {
-    const rowStart = this.#rowOffsets[rowIndex];
-    const rowEnd = this.#rowOffsets[rowIndex + 1];
-    if (rowStart === undefined || rowEnd === undefined) {
-      throw new RangeError(`row index out of range: ${rowIndex}`);
-    }
+    this.#rowRange(rowIndex);
     this.#rowIndex = rowIndex;
     return this;
   }
 
   fieldRange(columnIndex: number): CsvFieldRange | null {
-    const rowStart = this.#rowOffsets[this.#rowIndex];
-    const rowEnd = this.#rowOffsets[this.#rowIndex + 1];
-    if (rowStart === undefined || rowEnd === undefined) {
-      throw new RangeError(`row index out of range: ${this.#rowIndex}`);
-    }
+    const [rowStart, rowEnd,] = this.#rowRange(this.#rowIndex);
 
     const fieldIndex = rowStart + columnIndex;
     if (fieldIndex < rowStart || fieldIndex >= rowEnd) {
@@ -66,8 +59,8 @@ export class NativeCsvRowView {
     }
 
     return {
-      start: this.#fieldOffsets[fieldIndex] ?? 0,
-      end: this.#fieldOffsets[fieldIndex + 1] ?? 0,
+      start: offsetAt(this.#fieldOffsets, fieldIndex, 'field offset', this.#data.byteLength),
+      end: offsetAt(this.#fieldOffsets, fieldIndex + 1, 'field offset', this.#data.byteLength),
     };
   }
 
@@ -127,14 +120,24 @@ export class NativeCsvRowView {
   pick(columns: CsvColumns): string[] {
     return this.pickPhysical(columns);
   }
+
+  #rowRange(rowIndex: number): readonly [number, number] {
+    const maxFieldIndex = this.#fieldOffsets.length - 1;
+    const rowStart = offsetAt(this.#rowOffsets, rowIndex, `row ${rowIndex} offset`, maxFieldIndex);
+    const rowEnd = offsetAt(this.#rowOffsets, rowIndex + 1, `row ${rowIndex} offset`, maxFieldIndex);
+    if (rowEnd < rowStart) {
+      throw new RangeError(`row ${rowIndex} offsets are not monotonic`);
+    }
+    return [rowStart, rowEnd];
+  }
 }
 
 export class NativeCsvBatch {
   #handle: Pointer | null;
   #data: Buffer | undefined;
   #dataView: Uint8Array | undefined;
-  #rowOffsets: Uint32Array | undefined;
-  #fieldOffsets: Uint32Array | undefined;
+  #rowOffsets: BigUint64Array | undefined;
+  #fieldOffsets: BigUint64Array | undefined;
 
   constructor(handle: Pointer) {
     this.#handle = handle;
@@ -145,15 +148,15 @@ export class NativeCsvBatch {
   }
 
   get rowCount(): number {
-    return Number(native.symbols.csv_batch_row_count(this.#requireHandle()));
+    return u64ToSafeNumber(native.symbols.csv_batch_row_count(this.#requireHandle()), 'CSV batch row count');
   }
 
   get totalFields(): number {
-    return Number(native.symbols.csv_batch_total_fields(this.#requireHandle()));
+    return u64ToSafeNumber(native.symbols.csv_batch_total_fields(this.#requireHandle()), 'CSV batch field count');
   }
 
   get dataLength(): number {
-    return Number(native.symbols.csv_batch_data_len(this.#requireHandle()));
+    return u64ToSafeNumber(native.symbols.csv_batch_data_len(this.#requireHandle()), 'CSV batch data length');
   }
 
   rows(): CsvRow[] {
@@ -169,7 +172,9 @@ export class NativeCsvBatch {
   }
 
   rowsInto(target: CsvRow[], columns?: CsvColumns, stringCache?: CsvStringCache): CsvRow[] {
+    normalizeColumns(columns);
     const rowCount = this.rowCount;
+    const totalFields = this.totalFields;
     const rowOffsets = this.rowOffsets();
     const fieldOffsets = this.fieldOffsets();
     const data = this.data();
@@ -177,8 +182,8 @@ export class NativeCsvBatch {
 
     if (columns !== undefined) {
       for (let rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
-        const fieldStart = rowOffsets[rowIndex] ?? 0;
-        const fieldEnd = rowOffsets[rowIndex + 1] ?? fieldStart;
+        const fieldStart = offsetAt(rowOffsets, rowIndex, `row ${rowIndex} offset`, totalFields);
+        const fieldEnd = offsetAt(rowOffsets, rowIndex + 1, `row ${rowIndex} offset`, totalFields);
         const existing = target[rowIndex];
         const row = existing === undefined ? [] : existing;
         row.length = columns.length;
@@ -191,8 +196,8 @@ export class NativeCsvBatch {
             continue;
           }
 
-          const start = fieldOffsets[fieldIndex] ?? 0;
-          const end = fieldOffsets[fieldIndex + 1] ?? start;
+          const start = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
+          const end = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
           row[outputIndex] = stringCache === undefined
             ? data.toString('utf8', start, end)
             : stringCache.decode(data, start, end, column);
@@ -204,14 +209,14 @@ export class NativeCsvBatch {
     }
 
     for (let rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
-      const fieldStart = rowOffsets[rowIndex] ?? 0;
-      const fieldEnd = rowOffsets[rowIndex + 1] ?? fieldStart;
+      const fieldStart = offsetAt(rowOffsets, rowIndex, `row ${rowIndex} offset`, totalFields);
+      const fieldEnd = offsetAt(rowOffsets, rowIndex + 1, `row ${rowIndex} offset`, totalFields);
       const existing = target[rowIndex];
       const row = existing === undefined ? [] : existing;
       row.length = fieldEnd - fieldStart;
       for (let fieldIndex = fieldStart; fieldIndex < fieldEnd; ++fieldIndex) {
-        const start = fieldOffsets[fieldIndex] ?? 0;
-        const end = fieldOffsets[fieldIndex + 1] ?? start;
+        const start = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
+        const end = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
         const column = fieldIndex - fieldStart;
         row[column] = stringCache === undefined
           ? data.toString('utf8', start, end)
@@ -239,13 +244,13 @@ export class NativeCsvBatch {
     }
 
     const handle = this.#requireHandle();
-    const dataLen = Number(native.symbols.csv_batch_data_len(handle));
+    const dataLen = u64ToSafeNumber(native.symbols.csv_batch_data_len(handle), 'CSV batch data length');
     const dataPtr = native.symbols.csv_batch_data_ptr(handle);
     this.#dataView = dataLen === 0 ? new Uint8Array(0) : new Uint8Array(toArrayBuffer(requirePtr(dataPtr), 0, dataLen));
     return this.#dataView;
   }
 
-  rowOffsets(): Uint32Array {
+  rowOffsets(): BigUint64Array {
     if (this.#rowOffsets !== undefined) {
       return this.#rowOffsets;
     }
@@ -255,11 +260,11 @@ export class NativeCsvBatch {
     if (ptr === null) {
       throw new Error('native CSV batch row offsets are null');
     }
-    this.#rowOffsets = new Uint32Array(toArrayBuffer(ptr, 0, (rowCount + 1) * 4));
+    this.#rowOffsets = new BigUint64Array(toArrayBuffer(ptr, 0, (rowCount + 1) * BigUint64Array.BYTES_PER_ELEMENT));
     return this.#rowOffsets;
   }
 
-  fieldOffsets(): Uint32Array {
+  fieldOffsets(): BigUint64Array {
     if (this.#fieldOffsets !== undefined) {
       return this.#fieldOffsets;
     }
@@ -269,28 +274,26 @@ export class NativeCsvBatch {
     if (ptr === null) {
       throw new Error('native CSV batch field offsets are null');
     }
-    this.#fieldOffsets = new Uint32Array(toArrayBuffer(ptr, 0, (totalFields + 1) * 4));
+    this.#fieldOffsets = new BigUint64Array(
+      toArrayBuffer(ptr, 0, (totalFields + 1) * BigUint64Array.BYTES_PER_ELEMENT),
+    );
     return this.#fieldOffsets;
   }
 
   rowFieldCount(rowIndex: number): number {
     const rowOffsets = this.rowOffsets();
-    const start = rowOffsets[rowIndex];
-    const end = rowOffsets[rowIndex + 1];
-    if (start === undefined || end === undefined) {
-      throw new RangeError(`row index out of range: ${rowIndex}`);
-    }
+    const start = offsetAt(rowOffsets, rowIndex, `row ${rowIndex} offset`, this.totalFields);
+    const end = offsetAt(rowOffsets, rowIndex + 1, `row ${rowIndex} offset`, this.totalFields);
     return end - start;
   }
 
   fieldRange(rowIndex: number, columnIndex: number): CsvFieldRange | null {
     const rowOffsets = this.rowOffsets();
     const fieldOffsets = this.fieldOffsets();
-    const rowStart = rowOffsets[rowIndex];
-    const rowEnd = rowOffsets[rowIndex + 1];
-    if (rowStart === undefined || rowEnd === undefined) {
-      throw new RangeError(`row index out of range: ${rowIndex}`);
-    }
+    const totalFields = this.totalFields;
+    const dataLength = this.dataLength;
+    const rowStart = offsetAt(rowOffsets, rowIndex, `row ${rowIndex} offset`, totalFields);
+    const rowEnd = offsetAt(rowOffsets, rowIndex + 1, `row ${rowIndex} offset`, totalFields);
 
     const fieldIndex = rowStart + columnIndex;
     if (fieldIndex < rowStart || fieldIndex >= rowEnd) {
@@ -298,8 +301,8 @@ export class NativeCsvBatch {
     }
 
     return {
-      start: fieldOffsets[fieldIndex] ?? 0,
-      end: fieldOffsets[fieldIndex + 1] ?? 0,
+      start: offsetAt(fieldOffsets, fieldIndex, 'field offset', dataLength),
+      end: offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', dataLength),
     };
   }
 
@@ -335,22 +338,25 @@ export class NativeCsvBatch {
   ): void {
     const rowOffsets = this.rowOffsets();
     const fieldOffsets = this.fieldOffsets();
+    const totalFields = this.totalFields;
+    const dataLength = this.dataLength;
     const resolvedEndRow = this.#resolveEndRow(endRow);
     this.#validateRowRange(startRow, resolvedEndRow);
 
     for (let rowIndex = startRow; rowIndex < resolvedEndRow; ++rowIndex) {
-      const rowStart = rowOffsets[rowIndex];
-      const rowEnd = rowOffsets[rowIndex + 1];
-      if (rowStart === undefined || rowEnd === undefined) {
-        throw new RangeError(`row index out of range: ${rowIndex}`);
-      }
+      const rowStart = offsetAt(rowOffsets, rowIndex, `row ${rowIndex} offset`, totalFields);
+      const rowEnd = offsetAt(rowOffsets, rowIndex + 1, `row ${rowIndex} offset`, totalFields);
 
       const fieldIndex = rowStart + columnIndex;
       if (fieldIndex < rowStart || fieldIndex >= rowEnd) {
         continue;
       }
 
-      callback(rowIndex, fieldOffsets[fieldIndex] ?? 0, fieldOffsets[fieldIndex + 1] ?? 0);
+      callback(
+        rowIndex,
+        offsetAt(fieldOffsets, fieldIndex, 'field offset', dataLength),
+        offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', dataLength),
+      );
     }
   }
 
@@ -382,14 +388,12 @@ export class NativeCsvBatch {
     const rowOffsets = this.rowOffsets();
     const fieldOffsets = this.fieldOffsets();
     const data = this.data();
-    const ranges = new Int32Array(columns.length * 2);
+    const totalFields = this.totalFields;
+    const ranges = new Float64Array(columns.length * 2);
 
     for (let rowIndex = startRow; rowIndex < resolvedEndRow; ++rowIndex) {
-      const rowStart = rowOffsets[rowIndex];
-      const rowEnd = rowOffsets[rowIndex + 1];
-      if (rowStart === undefined || rowEnd === undefined) {
-        throw new RangeError(`row index out of range: ${rowIndex}`);
-      }
+      const rowStart = offsetAt(rowOffsets, rowIndex, `row ${rowIndex} offset`, totalFields);
+      const rowEnd = offsetAt(rowOffsets, rowIndex + 1, `row ${rowIndex} offset`, totalFields);
 
       for (let columnOffset = 0; columnOffset < columns.length; ++columnOffset) {
         const columnIndex = columns[columnOffset] ?? 0;
@@ -401,8 +405,8 @@ export class NativeCsvBatch {
           continue;
         }
 
-        ranges[rangeIndex] = fieldOffsets[fieldIndex] ?? 0;
-        ranges[rangeIndex + 1] = fieldOffsets[fieldIndex + 1] ?? 0;
+        ranges[rangeIndex] = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
+        ranges[rangeIndex + 1] = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
       }
 
       callback(rowIndex, ranges, data);
@@ -410,13 +414,17 @@ export class NativeCsvBatch {
   }
 
   countWhereEquals(columnIndex: number, value: string | Buffer | Uint8Array): number {
+    normalizeFilterColumn(columnIndex);
     const encoded = typeof value === 'string' ? Buffer.from(value) : value;
-    return Number(native.symbols.csv_batch_count_where_equals(
-      this.#requireHandle(),
-      columnIndex,
-      encoded.byteLength === 0 ? EMPTY_BUFFER : encoded,
-      BigInt(encoded.byteLength),
-    ));
+    return u64ToSafeNumber(
+      native.symbols.csv_batch_count_where_equals(
+        this.#requireHandle(),
+        columnIndex,
+        encoded.byteLength === 0 ? EMPTY_BUFFER : encoded,
+        BigInt(encoded.byteLength),
+      ),
+      'CSV batch filtered row count',
+    );
   }
 
   close(): void {
@@ -466,7 +474,7 @@ export class NativeCsvBatch {
 export class NativeCsvDictionaryBatch {
   #handle: Pointer | null;
   #ids: Uint32Array | undefined;
-  #dictionaryOffsets: Uint32Array | undefined;
+  #dictionaryOffsets: BigUint64Array | undefined;
   #dictionaryData: Buffer | undefined;
 
   constructor(handle: Pointer) {
@@ -478,11 +486,14 @@ export class NativeCsvDictionaryBatch {
   }
 
   get rowCount(): number {
-    return Number(native.symbols.csv_dictionary_batch_row_count(this.#requireHandle()));
+    return u64ToSafeNumber(native.symbols.csv_dictionary_batch_row_count(this.#requireHandle()), 'CSV dictionary row count');
   }
 
   get dictionaryCount(): number {
-    return Number(native.symbols.csv_dictionary_batch_dict_count(this.#requireHandle()));
+    return u64ToSafeNumber(
+      native.symbols.csv_dictionary_batch_dict_count(this.#requireHandle()),
+      'CSV dictionary entry count',
+    );
   }
 
   ids(): Uint32Array {
@@ -498,7 +509,7 @@ export class NativeCsvDictionaryBatch {
     return this.#ids;
   }
 
-  dictionaryOffsets(): Uint32Array {
+  dictionaryOffsets(): BigUint64Array {
     if (this.#dictionaryOffsets !== undefined) {
       return this.#dictionaryOffsets;
     }
@@ -507,7 +518,9 @@ export class NativeCsvDictionaryBatch {
     if (ptr === null) {
       throw new Error('native CSV dictionary offsets are null');
     }
-    this.#dictionaryOffsets = new Uint32Array(toArrayBuffer(ptr, 0, (dictCount + 1) * 4));
+    this.#dictionaryOffsets = new BigUint64Array(
+      toArrayBuffer(ptr, 0, (dictCount + 1) * BigUint64Array.BYTES_PER_ELEMENT),
+    );
     return this.#dictionaryOffsets;
   }
 
@@ -516,7 +529,7 @@ export class NativeCsvDictionaryBatch {
       return this.#dictionaryData;
     }
     const handle = this.#requireHandle();
-    const dataLen = Number(native.symbols.csv_dictionary_batch_data_len(handle));
+    const dataLen = u64ToSafeNumber(native.symbols.csv_dictionary_batch_data_len(handle), 'CSV dictionary data length');
     const dataPtr = native.symbols.csv_dictionary_batch_data_ptr(handle);
     this.#dictionaryData = dataLen === 0 ? Buffer.allocUnsafe(0) : Buffer.from(toArrayBuffer(requirePtr(dataPtr), 0, dataLen));
     return this.#dictionaryData;
@@ -527,8 +540,7 @@ export class NativeCsvDictionaryBatch {
     const data = this.dictionaryData();
     const values: string[] = [];
     for (let index = 0; index < this.dictionaryCount; ++index) {
-      const start = offsets[index] ?? 0;
-      const end = offsets[index + 1] ?? start;
+      const [start, end,] = offsetRangeAt(offsets, index, 'dictionary offset', data.byteLength);
       values.push(data.toString('utf8', start, end));
     }
     return values;
@@ -563,14 +575,14 @@ export class NativeCsvDictionaryBatch {
 export interface NativeCsvGroupByCountBatchInit {
   counts: BigUint64Array | bigint[];
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array | number[];
+  dictionaryOffsets: BigUint64Array | Uint32Array | readonly (bigint | number)[];
   rowCount: bigint | number;
 }
 
 export class NativeCsvGroupByCountBatch {
   #handle: Pointer | null;
   #counts: BigUint64Array | undefined;
-  #dictionaryOffsets: Uint32Array | undefined;
+  #dictionaryOffsets: BigUint64Array | undefined;
   #dictionaryData: Buffer | undefined;
 
   constructor(handle: Pointer) {
@@ -582,11 +594,14 @@ export class NativeCsvGroupByCountBatch {
   }
 
   get rowCount(): number {
-    return Number(native.symbols.csv_group_by_count_batch_row_count(this.#requireHandle()));
+    return u64ToSafeNumber(native.symbols.csv_group_by_count_batch_row_count(this.#requireHandle()), 'CSV groupBy row count');
   }
 
   get dictionaryCount(): number {
-    return Number(native.symbols.csv_group_by_count_batch_dict_count(this.#requireHandle()));
+    return u64ToSafeNumber(
+      native.symbols.csv_group_by_count_batch_dict_count(this.#requireHandle()),
+      'CSV groupBy dictionary entry count',
+    );
   }
 
   counts(): BigUint64Array {
@@ -615,7 +630,7 @@ export class NativeCsvGroupByCountBatch {
     });
   }
 
-  dictionaryOffsets(): Uint32Array {
+  dictionaryOffsets(): BigUint64Array {
     if (this.#dictionaryOffsets !== undefined) {
       return this.#dictionaryOffsets;
     }
@@ -624,7 +639,9 @@ export class NativeCsvGroupByCountBatch {
     if (ptr === null) {
       throw new Error('native CSV groupBy count offsets are null');
     }
-    this.#dictionaryOffsets = new Uint32Array(toArrayBuffer(ptr, 0, (dictCount + 1) * 4));
+    this.#dictionaryOffsets = new BigUint64Array(
+      toArrayBuffer(ptr, 0, (dictCount + 1) * BigUint64Array.BYTES_PER_ELEMENT),
+    );
     return this.#dictionaryOffsets;
   }
 
@@ -633,7 +650,7 @@ export class NativeCsvGroupByCountBatch {
       return this.#dictionaryData;
     }
     const handle = this.#requireHandle();
-    const dataLen = Number(native.symbols.csv_group_by_count_batch_data_len(handle));
+    const dataLen = u64ToSafeNumber(native.symbols.csv_group_by_count_batch_data_len(handle), 'CSV groupBy dictionary data length');
     const dataPtr = native.symbols.csv_group_by_count_batch_data_ptr(handle);
     this.#dictionaryData = dataLen === 0 ? Buffer.allocUnsafe(0) : Buffer.from(toArrayBuffer(requirePtr(dataPtr), 0, dataLen));
     return this.#dictionaryData;
@@ -644,8 +661,7 @@ export class NativeCsvGroupByCountBatch {
     const data = this.dictionaryData();
     const values: string[] = [];
     for (let index = 0; index < this.dictionaryCount; ++index) {
-      const start = offsets[index] ?? 0;
-      const end = offsets[index + 1] ?? start;
+      const [start, end,] = offsetRangeAt(offsets, index, 'dictionary offset', data.byteLength);
       values.push(data.toString('utf8', start, end));
     }
     return values;
@@ -688,7 +704,7 @@ export class NativeCsvGroupByCountBatch {
 
 export function createNativeCsvGroupByCountBatch(init: NativeCsvGroupByCountBatchInit): NativeCsvGroupByCountBatch {
   const dictionaryData = asUint8Array(init.dictionaryData);
-  const dictionaryOffsets = asUint32Array(init.dictionaryOffsets);
+  const dictionaryOffsets = asBigUint64Offsets(init.dictionaryOffsets, dictionaryData.byteLength);
   const counts = asBigUint64Array(init.counts);
   const rowCount = toBigInt(init.rowCount, 'groupBy rowCount');
   const handle = native.symbols.csv_group_by_count_batch_create(
@@ -710,7 +726,7 @@ export interface NativeCsvColumnStatsBatchInit {
   column?: number;
   counts: BigUint64Array | bigint[];
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array | number[];
+  dictionaryOffsets: BigUint64Array | Uint32Array | readonly (bigint | number)[];
   ids: Uint32Array | number[];
 }
 
@@ -719,7 +735,7 @@ export class NativeCsvColumnStatsBatch {
   readonly column: number | undefined;
   #ids: Uint32Array | undefined;
   #counts: BigUint64Array | undefined;
-  #dictionaryOffsets: Uint32Array | undefined;
+  #dictionaryOffsets: BigUint64Array | undefined;
   #dictionaryDataView: Uint8Array | undefined;
   #dictionaryData: Buffer | undefined;
 
@@ -733,11 +749,14 @@ export class NativeCsvColumnStatsBatch {
   }
 
   get rowCount(): number {
-    return Number(native.symbols.csv_column_stats_batch_row_count(this.#requireHandle()));
+    return u64ToSafeNumber(native.symbols.csv_column_stats_batch_row_count(this.#requireHandle()), 'CSV column stats row count');
   }
 
   get dictionaryCount(): number {
-    return Number(native.symbols.csv_column_stats_batch_dict_count(this.#requireHandle()));
+    return u64ToSafeNumber(
+      native.symbols.csv_column_stats_batch_dict_count(this.#requireHandle()),
+      'CSV column stats dictionary entry count',
+    );
   }
 
   ids(): Uint32Array {
@@ -784,7 +803,7 @@ export class NativeCsvColumnStatsBatch {
     return values;
   }
 
-  dictionaryOffsets(): Uint32Array {
+  dictionaryOffsets(): BigUint64Array {
     if (this.#dictionaryOffsets !== undefined) {
       return this.#dictionaryOffsets;
     }
@@ -793,7 +812,9 @@ export class NativeCsvColumnStatsBatch {
     if (ptr === null) {
       throw new Error('native CSV column stats offsets are null');
     }
-    this.#dictionaryOffsets = new Uint32Array(toArrayBuffer(ptr, 0, (dictCount + 1) * 4));
+    this.#dictionaryOffsets = new BigUint64Array(
+      toArrayBuffer(ptr, 0, (dictCount + 1) * BigUint64Array.BYTES_PER_ELEMENT),
+    );
     return this.#dictionaryOffsets;
   }
 
@@ -811,7 +832,10 @@ export class NativeCsvColumnStatsBatch {
       return this.#dictionaryDataView;
     }
     const handle = this.#requireHandle();
-    const dataLen = Number(native.symbols.csv_column_stats_batch_data_len(handle));
+    const dataLen = u64ToSafeNumber(
+      native.symbols.csv_column_stats_batch_data_len(handle),
+      'CSV column stats dictionary data length',
+    );
     const dataPtr = native.symbols.csv_column_stats_batch_data_ptr(handle);
     this.#dictionaryDataView = dataLen === 0 ? new Uint8Array(0) : new Uint8Array(toArrayBuffer(requirePtr(dataPtr), 0, dataLen));
     return this.#dictionaryDataView;
@@ -823,8 +847,7 @@ export class NativeCsvColumnStatsBatch {
     const values: string[] = [];
     values.length = this.dictionaryCount;
     for (let index = 0; index < values.length; ++index) {
-      const start = offsets[index] ?? 0;
-      const end = offsets[index + 1] ?? start;
+      const [start, end,] = offsetRangeAt(offsets, index, 'dictionary offset', data.byteLength);
       values[index] = data.toString('utf8', start, end);
     }
     return values;
@@ -835,9 +858,9 @@ export class NativeCsvColumnStatsBatch {
       throw new RangeError(`column stats dictionary index out of range: ${index}`);
     }
     const offsets = this.dictionaryOffsets();
-    const start = offsets[index] ?? 0;
-    const end = offsets[index + 1] ?? start;
-    return this.dictionaryData().toString('utf8', start, end);
+    const data = this.dictionaryData();
+    const [start, end,] = offsetRangeAt(offsets, index, 'dictionary offset', data.byteLength);
+    return data.toString('utf8', start, end);
   }
 
   countNumberAt(index: number): number {
@@ -854,8 +877,7 @@ export class NativeCsvColumnStatsBatch {
     const values: CsvGroupByCountEntry[] = [];
     values.length = this.dictionaryCount;
     for (let index = 0; index < values.length; ++index) {
-      const start = offsets[index] ?? 0;
-      const end = offsets[index + 1] ?? start;
+      const [start, end,] = offsetRangeAt(offsets, index, 'dictionary offset', data.byteLength);
       values[index] = {
         value: data.toString('utf8', start, end),
         count: columnStatsCountToNumber(counts[index] ?? 0n),
@@ -869,8 +891,7 @@ export class NativeCsvColumnStatsBatch {
     const data = this.dictionaryData();
     const counts = this.counts();
     for (let index = 0; index < this.dictionaryCount; ++index) {
-      const start = offsets[index] ?? 0;
-      const end = offsets[index + 1] ?? start;
+      const [start, end,] = offsetRangeAt(offsets, index, 'dictionary offset', data.byteLength);
       callback(data.toString('utf8', start, end), columnStatsCountToNumber(counts[index] ?? 0n), index);
     }
   }
@@ -906,8 +927,8 @@ export class NativeCsvColumnStatsBatch {
 export function createNativeCsvColumnStatsBatch(init: NativeCsvColumnStatsBatchInit): NativeCsvColumnStatsBatch {
   const ids = asUint32Array(init.ids);
   const counts = asBigUint64Array(init.counts);
-  const dictionaryOffsets = asUint32Array(init.dictionaryOffsets);
   const dictionaryData = asUint8Array(init.dictionaryData);
+  const dictionaryOffsets = asBigUint64Offsets(init.dictionaryOffsets, dictionaryData.byteLength);
   const handle = native.symbols.csv_column_stats_batch_create(
     asBuffer(new Uint8Array(ids.buffer, ids.byteOffset, ids.byteLength)),
     BigInt(ids.length),
@@ -926,7 +947,10 @@ export function createNativeCsvColumnStatsBatch(init: NativeCsvColumnStatsBatchI
 
 export function takeMultiColumnStatsBatches(handle: Pointer): NativeCsvColumnStatsBatch[] {
   try {
-    const columnCount = Number(native.symbols.csv_multi_column_stats_batch_column_count(handle));
+    const columnCount = u64ToSafeNumber(
+      native.symbols.csv_multi_column_stats_batch_column_count(handle),
+      'CSV multi-column stats column count',
+    );
     const batches: NativeCsvColumnStatsBatch[] = [];
     batches.length = columnCount;
     for (let index = 0; index < columnCount; ++index) {
@@ -962,16 +986,69 @@ function asUint32Array(value: Uint32Array | number[]): Uint32Array {
   return value instanceof Uint32Array ? value : Uint32Array.from(value);
 }
 
+function asBigUint64Offsets(
+  value: BigUint64Array | Uint32Array | readonly (bigint | number)[],
+  dataLength: number,
+): BigUint64Array {
+  const offsets = value instanceof BigUint64Array ? value : new BigUint64Array(value.length);
+  if (!(value instanceof BigUint64Array)) {
+    for (let index = 0; index < value.length; ++index) {
+      offsets[index] = toBigInt(value[index] ?? 0, 'dictionary offset');
+    }
+  }
+  let previous = 0;
+  for (let index = 0; index < offsets.length; ++index) {
+    const offset = offsetAt(offsets, index, 'dictionary offset', dataLength);
+    if (offset < previous) {
+      throw new RangeError(`dictionary offsets are not monotonic at index ${index}`);
+    }
+    previous = offset;
+  }
+  return offsets;
+}
+
 function asBigUint64Array(value: BigUint64Array | bigint[]): BigUint64Array {
   return value instanceof BigUint64Array ? value : BigUint64Array.from(value);
 }
 
 function toBigInt(value: bigint | number, label: string): bigint {
   if (typeof value === 'bigint') {
+    if (value < 0n || value > 0xffff_ffff_ffff_ffffn) {
+      throw new RangeError(`${label} out of range: ${value}`);
+    }
     return value;
   }
-  if (!Number.isInteger(value) || value < 0) {
+  if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`${label} out of range: ${value}`);
   }
   return BigInt(value);
+}
+
+function offsetAt(offsets: BigUint64Array, index: number, label: string, upperBound: number): number {
+  const value = offsets[index];
+  if (value === undefined) {
+    throw new RangeError(`${label} index out of range: ${index}`);
+  }
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(`${label} exceeds Number.MAX_SAFE_INTEGER: ${value}`);
+  }
+  const offset = Number(value);
+  if (offset > upperBound) {
+    throw new RangeError(`${label} exceeds backing storage: ${value}`);
+  }
+  return offset;
+}
+
+function offsetRangeAt(
+  offsets: BigUint64Array,
+  index: number,
+  label: string,
+  upperBound: number,
+): readonly [number, number] {
+  const start = offsetAt(offsets, index, label, upperBound);
+  const end = offsetAt(offsets, index + 1, label, upperBound);
+  if (end < start) {
+    throw new RangeError(`${label}s are not monotonic at index ${index + 1}`);
+  }
+  return [start, end];
 }

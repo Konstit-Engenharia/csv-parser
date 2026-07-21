@@ -45,7 +45,7 @@ type WorkerAggregateMessage =
 interface WorkerGroupByCountPayload {
   counts: BigUint64Array;
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
   rowCount: number;
 }
 

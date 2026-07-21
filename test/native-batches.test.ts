@@ -6,6 +6,7 @@ import {
 import {
   CsvStringCache,
   NativeCsvParser,
+  NativeCsvRowView,
   parseCsvBuffer,
 } from '../src/index.ts';
 
@@ -16,6 +17,9 @@ describe('NativeCsvParser batches and materialization', () => {
       const batch = parser.writeBatch(Buffer.from('"1";"Ana";"SP"\n"2";"Joao";"RJ"\n'), true);
       try {
         expect(batch.rowCount).toBe(2);
+        expect(batch.rowOffsets()).toBeInstanceOf(BigUint64Array);
+        expect(batch.fieldOffsets()).toBeInstanceOf(BigUint64Array);
+        expect([...batch.rowOffsets()]).toEqual([0n, 3n, 6n]);
         expect(batch.rowFieldCount(0)).toBe(3);
         expect(batch.fieldString(1, 2)).toBe('RJ');
         expect(batch.fieldBuffer(0, 1)?.toString()).toBe('Ana');
@@ -264,5 +268,21 @@ describe('NativeCsvParser batches and materialization', () => {
       ['id', 'uf'],
       ['1', 'SP'],
     ]);
+  });
+
+  test('rejects offsets that cannot be represented safely or exceed backing storage', () => {
+    const unsafe = new NativeCsvRowView(
+      Buffer.alloc(0),
+      new BigUint64Array([0n, BigInt(Number.MAX_SAFE_INTEGER) + 1n]),
+      new BigUint64Array([0n]),
+    );
+    expect(() => unsafe.fieldCount).toThrow('exceeds Number.MAX_SAFE_INTEGER');
+
+    const outsideData = new NativeCsvRowView(
+      Buffer.from('a'),
+      new BigUint64Array([0n, 1n]),
+      new BigUint64Array([0n, 2n]),
+    );
+    expect(() => outsideData.fieldRange(0)).toThrow('exceeds backing storage');
   });
 });

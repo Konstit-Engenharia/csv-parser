@@ -1,5 +1,6 @@
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
+import { normalizeFilterColumn } from './normalize.ts';
 import type {
   CsvFieldValue,
   CsvParallelCountOptions,
@@ -59,6 +60,7 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
   if ((options as { strict?: boolean; }).strict === true) {
     throw new Error('parallel count does not support strict CSV validation; use count() without workers for strict schema checks');
   }
+  const where = normalizeWhere(options.where);
 
   const shards = findCsvSafeShards(path, workerCount, options.delimiter ?? ',');
   if (shards.length === 0) {
@@ -113,6 +115,10 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
             return;
           }
           total += message.rows;
+          if (!Number.isSafeInteger(total)) {
+            fail(new RangeError(`parallel row count exceeds Number.MAX_SAFE_INTEGER: ${total}`));
+            return;
+          }
           ++doneWorkers;
           if (doneWorkers === workers.length) {
             finish(total);
@@ -129,7 +135,7 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
             path,
             shard,
             shardIndex,
-            where: normalizeWhere(options.where),
+            where,
           } satisfies WorkerCountMessage,
         );
       });
@@ -148,7 +154,7 @@ function normalizeWhere(where: CsvWhereFilter | undefined): WorkerCountFilterMes
   if ('equals' in where) {
     return {
       equals: {
-        column: where.column,
+        column: normalizeFilterColumn(where.column),
         value: normalizeFieldValue(where.equals),
       },
     };
@@ -156,14 +162,14 @@ function normalizeWhere(where: CsvWhereFilter | undefined): WorkerCountFilterMes
   if ('in' in where) {
     return {
       in: {
-        column: where.column,
+        column: normalizeFilterColumn(where.column),
         values: where.in.map((value) => normalizeFieldValue(value)),
       },
     };
   }
   return {
     startsWith: {
-      column: where.column,
+      column: normalizeFilterColumn(where.column),
       prefix: normalizeFieldValue(where.startsWith),
     },
   };

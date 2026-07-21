@@ -11,6 +11,7 @@ import {
   native,
   requirePtr,
   toArrayBuffer,
+  u64ToSafeNumber,
 } from '../../src/native.ts';
 
 export interface TrustedShard {
@@ -204,6 +205,7 @@ export function buildNativeCsvSafeShards(
   if (delimiter.length !== 1) {
     throw new Error('delimiter must be one character');
   }
+  const size = fileSize(path);
 
   const batch = native.symbols.csv_parser_find_split_offsets(
     Buffer.from(`${path}\0`),
@@ -215,7 +217,7 @@ export function buildNativeCsvSafeShards(
   }
 
   try {
-    const count = Number(native.symbols.csv_split_offsets_batch_count(batch));
+    const count = u64ToSafeNumber(native.symbols.csv_split_offsets_batch_count(batch), 'CSV split offset count');
     if (count === 0) {
       return [];
     }
@@ -224,7 +226,11 @@ export function buildNativeCsvSafeShards(
     const starts: number[] = [];
     starts.length = offsets.length;
     for (let index = 0; index < offsets.length; ++index) {
-      starts[index] = Number(offsets[index]);
+      const offset = u64ToSafeNumber(offsets[index] ?? 0n, 'CSV split offset');
+      if (offset > size) {
+        throw new RangeError(`CSV split offset exceeds file size: ${offset}`);
+      }
+      starts[index] = offset;
     }
     return startsToShards(starts);
   } finally {

@@ -58,7 +58,11 @@ void csv.file(path).select([0, 1, 2] as const).withRowViews((row) => {
 
 void csv.file(path).select([0, 2] as const).withColumnarBatches((batch) => {
   const columns: readonly [0, 2] = batch.selectedColumns;
+  const rowOffsets: BigUint64Array = batch.rowOffsets();
+  const fieldOffsets: BigUint64Array = batch.fieldOffsets();
   void columns;
+  void rowOffsets;
+  void fieldOffsets;
 });
 
 void csv.file(path).select([0, 1, 2] as const).withColumnarBatches((batch) => {

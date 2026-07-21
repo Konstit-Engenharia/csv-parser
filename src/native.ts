@@ -349,3 +349,16 @@ export function requirePtr(ptr: Pointer | null): Pointer {
   }
   return ptr;
 }
+
+export function u64ToSafeNumber(value: bigint | number, label: string): number {
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new RangeError(`${label} exceeds the JavaScript safe integer range: ${value}`);
+    }
+    return value;
+  }
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(`${label} exceeds Number.MAX_SAFE_INTEGER: ${value}`);
+  }
+  return Number(value);
+}

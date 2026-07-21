@@ -28,8 +28,8 @@ try {
       rows += rowCount;
 
       for (let rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
-        const fieldStart = rowOffsets[rowIndex] ?? 0;
-        const fieldEnd = rowOffsets[rowIndex + 1] ?? fieldStart;
+        const fieldStart = offsetAt(rowOffsets, rowIndex, 'row offset', fieldOffsets.length - 1);
+        const fieldEnd = offsetAt(rowOffsets, rowIndex + 1, 'row offset', fieldOffsets.length - 1);
         for (let outputIndex = 0; outputIndex < SELECTED_COLUMNS.length; ++outputIndex) {
           const column = SELECTED_COLUMNS[outputIndex] ?? 0;
           const fieldIndex = fieldStart + column;
@@ -42,8 +42,8 @@ try {
             continue;
           }
 
-          const start = fieldOffsets[fieldIndex] ?? 0;
-          const end = fieldOffsets[fieldIndex + 1] ?? start;
+          const start = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
+          const end = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
           const value = data.toString('utf8', start, end);
           counts.set(value, (counts.get(value) ?? 0) + 1);
         }
@@ -86,3 +86,18 @@ console.log(JSON.stringify(
   null,
   2,
 ));
+
+function offsetAt(offsets: BigUint64Array, index: number, label: string, upperBound: number): number {
+  const value = offsets[index];
+  if (value === undefined) {
+    throw new RangeError(`${label} index out of range: ${index}`);
+  }
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(`${label} exceeds Number.MAX_SAFE_INTEGER: ${value}`);
+  }
+  const offset = Number(value);
+  if (offset > upperBound) {
+    throw new RangeError(`${label} exceeds backing storage: ${value}`);
+  }
+  return offset;
+}

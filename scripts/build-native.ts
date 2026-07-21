@@ -1,20 +1,8 @@
 import {
-  join,
-  resolve,
-} from 'node:path';
-import {
   type NativeBuildTarget,
   nativeBuildTargets,
   repoRoot,
 } from './native-target.ts';
-
-const vcpkgRootEnv = process.env['VCPKG_ROOT'];
-
-if (vcpkgRootEnv === undefined || vcpkgRootEnv.length === 0) {
-  throw new Error('VCPKG_ROOT is required for native build');
-}
-
-const vcpkgRoot = vcpkgRootEnv;
 
 for (const target of nativeBuildTargets()) {
   configure(target);
@@ -22,36 +10,11 @@ for (const target of nativeBuildTargets()) {
 }
 
 function configure(target: NativeBuildTarget): void {
-  const args = [
-    '-S',
-    repoRoot,
-    '-B',
-    buildDir(target),
-    '-G',
-    'Ninja',
-    '-DCMAKE_BUILD_TYPE=Release',
-    '-DCSV_NATIVE_PORTABLE=ON',
-    `-DCMAKE_TOOLCHAIN_FILE=${resolve(vcpkgRoot, 'scripts/buildsystems/vcpkg.cmake')}`,
-  ];
-
-  if (target.osxArchitecture !== undefined) {
-    args.push(`-DCMAKE_OSX_ARCHITECTURES=${target.osxArchitecture}`);
-    args.push('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0');
-  }
-
-  if (target.vcpkgTriplet !== undefined) {
-    args.push(`-DVCPKG_TARGET_TRIPLET=${target.vcpkgTriplet}`);
-  }
-
-  run('cmake', args);
+  run('cmake', ['--fresh', '--preset', target.releasePreset]);
 }
 
 function build(target: NativeBuildTarget): void {
-  run('cmake', ['--build', buildDir(target), '--config', 'Release']);
-}
-
-function buildDir(target: NativeBuildTarget): string {
-  return join(repoRoot, 'build', target.name);
+  run('cmake', ['--build', '--preset', target.releasePreset]);
 }
 
 function run(cmd: string, args: string[]): void {

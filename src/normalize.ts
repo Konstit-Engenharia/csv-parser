@@ -12,6 +12,9 @@ import type {
   CsvTrustedParserOptions,
 } from './types.ts';
 
+export const MAX_COLUMN_INDEX = 2024;
+export const MAX_PROJECTION_LENGTH = 2024;
+
 export function encodingCode(encoding: CsvEncoding = 'utf8'): number {
   const normalized = encoding.toLowerCase();
   if (normalized === 'utf8') {
@@ -52,27 +55,44 @@ export function normalizeColumns(columns: CsvColumns | undefined): Uint32Array {
     return EMPTY_U32;
   }
 
+  if (columns.length > MAX_PROJECTION_LENGTH) {
+    throw new RangeError(`selected column count out of range: ${columns.length}`);
+  }
+
   const normalized = new Uint32Array(columns.length);
+  const seen = new Set<number>();
   for (let index = 0; index < columns.length; ++index) {
     const column = columns[index] ?? NaN;
-    if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
-      throw new RangeError(`selected column out of range: ${column}`);
+    normalizeColumnIndex(column, 'selected column');
+    if (seen.has(column)) {
+      throw new RangeError(`selected column repeated: ${column}`);
     }
+    seen.add(column);
     normalized[index] = column;
   }
   return normalized.length === 0 ? EMPTY_U32 : normalized;
 }
 
 export function normalizeColumnStatsColumns(columns: CsvColumns): Uint32Array {
-  const normalized = normalizeColumns(columns);
+  const normalized = new Uint32Array(columns.length);
   const seen = new Set<number>();
-  for (const column of normalized) {
+  for (let index = 0; index < columns.length; ++index) {
+    const column = columns[index] ?? NaN;
+    normalizeColumnIndex(column, 'multi-column stats column');
     if (seen.has(column)) {
       throw new RangeError(`multi-column stats column repeated: ${column}`);
     }
     seen.add(column);
+    normalized[index] = column;
   }
   return normalized;
+}
+
+export function normalizeColumnIndex(column: number, label: string): number {
+  if (!Number.isInteger(column) || column < 0 || column > MAX_COLUMN_INDEX) {
+    throw new RangeError(`${label} out of range: ${column}`);
+  }
+  return column;
 }
 
 export function normalizeEqualsFilter(filter: CsvEqualsFilter | undefined): {
@@ -90,9 +110,7 @@ export function normalizeEqualsFilter(filter: CsvEqualsFilter | undefined): {
     };
   }
 
-  if (!Number.isInteger(filter.column) || filter.column < 0 || filter.column > 0xffff_ffff) {
-    throw new RangeError(`filter column out of range: ${filter.column}`);
-  }
+  normalizeColumnIndex(filter.column, 'filter column');
 
   const value = typeof filter.value === 'string' ? Buffer.from(filter.value) : filter.value;
   return {
@@ -104,10 +122,7 @@ export function normalizeEqualsFilter(filter: CsvEqualsFilter | undefined): {
 }
 
 export function normalizeFilterColumn(column: number): number {
-  if (!Number.isInteger(column) || column < 0 || column > 0xffff_ffff) {
-    throw new RangeError(`filter column out of range: ${column}`);
-  }
-  return column;
+  return normalizeColumnIndex(column, 'filter column');
 }
 
 export function normalizeFilterValue(value: CsvFieldValue): Uint8Array {

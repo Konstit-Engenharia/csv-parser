@@ -84,37 +84,97 @@ describe('NativeCsvParser native filters', () => {
     }
   });
 
-  test('streams ordered and duplicate projections across tiny chunks', () => {
+  test('streams ordered projections across tiny chunks', () => {
     const input = Buffer.from('a,b,c\n"x\nx",y,z\n1,2,3');
-
-    for (const selectedColumns of [[0, 2], [2, 0, 2]]) {
-      const parser = new NativeCsvParser();
-      const rows: string[][] = [];
-      try {
-        for (let offset = 0; offset < input.byteLength; ++offset) {
-          const batch = parser.writeProjectedBatch(input.subarray(offset, offset + 1), { selectedColumns });
-          try {
-            rows.push(...batch.rows());
-          } finally {
-            batch.close();
-          }
-        }
-
-        const batch = parser.endProjectedBatch({ selectedColumns });
+    const selectedColumns = [2, 0];
+    const parser = new NativeCsvParser();
+    const rows: string[][] = [];
+    try {
+      for (let offset = 0; offset < input.byteLength; ++offset) {
+        const batch = parser.writeProjectedBatch(input.subarray(offset, offset + 1), { selectedColumns });
         try {
           rows.push(...batch.rows());
         } finally {
           batch.close();
         }
-
-        expect(rows).toEqual(
-          selectedColumns.length === 2
-            ? [['a', 'c'], ['x\nx', 'z'], ['1', '3']]
-            : [['c', 'a', 'c'], ['z', 'x\nx', 'z'], ['3', '1', '3']],
-        );
-      } finally {
-        parser.close();
       }
+
+      const batch = parser.endProjectedBatch({ selectedColumns });
+      try {
+        rows.push(...batch.rows());
+      } finally {
+        batch.close();
+      }
+
+      expect(rows).toEqual([['c', 'a'], ['z', 'x\nx'], ['3', '1']]);
+    } finally {
+      parser.close();
+    }
+  });
+
+  test('enforces projected column uniqueness and configured limits', () => {
+    const parser = new NativeCsvParser();
+    try {
+      expect(() => parser.writeProjectedBatch(Buffer.from('a,b,c\n'), { selectedColumns: [2, 2] })).toThrow(
+        'selected column repeated: 2',
+      );
+      expect(() => parser.writeProjectedBatch(Buffer.from('a\n'), { selectedColumns: [2025] })).toThrow(
+        'selected column out of range: 2025',
+      );
+      expect(() =>
+        parser.writeProjectedBatch(Buffer.from('a\n'), {
+          selectedColumns: Array.from({ length: 2025 }, (_, index) => index),
+        })
+      ).toThrow('selected column count out of range: 2025');
+
+      const maximumIndex = parser.writeProjectedBatch(Buffer.from('a\n'), { selectedColumns: [2024] }, true);
+      try {
+        expect(maximumIndex.rows()).toEqual([['']]);
+      } finally {
+        maximumIndex.close();
+      }
+    } finally {
+      parser.close();
+    }
+
+    const maximumProjectionParser = new NativeCsvParser();
+    try {
+      const selectedColumns = Array.from({ length: 2024 }, (_, index) => index);
+      const batch = maximumProjectionParser.writeProjectedBatch(Buffer.from('a\n'), { selectedColumns }, true);
+      try {
+        const rows = batch.rows();
+        expect(rows[0]).toHaveLength(2024);
+        expect(rows[0]?.[0]).toBe('a');
+        expect(rows[0]?.[2023]).toBe('');
+      } finally {
+        batch.close();
+      }
+    } finally {
+      maximumProjectionParser.close();
+    }
+  });
+
+  test('enforces the maximum filter column across native filter variants', () => {
+    const parser = new NativeCsvParser();
+    try {
+      expect(parser.writeCountWhereEquals(Buffer.from('a\n'), { column: 2024, value: 'a' }, true)).toBe(0);
+    } finally {
+      parser.close();
+    }
+
+    const invalidParser = new NativeCsvParser();
+    try {
+      expect(() => invalidParser.writeCountWhereEquals(Buffer.from('a\n'), { column: 2025, value: 'a' })).toThrow(
+        'filter column out of range: 2025',
+      );
+      expect(() => invalidParser.writeCountWhereIn(Buffer.from('a\n'), { column: 2025, values: ['a'] })).toThrow(
+        'filter column out of range: 2025',
+      );
+      expect(() => invalidParser.writeCountWhereStartsWith(Buffer.from('a\n'), { column: 2025, prefix: 'a' })).toThrow(
+        'filter column out of range: 2025',
+      );
+    } finally {
+      invalidParser.close();
     }
   });
 

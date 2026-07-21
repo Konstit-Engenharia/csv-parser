@@ -122,6 +122,29 @@ describe('csv high-level API', () => {
     expect(() => csv.file('unused.csv').workers(1.5)).toThrow('workers requires workerCount > 1: 1.5');
   });
 
+  test('rejects invalid projections before parsing or starting workers', async () => {
+    const duplicateError = await rejectedError(csv.parse(Buffer.from('a,b,c\n'), { columns: [2, 2] }));
+    expect(duplicateError.message).toContain('selected column repeated: 2');
+
+    const path = await writeFixture('');
+    let workerError: unknown;
+    try {
+      for await (const _rows of csv.rows(path, { columns: [2025], workerCount: 2 })) {
+        throw new Error('unreachable');
+      }
+    } catch (error) {
+      workerError = error;
+    }
+    expect(workerError).toBeInstanceOf(RangeError);
+    expect((workerError as Error).message).toContain('selected column out of range: 2025');
+
+    const filterError = await rejectedError(csv.file(path).workers(2).whereEquals(2025, 'a').count());
+    expect(filterError.message).toContain('filter column out of range: 2025');
+
+    const aggregateError = await rejectedError(csv.file(path).workers(2).groupByCount(2025));
+    expect(aggregateError.message).toContain('groupBy count column out of range: 2025');
+  });
+
   test('streams rows through workers with shard-safe splitting', async () => {
     const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"S\nP"\n"4";"Caio";"SP"\n');
     const rows: string[][] = [];
@@ -212,6 +235,8 @@ describe('csv high-level API', () => {
     const batch = await csv.file(path).delimiter(';').workers(2).groupByCount(1);
     try {
       expect(batch.rowCount).toBe(5);
+      expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
+      expect(batch.dictionaryOffsets().at(-1)).toBe(BigInt(batch.dictionaryData().byteLength));
       expect(batch.entries()).toEqual([
         { value: 'uf', count: 1 },
         { value: 'SP', count: 2 },
@@ -228,6 +253,8 @@ describe('csv high-level API', () => {
     const batch = await csv.file(path).delimiter(';').workers(2).columnStats(1);
     try {
       expect(batch.rowCount).toBe(5);
+      expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
+      expect(batch.dictionaryOffsets().at(-1)).toBe(BigInt(batch.dictionaryData().byteLength));
       expect(batch.entries()).toEqual([
         { value: 'uf', count: 1 },
         { value: 'SP', count: 2 },
@@ -453,7 +480,7 @@ describe('csv high-level API', () => {
       '1',
       '2',
     ]);
-    expect(() => (retained as { rowOffsets(): Uint32Array; }).rowOffsets()).toThrow(
+    expect(() => (retained as { rowOffsets(): BigUint64Array; }).rowOffsets()).toThrow(
       'columnar batch view is only valid during columnar batch callback',
     );
     expect(() => (retained as { forEachColumnRange(columnIndex: number, callback: () => void): void; }).forEachColumnRange(0, () => {}))

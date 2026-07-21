@@ -6,6 +6,10 @@ import {
 } from './batches.ts';
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
+import {
+  normalizeColumnIndex,
+  normalizeColumnStatsColumns,
+} from './normalize.ts';
 import type {
   CsvApiFileOptions,
   CsvColumns,
@@ -46,7 +50,7 @@ type WorkerAggregateMessage =
 interface WorkerGroupByCountPayload {
   counts: BigUint64Array;
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
   rowCount: number;
 }
 
@@ -96,12 +100,13 @@ export async function parallelGroupByCount(
   column: number,
   options: CsvParallelAggregateOptions,
 ): Promise<NativeCsvGroupByCountBatch> {
+  normalizeColumnIndex(column, 'groupBy count column');
   const shards = workerShards(path, options);
   if (shards.length === 0) {
     return createNativeCsvGroupByCountBatch({
       counts: new BigUint64Array(0),
       dictionaryData: new Uint8Array(0),
-      dictionaryOffsets: new Uint32Array([0]),
+      dictionaryOffsets: new BigUint64Array([0n]),
       rowCount: 0,
     });
   }
@@ -118,13 +123,14 @@ export async function parallelColumnStats(
   column: number,
   options: CsvParallelAggregateOptions,
 ): Promise<NativeCsvColumnStatsBatch> {
+  normalizeColumnIndex(column, 'column stats column');
   const shards = workerShards(path, options);
   if (shards.length === 0) {
     return createNativeCsvColumnStatsBatch({
       column,
       counts: new BigUint64Array(0),
       dictionaryData: new Uint8Array(0),
-      dictionaryOffsets: new Uint32Array([0]),
+      dictionaryOffsets: new BigUint64Array([0n]),
       ids: new Uint32Array(0),
     });
   }
@@ -141,6 +147,7 @@ export async function parallelMultiColumnStats(
   columns: CsvColumns,
   options: CsvParallelAggregateOptions,
 ): Promise<NativeCsvColumnStatsBatch[]> {
+  normalizeColumnStatsColumns(columns);
   if (columns.length === 0) {
     return [];
   }
@@ -151,7 +158,7 @@ export async function parallelMultiColumnStats(
         column,
         counts: new BigUint64Array(0),
         dictionaryData: new Uint8Array(0),
-        dictionaryOffsets: new Uint32Array([0]),
+        dictionaryOffsets: new BigUint64Array([0n]),
         ids: new Uint32Array(0),
       })
     );
@@ -171,6 +178,7 @@ export async function runGroupByCountWithWorkers(
   execution: WorkerExecutionOptions,
 ): Promise<NativeCsvGroupByCountBatch> {
   rejectWorkerAggregatesUnsupported(options, 'groupByCount');
+  normalizeColumnIndex(column, 'groupBy count column');
   const results = await runWorkerJob<WorkerGroupByCountDoneMessage>(
     path,
     options,
@@ -197,6 +205,7 @@ export async function runColumnStatsWithWorkers(
   execution: WorkerExecutionOptions,
 ): Promise<NativeCsvColumnStatsBatch> {
   rejectWorkerAggregatesUnsupported(options, 'columnStats');
+  normalizeColumnIndex(column, 'column stats column');
   const results = await runWorkerJob<WorkerColumnStatsDoneMessage>(
     path,
     options,
@@ -223,6 +232,7 @@ export async function runMultiColumnStatsWithWorkers(
   execution: WorkerExecutionOptions,
 ): Promise<NativeCsvColumnStatsBatch[]> {
   rejectWorkerAggregatesUnsupported(options, 'multiColumnStats');
+  normalizeColumnStatsColumns(columns);
   const results = await runWorkerJob<WorkerMultiColumnStatsDoneMessage>(
     path,
     options,
@@ -355,6 +365,9 @@ function mergeGroupByResults(results: readonly WorkerGroupByCountPayload[]): Nat
 
   for (const result of results) {
     rowCount += result.rowCount;
+    if (!Number.isSafeInteger(rowCount)) {
+      throw new RangeError(`merged groupBy row count exceeds Number.MAX_SAFE_INTEGER: ${rowCount}`);
+    }
     const values = decodeDictionary(result.dictionaryData, result.dictionaryOffsets);
     for (let index = 0; index < values.length; ++index) {
       const value = values[index] ?? '';
@@ -381,6 +394,9 @@ function mergeColumnStatsResults(column: number, results: readonly WorkerColumnS
 
   for (const result of results) {
     totalIds += result.ids.length;
+    if (!Number.isSafeInteger(totalIds)) {
+      throw new RangeError(`merged column stats row count exceeds Number.MAX_SAFE_INTEGER: ${totalIds}`);
+    }
     const decoded = decodeDictionary(result.dictionaryData, result.dictionaryOffsets);
     const localToGlobal = new Uint32Array(decoded.length);
 
@@ -421,13 +437,16 @@ function mergeColumnStatsResults(column: number, results: readonly WorkerColumnS
   });
 }
 
-function decodeDictionary(data: Uint8Array, offsets: Uint32Array): string[] {
+function decodeDictionary(data: Uint8Array, offsets: BigUint64Array): string[] {
   const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
   const values: string[] = [];
   values.length = offsets.length === 0 ? 0 : offsets.length - 1;
   for (let index = 0; index < values.length; ++index) {
-    const start = offsets[index] ?? 0;
-    const end = offsets[index + 1] ?? start;
+    const start = dictionaryOffsetToNumber(offsets[index], index, data.byteLength);
+    const end = dictionaryOffsetToNumber(offsets[index + 1], index + 1, data.byteLength);
+    if (end < start) {
+      throw new RangeError(`dictionary offsets are not monotonic at index ${index + 1}`);
+    }
     values[index] = buffer.toString('utf8', start, end);
   }
   return values;
@@ -435,19 +454,22 @@ function decodeDictionary(data: Uint8Array, offsets: Uint32Array): string[] {
 
 function encodeDictionary(values: readonly string[]): {
   data: Uint8Array;
-  offsets: Uint32Array;
+  offsets: BigUint64Array;
 } {
-  const offsets = new Uint32Array(values.length + 1);
+  const offsets = new BigUint64Array(values.length + 1);
   const chunks: Buffer[] = [];
   let offset = 0;
 
   for (let index = 0; index < values.length; ++index) {
-    offsets[index] = offset;
+    offsets[index] = BigInt(offset);
     const chunk = Buffer.from(values[index] ?? '', 'utf8');
     chunks.push(chunk);
     offset += chunk.byteLength;
+    if (!Number.isSafeInteger(offset)) {
+      throw new RangeError(`dictionary data length exceeds Number.MAX_SAFE_INTEGER: ${offset}`);
+    }
   }
-  offsets[values.length] = offset;
+  offsets[values.length] = BigInt(offset);
 
   const data = chunks.length === 0 ? Buffer.alloc(0) : Buffer.concat(chunks, offset);
   return {
@@ -462,6 +484,20 @@ function toBigUint64Array(values: readonly bigint[]): BigUint64Array {
     result[index] = values[index] ?? 0n;
   }
   return result;
+}
+
+function dictionaryOffsetToNumber(value: bigint | undefined, index: number, dataLength: number): number {
+  if (value === undefined) {
+    throw new RangeError(`dictionary offset index out of range: ${index}`);
+  }
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(`dictionary offset exceeds Number.MAX_SAFE_INTEGER: ${value}`);
+  }
+  const offset = Number(value);
+  if (offset > dataLength) {
+    throw new RangeError(`dictionary offset exceeds dictionary data length: ${value}`);
+  }
+  return offset;
 }
 
 function rejectWorkerAggregatesUnsupported(options: CsvApiFileOptions, name: string): void {

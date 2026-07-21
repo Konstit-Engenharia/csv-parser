@@ -19,6 +19,8 @@ describe('NativeCsvParser native aggregates', () => {
       const batch = parser.writeDictionaryBatch(Buffer.from('"1";"SP"\n"2";"SP"\n"3";"RJ"\n'), 1, true);
       try {
         expect([...batch.ids()]).toEqual([0, 0, 1]);
+        expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
+        expect([...batch.dictionaryOffsets()]).toEqual([0n, 2n, 4n]);
         expect(batch.dictionaryStrings()).toEqual(['SP', 'RJ']);
       } finally {
         batch.close();
@@ -37,6 +39,7 @@ describe('NativeCsvParser native aggregates', () => {
       try {
         expect(batch.rowCount).toBe(4);
         expect(batch.dictionaryStrings()).toEqual(['SP', 'RJ', '']);
+        expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
         expect(batch.countsNumbers()).toEqual([2, 1, 1]);
         expect(batch.entries()).toEqual([
           { value: 'SP', count: 2 },
@@ -60,6 +63,7 @@ describe('NativeCsvParser native aggregates', () => {
       try {
         expect(batch.rowCount).toBe(4);
         expect(batch.dictionaryStrings()).toEqual(['SP', 'RJ', '']);
+        expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
         expect(batch.dictionaryString(1)).toBe('RJ');
         expect([...batch.ids()]).toEqual([0, 0, 1, 2]);
         expect(batch.countsNumbers()).toEqual([2, 1, 1]);
@@ -142,6 +146,50 @@ describe('NativeCsvParser native aggregates', () => {
       );
     } finally {
       parser.close();
+    }
+  });
+
+  test('enforces the maximum aggregate column index', () => {
+    const dictionaryParser = new NativeCsvParser();
+    try {
+      const batch = dictionaryParser.writeDictionaryBatch(Buffer.from('a\n'), 2024, true);
+      batch.close();
+    } finally {
+      dictionaryParser.close();
+    }
+
+    const groupByParser = new NativeCsvParser();
+    try {
+      groupByParser.writeGroupByCount(Buffer.from('a\n'), 2024);
+      groupByParser.endGroupByCount(2024).close();
+    } finally {
+      groupByParser.close();
+    }
+
+    const statsParser = new NativeCsvParser();
+    try {
+      statsParser.writeColumnStats(Buffer.from('a\n'), 2024);
+      statsParser.endColumnStats(2024).close();
+    } finally {
+      statsParser.close();
+    }
+
+    const invalidParser = new NativeCsvParser();
+    try {
+      expect(() => invalidParser.writeDictionaryBatch(Buffer.from('a\n'), 2025)).toThrow(
+        'dictionary column out of range: 2025',
+      );
+      expect(() => invalidParser.writeGroupByCount(Buffer.from('a\n'), 2025)).toThrow(
+        'groupBy count column out of range: 2025',
+      );
+      expect(() => invalidParser.writeColumnStats(Buffer.from('a\n'), 2025)).toThrow(
+        'column stats column out of range: 2025',
+      );
+      expect(() => invalidParser.writeMultiColumnStats(Buffer.from('a\n'), [2025])).toThrow(
+        'multi-column stats column out of range: 2025',
+      );
+    } finally {
+      invalidParser.close();
     }
   });
 

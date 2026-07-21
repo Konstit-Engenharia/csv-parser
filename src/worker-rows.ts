@@ -1,5 +1,9 @@
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
+import {
+  normalizeColumns,
+  normalizeFilterColumn,
+} from './normalize.ts';
 import type {
   CsvApiFileOptions,
   CsvColumns,
@@ -175,7 +179,9 @@ function selectedColumns(options: CsvApiFileOptions): CsvColumns | undefined {
   if (options.columns !== undefined && options.selectedColumns !== undefined) {
     throw new Error('use columns or selectedColumns, not both');
   }
-  return options.columns ?? options.selectedColumns;
+  const columns = options.columns ?? options.selectedColumns;
+  normalizeColumns(columns);
+  return columns;
 }
 
 function rejectWorkerRowsUnsupported(options: CsvApiFileOptions): void {
@@ -199,7 +205,7 @@ function whereEqualsFilter(where: CsvWhereFilter | undefined): WorkerEqualsFilte
     return undefined;
   }
   return {
-    column: where.column,
+    column: normalizeFilterColumn(where.column),
     value: normalizeFieldValue(where.equals),
   };
 }

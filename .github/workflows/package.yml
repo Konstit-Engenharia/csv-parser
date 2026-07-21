@@ -12,9 +12,6 @@ jobs:
           - macos-latest
           - ubuntu-latest
     runs-on: ${{ matrix.os }}
-    env:
-      VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -24,24 +21,17 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y cmake ninja-build pkg-config
+            sudo apt-get install -y clang cmake git ninja-build
           else
-            brew install cmake ninja pkg-config
+            brew install cmake ninja
           fi
-      - uses: actions/cache@v4
+      - name: Cache FetchContent sources
+        uses: actions/cache@v4
         with:
-          path: |
-            .cache/vcpkg
-            .cache/vcpkg-binary
-          key: package-vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}
-      - name: Bootstrap vcpkg
-        run: |
-          if [ ! -d "$VCPKG_ROOT/.git" ]; then
-            rm -rf "$VCPKG_ROOT"
-            git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
-          fi
-          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
-          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          path: .cache/fetchcontent
+          key: package-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'toolchains/*.cmake') }}
+          restore-keys: |
+            package-fetchcontent-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run build:native
       - run: bun run stage:native

@@ -57,7 +57,7 @@ type WorkerRunMessage = GroupByCountWorkerRunMessage | ColumnStatsWorkerRunMessa
 interface GroupByCountBatchParts {
   counts: BigUint64Array;
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
   rowCount: number;
 }
 
@@ -65,7 +65,7 @@ interface ColumnStatsBatchParts {
   column: number;
   counts: BigUint64Array;
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
   ids: Uint32Array;
 }
 
@@ -202,7 +202,7 @@ async function parallelGroupByCountBatchLocal(): Promise<NativeCsvGroupByCountBa
     return createNativeCsvGroupByCountBatch({
       counts: [],
       dictionaryData: new Uint8Array(0),
-      dictionaryOffsets: [0],
+      dictionaryOffsets: [0n],
       rowCount: 0,
     });
   }
@@ -238,7 +238,7 @@ async function parallelColumnStatsBatchLocal(): Promise<NativeCsvColumnStatsBatc
       column: STATS_COLUMN,
       counts: [],
       dictionaryData: new Uint8Array(0),
-      dictionaryOffsets: [0],
+      dictionaryOffsets: [0n],
       ids: [],
     });
   }
@@ -387,8 +387,8 @@ function mergeGroupByCountBatches(batches: readonly NativeCsvGroupByCountBatch[]
     const offsets = batch.dictionaryOffsets();
     const data = batch.dictionaryData();
     for (let index = 0; index < batch.dictionaryCount; ++index) {
-      const start = offsets[index] ?? 0;
-      const end = offsets[index + 1] ?? start;
+      const start = offsetAt(offsets, index, data.byteLength);
+      const end = offsetAt(offsets, index + 1, data.byteLength);
       const value = data.toString('utf8', start, end);
       mergedCounts.set(value, (mergedCounts.get(value) ?? 0n) + (counts[index] ?? 0n));
     }
@@ -431,8 +431,8 @@ function mergeColumnStatsBatches(column: number, batches: readonly NativeCsvColu
     const localToGlobal = new Uint32Array(batch.dictionaryCount);
 
     for (let index = 0; index < batch.dictionaryCount; ++index) {
-      const start = localOffsets[index] ?? 0;
-      const end = localOffsets[index + 1] ?? start;
+      const start = offsetAt(localOffsets, index, localData.byteLength);
+      const end = offsetAt(localOffsets, index + 1, localData.byteLength);
       const value = localData.toString('utf8', start, end);
       let globalIndex = dictionaryIndexes.get(value);
       if (globalIndex === undefined) {
@@ -467,7 +467,7 @@ function mergeColumnStatsBatches(column: number, batches: readonly NativeCsvColu
 function encodeDictionaryCounts(values: ReadonlyMap<string, bigint>): {
   counts: BigUint64Array;
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
 } {
   const entries = Array.from(values.entries()).sort(compareStringTuple);
   const counts = new BigUint64Array(entries.length);
@@ -487,16 +487,19 @@ function encodeDictionaryCounts(values: ReadonlyMap<string, bigint>): {
 
 function encodeDictionaryValues(values: readonly string[]): {
   dictionaryData: Uint8Array;
-  dictionaryOffsets: Uint32Array;
+  dictionaryOffsets: BigUint64Array;
 } {
   const encoded = values.map((value) => Buffer.from(value, 'utf8'));
-  const dictionaryOffsets = new Uint32Array(values.length + 1);
+  const dictionaryOffsets = new BigUint64Array(values.length + 1);
   let totalBytes = 0;
   for (const [index, value,] of encoded.entries()) {
-    dictionaryOffsets[index] = totalBytes;
+    dictionaryOffsets[index] = BigInt(totalBytes);
     totalBytes += value.byteLength;
+    if (!Number.isSafeInteger(totalBytes)) {
+      throw new RangeError(`dictionary data length exceeds Number.MAX_SAFE_INTEGER: ${totalBytes}`);
+    }
   }
-  dictionaryOffsets[values.length] = totalBytes;
+  dictionaryOffsets[values.length] = BigInt(totalBytes);
 
   const dictionaryData = new Uint8Array(totalBytes);
   let offset = 0;
@@ -509,6 +512,21 @@ function encodeDictionaryValues(values: readonly string[]): {
     dictionaryData,
     dictionaryOffsets,
   };
+}
+
+function offsetAt(offsets: BigUint64Array, index: number, upperBound: number): number {
+  const value = offsets[index];
+  if (value === undefined) {
+    throw new RangeError(`dictionary offset index out of range: ${index}`);
+  }
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(`dictionary offset exceeds Number.MAX_SAFE_INTEGER: ${value}`);
+  }
+  const offset = Number(value);
+  if (offset > upperBound) {
+    throw new RangeError(`dictionary offset exceeds backing storage: ${value}`);
+  }
+  return offset;
 }
 
 function projectGroupByResult(result: GroupByBenchResult): Record<string, unknown> {

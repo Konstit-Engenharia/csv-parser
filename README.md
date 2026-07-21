@@ -15,10 +15,26 @@ bun install
 bun run build:native
 ```
 
+Native development requires CMake 3.25+, Ninja, Git, and Clang/AppleClang. CMake downloads pinned Highway and
+unordered_dense sources during the first configure; native test configurations also download pinned Catch2 sources.
+The downloaded sources are reused from `.cache/fetchcontent/`.
+
 The native build writes architecture-specific outputs under `build/<platform>-<arch>/`. On macOS, `bun run build:native`
 builds both `darwin-arm64` and `darwin-x64`; at runtime the FFI loader picks the library matching `process.platform` and
 `process.arch`. Legacy fallback paths such as `build/libcsv_native.*` and root `libcsv_native.*` are still checked for
 local development.
+
+The supported native targets are Clang C++20 builds for macOS ARM64/x64 and Linux x64. ARM64 requires NEON, and x64
+requires AVX2. CPUs without those instruction sets are not supported. Target-specific configuration is available through
+CMake presets, for example:
+
+```sh
+cmake --preset darwin-arm64-release
+cmake --build --preset darwin-arm64-release
+cmake --preset linux-x64-sanitize
+cmake --build --preset linux-x64-sanitize
+ctest --preset linux-x64-sanitize
+```
 
 If no matching library exists, imports fail with:
 
@@ -26,7 +42,7 @@ If no matching library exists, imports fail with:
 native library not found. Run: bun run build:native
 ```
 
-Package assembly is separate from publication. The `Package` workflow builds portable native libraries on macOS and
+Package assembly is separate from publication. The `Package` workflow builds target-specific native libraries on macOS and
 Linux, verifies every required target, creates the tarball, and installs that tarball in a clean smoke-test project.
 Publication must use this verified artifact; `prepack` rejects packages missing any required native library.
 
@@ -184,6 +200,9 @@ workers. `columns` and the legacy `selectedColumns` alias are mutually exclusive
 `strict`, worker, and filter state in the chain; change those through `.strict()`, `.workers()`, or `.where*()` instead
 of operation-level overrides.
 
+Column indexes are integers from `0` through `2024`. A projection may contain at most 2024 columns and must not repeat
+an index; invalid selections fail before parsing begins.
+
 ## Batch API
 
 Use batches when you need low allocation row access or byte ranges.
@@ -239,6 +258,11 @@ for await (const batch of csv.batches('data.csv', { delimiter: ';' })) {
 - `fieldString(rowIndex, columnIndex)`
 - `countWhereEquals(columnIndex, value)`
 - `close()`
+
+`rowOffsets()`, `fieldOffsets()`, and aggregate `dictionaryOffsets()` return `BigUint64Array`. Convert individual
+offsets to `number` only after checking that they are within `Number.MAX_SAFE_INTEGER` and the associated backing data.
+`scanColumns()` supplies its JavaScript-safe numeric ranges in a `Float64Array`. Column and dictionary IDs remain
+`Uint32Array`.
 
 ## Manual Parser API
 
@@ -298,7 +322,7 @@ Example environment variables:
 ## Validation
 
 ```sh
-bun run test
+bun test
 bun run lint
 ```
 

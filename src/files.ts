@@ -7,6 +7,7 @@ import type {
 import {
   DEFAULT_CHUNK_SIZE,
   native,
+  u64ToSafeNumber,
 } from './native.ts';
 import {
   requirePtr,
@@ -50,7 +51,10 @@ export function countTrustedNewlineRows(buffer: NodeJS.TypedArray | DataView): n
     return 0;
   }
   const input = normalizeChunk(buffer);
-  return Number(native.symbols.csv_parser_count_trusted_newlines(input, BigInt(input.byteLength)));
+  return u64ToSafeNumber(
+    native.symbols.csv_parser_count_trusted_newlines(input, BigInt(input.byteLength)),
+    'CSV newline row count',
+  );
 }
 
 export function findCsvSafeSplitOffsets(path: string, shardCount: number, delimiter = ','): number[] {
@@ -71,13 +75,13 @@ export function findCsvSafeSplitOffsets(path: string, shardCount: number, delimi
   }
 
   try {
-    const count = Number(native.symbols.csv_split_offsets_batch_count(batch));
+    const count = u64ToSafeNumber(native.symbols.csv_split_offsets_batch_count(batch), 'CSV split offset count');
     if (count === 0) {
       return [];
     }
     const ptr = native.symbols.csv_split_offsets_batch_ptr(batch);
     const offsets = new BigUint64Array(toArrayBuffer(requirePtr(ptr), 0, count * BigUint64Array.BYTES_PER_ELEMENT));
-    return Array.from(offsets, (offset) => Number(offset));
+    return Array.from(offsets, (offset) => u64ToSafeNumber(offset, 'CSV split offset'));
   } finally {
     native.symbols.csv_split_offsets_batch_destroy(batch);
   }

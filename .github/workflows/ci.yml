@@ -11,9 +11,6 @@ jobs:
   test:
     name: Bun native checks
     runs-on: ubuntu-latest
-    env:
-      VCPKG_ROOT: ${{ github.workspace }}/.cache/vcpkg
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binary
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,26 +21,15 @@ jobs:
           bun-version: 1.3.14
 
       - name: Install native toolchain
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config
+        run: sudo apt-get update && sudo apt-get install -y clang cmake git ninja-build
 
-      - name: Cache vcpkg
+      - name: Cache FetchContent sources
         uses: actions/cache@v4
         with:
-          path: |
-            .cache/vcpkg
-            .cache/vcpkg-binary
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}
+          path: .cache/fetchcontent
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'toolchains/*.cmake') }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-
-
-      - name: Bootstrap vcpkg
-        run: |
-          if [ ! -d "$VCPKG_ROOT/.git" ]; then
-            rm -rf "$VCPKG_ROOT"
-            git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
-          fi
-          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
-          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+            fetchcontent-${{ runner.os }}-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

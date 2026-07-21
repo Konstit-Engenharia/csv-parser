@@ -11,6 +11,7 @@ import {
   findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
 } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
+import { normalizeColumns } from './normalize.ts';
 import { NativeCsvParser } from './parser.ts';
 import {
   rejectStrictSchemaUnsupported,
@@ -987,7 +988,9 @@ function selectedColumns(options: CsvApiFileOptions): CsvColumns | undefined {
   if (options.columns !== undefined && options.selectedColumns !== undefined) {
     throw new Error('use columns or selectedColumns, not both');
   }
-  return options.columns ?? options.selectedColumns;
+  const columns = options.columns ?? options.selectedColumns;
+  normalizeColumns(columns);
+  return columns;
 }
 
 function materializeRows<TColumns extends CsvColumns | undefined>(
@@ -1356,11 +1359,11 @@ class ScopedCsvColumnarBatchView<TSelectedColumns extends CsvColumns | undefined
     return this.#requireBatch().dataView();
   }
 
-  rowOffsets(): Uint32Array {
+  rowOffsets(): BigUint64Array {
     return this.#requireBatch().rowOffsets();
   }
 
-  fieldOffsets(): Uint32Array {
+  fieldOffsets(): BigUint64Array {
     return this.#requireBatch().fieldOffsets();
   }
 
@@ -1395,7 +1398,7 @@ class ScopedCsvColumnarBatchView<TSelectedColumns extends CsvColumns | undefined
 
   scanColumns(
     columns: CsvColumns,
-    callback: (rowIndex: number, ranges: Int32Array, data: Buffer) => void,
+    callback: (rowIndex: number, ranges: Float64Array, data: Buffer) => void,
     startRow?: number,
     endRow?: number,
   ) {

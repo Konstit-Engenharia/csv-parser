@@ -8,6 +8,7 @@
 - Assume little-endian (x86-64, aarch64) architectures.
 - Assume AVX2 and NEON instruction sets are available.
 - Do not use x86-32 or other legacy architectures.
+- Benchmarks should run in serial, not in parallel agents to avoid CPU sharing and maximize benchmark accuracy.
 
 ## Interpretation
 
