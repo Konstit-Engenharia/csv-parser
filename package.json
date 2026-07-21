@@ -35,7 +35,7 @@
     "access": "public"
   },
   "scripts": {
-    "setup:cmake": "cmake -S . -B build/editor -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake -E copy_if_different build/editor/compile_commands.json compile_commands.json",
+    "setup:cmake": "cmake -S . -B build/editor -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake -E copy_if_different build/editor/compile_commands.json compile_commands.json",
     "build:native": "bun scripts/build-native.ts",
     "stage:native": "bun scripts/stage-native.ts",
     "verify:native-package": "bun scripts/verify-native-package.ts",

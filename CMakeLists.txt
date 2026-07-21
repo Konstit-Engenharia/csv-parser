@@ -96,12 +96,12 @@ set_target_properties(csv_native PROPERTIES
 )
 
 add_executable(csv_native_bench
-  bench/native/native_bench.cpp
+  native/native_bench.cpp
 )
 
 target_compile_features(csv_native_bench PRIVATE cxx_std_20)
 target_include_directories(csv_native_bench SYSTEM PRIVATE
-  bench/native
+  native
 )
 csv_native_target_options(csv_native_bench)
 target_compile_options(csv_native_bench PRIVATE -fno-rtti)
@@ -131,7 +131,7 @@ if(BUILD_TESTING)
   FetchContent_MakeAvailable(Catch2)
 
   add_executable(csv_native_tests
-    test/native_csv_cxx_test.cpp
+    native/native_csv_cxx_test.cpp
   )
 
   target_compile_features(csv_native_tests PRIVATE cxx_std_20)
@@ -141,7 +141,7 @@ if(BUILD_TESTING)
   add_test(NAME csv_native_tests COMMAND csv_native_tests)
 
   add_executable(csv_native_fuzz
-    test/native_csv_fuzz.cpp
+    native/native_csv_fuzz.cpp
   )
 
   target_compile_features(csv_native_fuzz PRIVATE cxx_std_20)

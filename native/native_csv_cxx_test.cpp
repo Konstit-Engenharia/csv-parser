@@ -234,7 +234,7 @@ TEST_CASE("native C ABI finds csv-safe split offsets") {
     std::FILE* file = std::fopen(path.c_str(), "rb");
     REQUIRE(file != nullptr);
     REQUIRE(std::fseek(file, 0, SEEK_END) == 0);
-    const long end = std::ftell(file);
+    const int64_t end = std::ftell(file);
     REQUIRE(end >= 0);
     REQUIRE(std::fseek(file, 0, SEEK_SET) == 0);
     bytes.resize(static_cast<size_t>(end));
@@ -306,7 +306,7 @@ TEST_CASE("native C ABI decodes full latin1 high range to utf8") {
 }
 
 TEST_CASE("native C ABI trusted fixed batch parses chunked rows") {
-  const std::string first = "\"1\";\"Ana; A\";\"S";
+  const std::string first = R"("1";"Ana; A";"S)";
   const std::string second = "P\"\r\n\"2\";\"Joao \"\"J\"\"\";\"RJ\"\n";
 
   void* parser = csv_parser_create(0, ';');
