@@ -44,6 +44,7 @@
     "prepack": "bun run verify:native-package",
     "test:native": "bun run build:native && bun scripts/test-native.ts",
     "test:native:sanitize": "bun scripts/test-native-sanitizers.ts",
+    "hooks:install": "git config core.hooksPath .githooks",
     "bench:native-csv-parser": "bun run bench -- csv.bench.ts",
     "bench:csv-parser:example": "bun run bench -- csv-parser/example-file.bench.ts",
     "bench:csv-parser:worker-materialize": "bun run bench -- csv-parser/example-file-worker-materialize.bench.ts",
@@ -87,7 +88,10 @@
     "lint:oxlint": "bunx oxlint --type-aware",
     "lint": "bun run tsc && bun run lint:biome && bun run lint:oxlint",
     "fmt": "bunx dprint fmt",
+    "fmt:check": "bunx dprint check",
     "fmt:native": "find native bench test -type f -name '*.cpp' -print0 | xargs -0 clang-format -i",
+    "fmt:native:check": "find native bench test -type f -name '*.cpp' -print0 | xargs -0 clang-format --dry-run --Werror",
+    "prepush": "bun run build:native && bun run build:native:linux && bun run fmt:check && bun run fmt:native:check && bun run lint && bun test && bun scripts/test-native.ts",
     "bench": "bun run build:native && bun run scripts/bench.ts"
   },
   "devDependencies": {

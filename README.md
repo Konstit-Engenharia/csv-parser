@@ -305,6 +305,16 @@ bun test
 bun run lint
 ```
 
+Install the repository's pre-push hook once per clone:
+
+```sh
+bun run hooks:install
+```
+
+Before every push, the hook builds the host's native libraries and the Linux x64 library, checks TypeScript and C++
+formatting, runs the linters and type checker, and runs both the Bun and native test suites. Building Linux x64 requires
+Docker to be installed and running. Run the same checks manually with `bun run prepush`.
+
 Full-file benchmarks against `example.csv` are long CPU-bound runs. Run them separately when comparing numbers.
 
 Small correctness/performance smoke:
