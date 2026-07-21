@@ -37,7 +37,9 @@
   "scripts": {
     "setup:cmake": "cmake -S . -B build/editor -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake -E copy_if_different build/editor/compile_commands.json compile_commands.json",
     "build:native": "bun scripts/build-native.ts",
+    "build:native:linux": "bun scripts/build-linux-native.ts",
     "stage:native": "bun scripts/stage-native.ts",
+    "prebuilds:linux": "bun run build:native:linux && bun scripts/stage-native.ts linux-x64",
     "verify:native-package": "bun scripts/verify-native-package.ts",
     "prepack": "bun run verify:native-package",
     "test:native": "bun run build:native && bun scripts/test-native.ts",

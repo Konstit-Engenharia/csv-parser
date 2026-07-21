@@ -24,6 +24,16 @@ builds both `darwin-arm64` and `darwin-x64`; at runtime the FFI loader picks the
 `process.arch`. Legacy fallback paths such as `build/libcsv_native.*` and root `libcsv_native.*` are still checked for
 local development.
 
+On macOS, build and stage the Linux x64 prebuild with Docker Desktop:
+
+```sh
+bun run prebuilds:linux
+```
+
+The command caches an Ubuntu 24.04 image with Clang, CMake, and Ninja, mounts the repository at `/work`, builds the
+existing `linux-x64-release` preset, and stages `prebuilds/linux-x64/libcsv_native.so`. Release packaging continues to
+build Linux x64 natively on the Ubuntu CI runner.
+
 The supported native targets are Clang C++20 builds for macOS ARM64/x64 and Linux x64. ARM64 requires NEON, and x64
 requires AVX2. CPUs without those instruction sets are not supported. Target-specific configuration is available through
 CMake presets, for example:
