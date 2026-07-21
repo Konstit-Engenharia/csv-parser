@@ -1,3 +1,4 @@
+// Builds the Linux x64 native library in the repository's Docker builder image.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { repoRoot } from './native-target.ts';

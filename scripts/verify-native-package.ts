@@ -1,3 +1,4 @@
+// Verifies that packaged native libraries exist and match their target binary formats.
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {

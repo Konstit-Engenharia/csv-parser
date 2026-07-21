@@ -1,3 +1,4 @@
+// Discovers, filters, imports, and runs the repository's mitata benchmarks.
 import { Glob } from 'bun';
 import { run } from 'mitata';
 

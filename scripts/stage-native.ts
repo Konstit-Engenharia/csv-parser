@@ -1,3 +1,4 @@
+// Copies built native libraries into their target-specific package prebuild directories.
 import { existsSync } from 'node:fs';
 import {
   chmod,

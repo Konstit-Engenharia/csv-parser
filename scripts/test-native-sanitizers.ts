@@ -1,3 +1,4 @@
+// Rebuilds and tests the current native target with the configured sanitizers enabled.
 import {
   currentNativeTargetName,
   repoRoot,

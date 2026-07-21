@@ -1,3 +1,4 @@
+// Configures and builds release native libraries for every target supported by the current host.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {

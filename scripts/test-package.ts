@@ -1,3 +1,4 @@
+// Installs a package tarball in a temporary project and smoke-tests its native CSV parser.
 import {
   mkdtemp,
   rm,

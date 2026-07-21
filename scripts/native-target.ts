@@ -1,3 +1,4 @@
+// Defines native build targets and resolves platform-specific build, library, and executable paths.
 import {
   dirname,
   join,

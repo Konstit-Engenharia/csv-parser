@@ -1,3 +1,4 @@
+// Rebuilds and runs the native CSV test executable for the current target.
 import {
   currentNativeBuildDir,
   currentNativeTargetName,

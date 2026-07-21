@@ -1,3 +1,4 @@
+// Runs the native CSV benchmark executable for the current platform and architecture.
 import { join } from 'node:path';
 import {
   currentNativeBuildDir,
