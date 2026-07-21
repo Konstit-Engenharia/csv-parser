@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   type NativeBuildTarget,
   nativeBuildTargets,
@@ -5,12 +7,18 @@ import {
 } from './native-target.ts';
 
 for (const target of nativeBuildTargets()) {
-  configure(target);
+  if (!isConfigured(target)) {
+    configure(target);
+  }
   build(target);
 }
 
+function isConfigured(target: NativeBuildTarget): boolean {
+  return existsSync(join(repoRoot, 'build', target.name, 'CMakeCache.txt'));
+}
+
 function configure(target: NativeBuildTarget): void {
-  run('cmake', ['--fresh', '--preset', target.releasePreset]);
+  run('cmake', ['--preset', target.releasePreset]);
 }
 
 function build(target: NativeBuildTarget): void {

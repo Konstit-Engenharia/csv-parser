@@ -1,7 +1,6 @@
 import iconv from 'iconv-lite';
 import {
   bench,
-  run,
   summary,
 } from 'mitata';
 import { makeLatin1Text } from '../synthetic/fixtures.ts';
@@ -22,5 +21,3 @@ summary(() => {
     }
   });
 });
-
-await run({ throw: true });

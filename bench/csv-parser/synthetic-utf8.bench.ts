@@ -1,6 +1,5 @@
 import {
   bench,
-  run,
   summary,
 } from 'mitata';
 import { makeUtf8Fixture } from '../synthetic/fixtures.ts';
@@ -20,5 +19,3 @@ summary(() => {
     }
   });
 });
-
-await run({ throw: true });

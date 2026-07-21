@@ -1,6 +1,5 @@
 import {
   bench,
-  run,
   summary,
 } from 'mitata';
 import { parseCsvBuffer } from '../src/index.ts';
@@ -17,8 +16,6 @@ summary(() => {
     }
   });
 });
-
-await run({ throw: true });
 
 function makeQuotedCloseFixture(rows: number, escapedQuotes: number): string {
   const escaped = '""'.repeat(escapedQuotes);

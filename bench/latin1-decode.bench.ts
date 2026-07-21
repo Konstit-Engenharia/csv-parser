@@ -1,6 +1,5 @@
 import {
   bench,
-  run,
   summary,
 } from 'mitata';
 import { parseCsvBuffer } from '../src/index.ts';
@@ -24,8 +23,6 @@ summary(() => {
     }
   });
 });
-
-await run({ throw: true });
 
 function makeAsciiHeavyLatin1Fixture(rows: number): Uint8Array {
   const lineLength = 32;

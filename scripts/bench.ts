@@ -7,9 +7,16 @@ const glob = new Glob('**/*.bench.{js,jsx,mjs,cjs,ts,tsx,mts,cts}');
 const benchmarkFiles: string[] = [];
 
 for await (const path of glob.scan({ cwd: benchmarkDirectory.pathname, onlyFiles: true })) {
-  if (fileFilters.length === 0 || fileFilters.some((filter) => path.includes(filter))) {
-    benchmarkFiles.push(path);
-  }
+  benchmarkFiles.push(path);
+}
+
+if (fileFilters.length > 0) {
+  const exactFilters = new Set(fileFilters.filter((filter) => benchmarkFiles.includes(filter)));
+  const filteredBenchmarkFiles = benchmarkFiles.filter((path) =>
+    fileFilters.some((filter) => exactFilters.has(filter) ? path === filter : path.includes(filter))
+  );
+  benchmarkFiles.length = 0;
+  benchmarkFiles.push(...filteredBenchmarkFiles);
 }
 
 benchmarkFiles.sort();
