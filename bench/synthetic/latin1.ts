@@ -17,14 +17,10 @@ export function registerSyntheticLatin1Benches(rows: number): void {
   });
 
   bench('native latin1 count', () => {
-    const parser = new NativeCsvParser({ encoding: 'latin1' });
-    try {
-      const parsedRows = parser.writeCount(latin1, true);
-      if (parsedRows !== rows + 1) {
-        throw new Error(`bad row count: ${parsedRows}`);
-      }
-    } finally {
-      parser.close();
+    using parser = new NativeCsvParser({ encoding: 'latin1' });
+    const parsedRows = parser.writeCount(latin1, true);
+    if (parsedRows !== rows + 1) {
+      throw new Error(`bad row count: ${parsedRows}`);
     }
   });
 }

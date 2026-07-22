@@ -63,43 +63,31 @@ for (const [name, fn,] of cases) {
 }
 
 async function materializeSingleThread(): Promise<{ cells: number; chars: number; rows: number; }> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const rowsBuffer: string[][] = [];
   let rows = 0;
   let cells = 0;
   let chars = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        const materialized = batch.rowsInto(rowsBuffer);
-        rows += materialized.length;
-        for (const row of materialized) {
-          cells += row.length;
-          for (const value of row) {
-            chars += value.length;
-          }
-        }
-      } finally {
-        batch.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    const materialized = batch.rowsInto(rowsBuffer);
+    rows += materialized.length;
+    for (const row of materialized) {
+      cells += row.length;
+      for (const value of row) {
+        chars += value.length;
       }
     }
+  }
 
-    const batch = parser.endBatch();
-    try {
-      const materialized = batch.rowsInto(rowsBuffer);
-      rows += materialized.length;
-      for (const row of materialized) {
-        cells += row.length;
-        for (const value of row) {
-          chars += value.length;
-        }
-      }
-    } finally {
-      batch.close();
+  using batch = parser.endBatch();
+  const materialized = batch.rowsInto(rowsBuffer);
+  rows += materialized.length;
+  for (const row of materialized) {
+    cells += row.length;
+    for (const value of row) {
+      chars += value.length;
     }
-  } finally {
-    parser.close();
   }
 
   return {

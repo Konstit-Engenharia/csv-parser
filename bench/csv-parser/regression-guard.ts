@@ -35,12 +35,8 @@ async function assertRows(): Promise<void> {
 }
 
 function countNativeRows(): number {
-  const parser = new NativeCsvParser();
-  try {
-    return parser.writeCount(input, true);
-  } finally {
-    parser.close();
-  }
+  using parser = new NativeCsvParser();
+  return parser.writeCount(input, true);
 }
 
 function countCsvParserRows(): Promise<number> {

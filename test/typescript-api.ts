@@ -20,14 +20,16 @@ const tupleParallelRows: AsyncGenerator<[string, string][], void> = parallelRows
 const tupleSelectedColumnsRows: AsyncGenerator<[string, string][], void> = csv.rows(path, {
   selectedColumns: [0, 2] as const,
 });
-const tuplePoolRows: AsyncGenerator<[string, string][], void> = csv.workerPool(path, {
+using tuplePool = csv.workerPool(path, {
   columns: [0, 2] as const,
   workerCount: 2,
-}).rows();
-const tupleDirectPoolRows: AsyncGenerator<[string, string][], void> = workerPool(path, {
+});
+const tuplePoolRows: AsyncGenerator<[string, string][], void> = tuplePool.rows();
+using tupleDirectPool = workerPool(path, {
   columns: [0, 2] as const,
   workerCount: 2,
-}).rows();
+});
+const tupleDirectPoolRows: AsyncGenerator<[string, string][], void> = tupleDirectPool.rows();
 void tupleRows;
 void tupleParallelRows;
 void tupleSelectedColumnsRows;

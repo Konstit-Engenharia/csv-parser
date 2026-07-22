@@ -11,45 +11,41 @@ const SELECTED_COLUMNS = (Bun.env['CSV_BENCH_COLUMNS'] ?? '0,4,19')
   .filter((value) => Number.isInteger(value) && value >= 0);
 const TOP_N = Number(Bun.env['CSV_CARDINALITY_TOP'] ?? 8);
 
-const parser = new NativeCsvParser({ delimiter: DELIMITER });
 const maps = SELECTED_COLUMNS.map(() => new Map<string, number>());
 let chunks = 0;
 let rows = 0;
 const startedAt = performance.now();
 
-try {
+{
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-    const batch = parser.writeBatch(chunk as Buffer);
-    try {
-      const data = batch.data();
-      const rowOffsets = batch.rowOffsets();
-      const fieldOffsets = batch.fieldOffsets();
-      const rowCount = batch.rowCount;
-      rows += rowCount;
+    using batch = parser.writeBatch(chunk as Buffer);
+    const data = batch.data();
+    const rowOffsets = batch.rowOffsets();
+    const fieldOffsets = batch.fieldOffsets();
+    const rowCount = batch.rowCount;
+    rows += rowCount;
 
-      for (let rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
-        const fieldStart = offsetAt(rowOffsets, rowIndex, 'row offset', fieldOffsets.length - 1);
-        const fieldEnd = offsetAt(rowOffsets, rowIndex + 1, 'row offset', fieldOffsets.length - 1);
-        for (let outputIndex = 0; outputIndex < SELECTED_COLUMNS.length; ++outputIndex) {
-          const column = SELECTED_COLUMNS[outputIndex] ?? 0;
-          const fieldIndex = fieldStart + column;
-          const counts = maps[outputIndex];
-          if (counts === undefined) {
-            continue;
-          }
-          if (fieldIndex >= fieldEnd) {
-            counts.set('', (counts.get('') ?? 0) + 1);
-            continue;
-          }
-
-          const start = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
-          const end = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
-          const value = data.toString('utf8', start, end);
-          counts.set(value, (counts.get(value) ?? 0) + 1);
+    for (let rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
+      const fieldStart = offsetAt(rowOffsets, rowIndex, 'row offset', fieldOffsets.length - 1);
+      const fieldEnd = offsetAt(rowOffsets, rowIndex + 1, 'row offset', fieldOffsets.length - 1);
+      for (let outputIndex = 0; outputIndex < SELECTED_COLUMNS.length; ++outputIndex) {
+        const column = SELECTED_COLUMNS[outputIndex] ?? 0;
+        const fieldIndex = fieldStart + column;
+        const counts = maps[outputIndex];
+        if (counts === undefined) {
+          continue;
         }
+        if (fieldIndex >= fieldEnd) {
+          counts.set('', (counts.get('') ?? 0) + 1);
+          continue;
+        }
+
+        const start = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
+        const end = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
+        const value = data.toString('utf8', start, end);
+        counts.set(value, (counts.get(value) ?? 0) + 1);
       }
-    } finally {
-      batch.close();
     }
 
     ++chunks;
@@ -57,8 +53,6 @@ try {
       break;
     }
   }
-} finally {
-  parser.close();
 }
 
 console.log({

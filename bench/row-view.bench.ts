@@ -68,132 +68,92 @@ for (const [name, fn,] of cases) {
 }
 
 async function countSelectedFieldsWithRowView(): Promise<BenchResult> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        batch.forEachRow((row) => {
-          ++result.rows;
-          for (const column of SELECTED_COLUMNS) {
-            const bytes = row.fieldBytes(column);
-            if (bytes !== null) {
-              ++result.fields;
-              result.bytes += bytes.byteLength;
-            }
-          }
-        });
-      } finally {
-        batch.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    batch.forEachRow((row) => {
+      ++result.rows;
+      for (const column of SELECTED_COLUMNS) {
+        const bytes = row.fieldBytes(column);
+        if (bytes !== null) {
+          ++result.fields;
+          result.bytes += bytes.byteLength;
+        }
+      }
+    });
+  }
+
+  using batch = parser.endBatch();
+  batch.forEachRow((row) => {
+    ++result.rows;
+    for (const column of SELECTED_COLUMNS) {
+      const bytes = row.fieldBytes(column);
+      if (bytes !== null) {
+        ++result.fields;
+        result.bytes += bytes.byteLength;
       }
     }
-
-    const batch = parser.endBatch();
-    try {
-      batch.forEachRow((row) => {
-        ++result.rows;
-        for (const column of SELECTED_COLUMNS) {
-          const bytes = row.fieldBytes(column);
-          if (bytes !== null) {
-            ++result.fields;
-            result.bytes += bytes.byteLength;
-          }
-        }
-      });
-    } finally {
-      batch.close();
-    }
-    return result;
-  } finally {
-    parser.close();
-  }
+  });
+  return result;
 }
 
 async function countSelectedFieldsWithRowsInto(): Promise<BenchResult> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const rowsBuffer: string[][] = [];
   const result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        countRowsIntoBatch(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), result);
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endBatch();
-    try {
-      countRowsIntoBatch(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), result);
-    } finally {
-      batch.close();
-    }
-    return result;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    countRowsIntoBatch(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), result);
   }
+
+  using batch = parser.endBatch();
+  countRowsIntoBatch(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), result);
+  return result;
 }
 
 async function printSelectedFieldsWithRowView(): Promise<BenchResult> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const output: string[] = [];
   const result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        batch.forEachRow((row) => {
-          if (output.length >= PRINT_ROWS) {
-            return;
-          }
-          const fields = SELECTED_COLUMNS.map((column) => row.fieldString(column) ?? '');
-          output.push(fields.join('|'));
-          ++result.rows;
-          result.fields += fields.length;
-          result.bytes += output.at(-1)?.length ?? 0;
-        });
-      } finally {
-        batch.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    batch.forEachRow((row) => {
+      if (output.length >= PRINT_ROWS) {
+        return;
       }
+      const fields = SELECTED_COLUMNS.map((column) => row.fieldString(column) ?? '');
+      output.push(fields.join('|'));
+      ++result.rows;
+      result.fields += fields.length;
+      result.bytes += output.at(-1)?.length ?? 0;
+    });
+    if (output.length >= PRINT_ROWS) {
+      return result;
+    }
+  }
+  return result;
+}
+
+async function printSelectedFieldsWithRowsInto(): Promise<BenchResult> {
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
+  const rowsBuffer: string[][] = [];
+  const output: string[] = [];
+  const result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    for (const row of batch.rowsInto(rowsBuffer, SELECTED_COLUMNS)) {
+      const line = row.join('|');
+      output.push(line);
+      ++result.rows;
+      result.fields += row.length;
+      result.bytes += line.length;
       if (output.length >= PRINT_ROWS) {
         return result;
       }
     }
-    return result;
-  } finally {
-    parser.close();
   }
-}
-
-async function printSelectedFieldsWithRowsInto(): Promise<BenchResult> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
-  const rowsBuffer: string[][] = [];
-  const output: string[] = [];
-  const result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        for (const row of batch.rowsInto(rowsBuffer, SELECTED_COLUMNS)) {
-          const line = row.join('|');
-          output.push(line);
-          ++result.rows;
-          result.fields += row.length;
-          result.bytes += line.length;
-          if (output.length >= PRINT_ROWS) {
-            return result;
-          }
-        }
-      } finally {
-        batch.close();
-      }
-    }
-    return result;
-  } finally {
-    parser.close();
-  }
+  return result;
 }
 
 function countRowsIntoBatch(rows: string[][], result: BenchResult): void {

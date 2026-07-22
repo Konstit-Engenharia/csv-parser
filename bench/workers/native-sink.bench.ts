@@ -81,34 +81,21 @@ for (const [name, fn,] of cases) {
 }
 
 async function sinkSingleThread(): Promise<NativeSinkResult> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   let rows = 0;
   let cells = 0;
   let dataBytes = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowCount;
-        cells += batch.totalFields;
-        dataBytes += batch.dataLength;
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowCount;
-      cells += batch.totalFields;
-      dataBytes += batch.dataLength;
-    } finally {
-      batch.close();
-    }
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += batch.rowCount;
+    cells += batch.totalFields;
+    dataBytes += batch.dataLength;
   }
 
+  using batch = parser.endBatch();
+  rows += batch.rowCount;
+  cells += batch.totalFields;
+  dataBytes += batch.dataLength;
   return { cells, dataBytes, rows };
 }
 

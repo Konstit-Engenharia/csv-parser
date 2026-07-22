@@ -112,28 +112,16 @@ async function countNativeProjectedFilteredRows(): Promise<number> {
 }
 
 async function countNativeSelectedRows(): Promise<number> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const rowsBuffer: string[][] = [];
   let rows = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
-      } finally {
-        batch.close();
-      }
-    }
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
   }
+  using batch = parser.endBatch();
+  rows += batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
+  return rows;
 }
 
 async function countNativeMaterializedRows(): Promise<number> {
@@ -145,52 +133,28 @@ async function countNativeMaterializedRows(): Promise<number> {
 }
 
 async function countNativeMaterializedRowsReused(): Promise<number> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const rowsBuffer: string[][] = [];
   let rows = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowsInto(rowsBuffer).length;
-      } finally {
-        batch.close();
-      }
-    }
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowsInto(rowsBuffer).length;
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += batch.rowsInto(rowsBuffer).length;
   }
+  using batch = parser.endBatch();
+  rows += batch.rowsInto(rowsBuffer).length;
+  return rows;
 }
 
 async function countNativeBatchRows(): Promise<number> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   let rows = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowCount;
-      } finally {
-        batch.close();
-      }
-    }
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowCount;
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += batch.rowCount;
   }
+  using batch = parser.endBatch();
+  rows += batch.rowCount;
+  return rows;
 }
 
 function summarizeHeap(stats: ReturnType<typeof heapStats>) {

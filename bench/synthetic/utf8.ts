@@ -16,14 +16,10 @@ export function registerSyntheticUtf8Benches(rows: number): void {
   });
 
   bench('native utf8 count', () => {
-    const parser = new NativeCsvParser({ encoding: 'utf8' });
-    try {
-      const parsedRows = parser.writeCount(utf8, true);
-      if (parsedRows !== rows + 1) {
-        throw new Error(`bad row count: ${parsedRows}`);
-      }
-    } finally {
-      parser.close();
+    using parser = new NativeCsvParser({ encoding: 'utf8' });
+    const parsedRows = parser.writeCount(utf8, true);
+    if (parsedRows !== rows + 1) {
+      throw new Error(`bad row count: ${parsedRows}`);
     }
   });
 }

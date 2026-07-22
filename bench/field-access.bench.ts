@@ -11,66 +11,51 @@ const expectedBytes = ROWS * ITERATIONS;
 
 summary(() => {
   bench('NativeCsvBatch.fieldBytes', function*() {
-    const parser = new NativeCsvParser({ delimiter: ';' });
-    const batch = parser.writeBatch(input, true);
-    try {
-      yield () => {
-        let bytes = 0;
-        for (let iteration = 0; iteration < ITERATIONS; ++iteration) {
-          for (let row = 0; row < ROWS; ++row) {
-            bytes += batch.fieldBytes(row, 1)?.byteLength ?? 0;
-          }
+    using parser = new NativeCsvParser({ delimiter: ';' });
+    using batch = parser.writeBatch(input, true);
+    yield () => {
+      let bytes = 0;
+      for (let iteration = 0; iteration < ITERATIONS; ++iteration) {
+        for (let row = 0; row < ROWS; ++row) {
+          bytes += batch.fieldBytes(row, 1)?.byteLength ?? 0;
         }
-        if (bytes !== expectedBytes) {
-          throw new Error(`bad byte count: ${bytes}`);
-        }
-      };
-    } finally {
-      batch.close();
-      parser.close();
-    }
+      }
+      if (bytes !== expectedBytes) {
+        throw new Error(`bad byte count: ${bytes}`);
+      }
+    };
   });
 
   bench('NativeCsvBatch.fieldBuffer', function*() {
-    const parser = new NativeCsvParser({ delimiter: ';' });
-    const batch = parser.writeBatch(input, true);
-    try {
-      yield () => {
-        let bytes = 0;
-        for (let iteration = 0; iteration < ITERATIONS; ++iteration) {
-          for (let row = 0; row < ROWS; ++row) {
-            bytes += batch.fieldBuffer(row, 1)?.byteLength ?? 0;
-          }
+    using parser = new NativeCsvParser({ delimiter: ';' });
+    using batch = parser.writeBatch(input, true);
+    yield () => {
+      let bytes = 0;
+      for (let iteration = 0; iteration < ITERATIONS; ++iteration) {
+        for (let row = 0; row < ROWS; ++row) {
+          bytes += batch.fieldBuffer(row, 1)?.byteLength ?? 0;
         }
-        if (bytes !== expectedBytes) {
-          throw new Error(`bad byte count: ${bytes}`);
-        }
-      };
-    } finally {
-      batch.close();
-      parser.close();
-    }
+      }
+      if (bytes !== expectedBytes) {
+        throw new Error(`bad byte count: ${bytes}`);
+      }
+    };
   });
 
   bench('NativeCsvBatch.fieldString', function*() {
-    const parser = new NativeCsvParser({ delimiter: ';' });
-    const batch = parser.writeBatch(input, true);
-    try {
-      yield () => {
-        let bytes = 0;
-        for (let iteration = 0; iteration < ITERATIONS; ++iteration) {
-          for (let row = 0; row < ROWS; ++row) {
-            bytes += batch.fieldString(row, 1)?.length ?? 0;
-          }
+    using parser = new NativeCsvParser({ delimiter: ';' });
+    using batch = parser.writeBatch(input, true);
+    yield () => {
+      let bytes = 0;
+      for (let iteration = 0; iteration < ITERATIONS; ++iteration) {
+        for (let row = 0; row < ROWS; ++row) {
+          bytes += batch.fieldString(row, 1)?.length ?? 0;
         }
-        if (bytes !== expectedBytes) {
-          throw new Error(`bad byte count: ${bytes}`);
-        }
-      };
-    } finally {
-      batch.close();
-      parser.close();
-    }
+      }
+      if (bytes !== expectedBytes) {
+        throw new Error(`bad byte count: ${bytes}`);
+      }
+    };
   });
 });
 

@@ -54,16 +54,12 @@ describe('generated CSV property tests', () => {
 
 function countChunkedRows(csv: string, chunkSize: number, delimiter: string): number {
   const input = Buffer.from(csv);
-  const parser = new NativeCsvParser({ delimiter });
+  using parser = new NativeCsvParser({ delimiter });
   let rows = 0;
-  try {
-    for (let offset = 0; offset < input.length; offset += chunkSize) {
-      rows += parser.writeCount(input.subarray(offset, offset + chunkSize));
-    }
-    return rows + parser.endCount();
-  } finally {
-    parser.close();
+  for (let offset = 0; offset < input.length; offset += chunkSize) {
+    rows += parser.writeCount(input.subarray(offset, offset + chunkSize));
   }
+  return rows + parser.endCount();
 }
 
 function generateCase(seed: number, delimiter: string): GeneratedCase {

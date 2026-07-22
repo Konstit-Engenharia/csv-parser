@@ -35,38 +35,26 @@ addEventListener('message', async (event: MessageEvent<NativeSinkWorkerRunMessag
 });
 
 async function sinkShard(message: NativeSinkWorkerRunMessage): Promise<NativeSinkResult> {
-  const parser = new NativeCsvParser({ delimiter: message.delimiter });
+  using parser = new NativeCsvParser({ delimiter: message.delimiter });
   let rows = 0;
   let cells = 0;
   let dataBytes = 0;
-  try {
-    for await (
-      const chunk of createReadStream(message.path, {
-        start: message.shard.start,
-        end: message.shard.end,
-        highWaterMark: message.chunkSize,
-      })
-    ) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowCount;
-        cells += batch.totalFields;
-        dataBytes += batch.dataLength;
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowCount;
-      cells += batch.totalFields;
-      dataBytes += batch.dataLength;
-    } finally {
-      batch.close();
-    }
-    return { cells, dataBytes, rows };
-  } finally {
-    parser.close();
+  for await (
+    const chunk of createReadStream(message.path, {
+      start: message.shard.start,
+      end: message.shard.end,
+      highWaterMark: message.chunkSize,
+    })
+  ) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += batch.rowCount;
+    cells += batch.totalFields;
+    dataBytes += batch.dataLength;
   }
+
+  using batch = parser.endBatch();
+  rows += batch.rowCount;
+  cells += batch.totalFields;
+  dataBytes += batch.dataLength;
+  return { cells, dataBytes, rows };
 }

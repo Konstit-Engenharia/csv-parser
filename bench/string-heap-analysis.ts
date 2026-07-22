@@ -16,7 +16,6 @@ const SELECTED_COLUMNS = (Bun.env['CSV_BENCH_COLUMNS'] ?? '0,4,19')
   .split(',')
   .map((value) => Number(value.trim()))
   .filter((value) => Number.isInteger(value) && value >= 0);
-const parser = new NativeCsvParser({ delimiter: DELIMITER });
 const rowsBuffer: string[][] = [];
 const bytes = statSync(FILE).size;
 let chunks = 0;
@@ -32,41 +31,36 @@ Bun.gc(true);
 const before = summarizeHeap(heapStats());
 const startedAt = performance.now();
 
-try {
+{
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-    const batch = parser.writeBatch(chunk as Buffer);
-    try {
-      const decodeStart = performance.now();
-      if (MODE === 'views') {
-        rows += batch.rowCount;
-        cells += batch.totalFields;
-        batch.data();
-        batch.rowOffsets();
-        batch.fieldOffsets();
-      } else {
-        const columns = MODE === 'selected' ? SELECTED_COLUMNS : undefined;
-        const materialized = batch.rowsInto(rowsBuffer, columns);
-        rows += materialized.length;
-        cells += countCells(materialized);
-      }
-      decodeMs += performance.now() - decodeStart;
-
-      const current = summarizeHeap(heapStats());
-      maxHeapSize = Math.max(maxHeapSize, current.heapSize);
-      maxObjectCount = Math.max(maxObjectCount, current.objectCount);
-      maxArrayCount = Math.max(maxArrayCount, current.arrayCount);
-      maxStringCount = Math.max(maxStringCount, current.stringCount);
-    } finally {
-      batch.close();
+    using batch = parser.writeBatch(chunk as Buffer);
+    const decodeStart = performance.now();
+    if (MODE === 'views') {
+      rows += batch.rowCount;
+      cells += batch.totalFields;
+      batch.data();
+      batch.rowOffsets();
+      batch.fieldOffsets();
+    } else {
+      const columns = MODE === 'selected' ? SELECTED_COLUMNS : undefined;
+      const materialized = batch.rowsInto(rowsBuffer, columns);
+      rows += materialized.length;
+      cells += countCells(materialized);
     }
+    decodeMs += performance.now() - decodeStart;
+
+    const current = summarizeHeap(heapStats());
+    maxHeapSize = Math.max(maxHeapSize, current.heapSize);
+    maxObjectCount = Math.max(maxObjectCount, current.objectCount);
+    maxArrayCount = Math.max(maxArrayCount, current.arrayCount);
+    maxStringCount = Math.max(maxStringCount, current.stringCount);
 
     ++chunks;
     if (chunks >= MAX_CHUNKS) {
       break;
     }
   }
-} finally {
-  parser.close();
 }
 
 Bun.gc(true);

@@ -86,28 +86,16 @@ async function countJsMaterializedSelectedStartsWith(): Promise<number> {
 }
 
 async function countJsMaterializedSelected(predicate: (value: string) => boolean): Promise<number> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const rowsBuffer: string[][] = [];
   let rows = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += countRowsMatching(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), predicate);
-      } finally {
-        batch.close();
-      }
-    }
-    const batch = parser.endBatch();
-    try {
-      rows += countRowsMatching(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), predicate);
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += countRowsMatching(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), predicate);
   }
+  using batch = parser.endBatch();
+  rows += countRowsMatching(batch.rowsInto(rowsBuffer, SELECTED_COLUMNS), predicate);
+  return rows;
 }
 
 async function countJsProjectedIn(): Promise<number> {

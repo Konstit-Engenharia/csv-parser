@@ -11,28 +11,16 @@ export function parseRows(input: string | Buffer, options: CsvParserOptions = {}
 
 export function parseChunkedRows(input: string | Buffer, chunkSize: number, options: CsvParserOptions = {}): CsvRow[] {
   const data = toBuffer(input);
-  const parser = new NativeCsvParser(options);
+  using parser = new NativeCsvParser(options);
   const rows: CsvRow[] = [];
-  try {
-    for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
-      const batch = parser.writeBatch(data.subarray(offset, offset + chunkSize));
-      try {
-        rows.push(...batch.rows());
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endBatch();
-    try {
-      rows.push(...batch.rows());
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
+  for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
+    using batch = parser.writeBatch(data.subarray(offset, offset + chunkSize));
+    rows.push(...batch.rows());
   }
+
+  using batch = parser.endBatch();
+  rows.push(...batch.rows());
+  return rows;
 }
 
 export function rowsToObjects(rows: CsvRow[]): Array<Record<string, string>> {

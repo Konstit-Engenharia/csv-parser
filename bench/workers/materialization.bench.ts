@@ -84,36 +84,24 @@ for (const [name, fn,] of cases) {
 }
 
 async function materializeSingleThread(projection: boolean): Promise<number> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const rowsBuffer: string[][] = [];
   let rows = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = projection
-        ? parser.writeProjectedBatch(chunk as Buffer, { selectedColumns: SELECTED_COLUMNS })
-        : parser.writeBatch(chunk as Buffer);
-      try {
-        rows += projection
-          ? batch.rowsInto(rowsBuffer).length
-          : batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
-      } finally {
-        batch.close();
-      }
-    }
-    const batch = projection
-      ? parser.endProjectedBatch({ selectedColumns: SELECTED_COLUMNS })
-      : parser.endBatch();
-    try {
-      rows += projection
-        ? batch.rowsInto(rowsBuffer).length
-        : batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = projection
+      ? parser.writeProjectedBatch(chunk as Buffer, { selectedColumns: SELECTED_COLUMNS })
+      : parser.writeBatch(chunk as Buffer);
+    rows += projection
+      ? batch.rowsInto(rowsBuffer).length
+      : batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
   }
+  using batch = projection
+    ? parser.endProjectedBatch({ selectedColumns: SELECTED_COLUMNS })
+    : parser.endBatch();
+  rows += projection
+    ? batch.rowsInto(rowsBuffer).length
+    : batch.rowsInto(rowsBuffer, SELECTED_COLUMNS).length;
+  return rows;
 }
 
 async function loadShards(): Promise<TrustedShard[]> {

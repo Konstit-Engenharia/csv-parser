@@ -36,7 +36,7 @@ summary(async () => {
 });
 
 async function countRows(mode: false | 'fixed' | 'trusted'): Promise<number> {
-  const parser = new NativeCsvParser({
+  using parser = new NativeCsvParser({
     delimiter: DELIMITER,
     fixedColumns: mode === 'fixed' ? FIXED_COLUMNS : undefined,
     trusted: mode === 'trusted'
@@ -47,25 +47,13 @@ async function countRows(mode: false | 'fixed' | 'trusted'): Promise<number> {
       : undefined,
   });
   let rows = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowCount;
-      } finally {
-        batch.close();
-      }
-    }
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowCount;
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += batch.rowCount;
   }
+  using batch = parser.endBatch();
+  rows += batch.rowCount;
+  return rows;
 }
 
 async function inferFixedColumns(path: string, delimiter: string): Promise<number> {

@@ -107,30 +107,17 @@ async function consumeMaterializedRowsFromApiWorkers(): Promise<BenchResult> {
 }
 
 async function consumeMaterializedRowsFromRowsInto(): Promise<BenchResult> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
   const rowsBuffer: string[][] = [];
   const result = emptyResult();
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeProjectedBatch(chunk as Buffer, { selectedColumns: SELECTED_COLUMNS });
-      try {
-        consumeMaterializedRows(batch.rowsInto(rowsBuffer), result);
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endProjectedBatch({ selectedColumns: SELECTED_COLUMNS });
-    try {
-      consumeMaterializedRows(batch.rowsInto(rowsBuffer), result);
-    } finally {
-      batch.close();
-    }
-
-    return result;
-  } finally {
-    parser.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    using batch = parser.writeProjectedBatch(chunk as Buffer, { selectedColumns: SELECTED_COLUMNS });
+    consumeMaterializedRows(batch.rowsInto(rowsBuffer), result);
   }
+
+  using batch = parser.endProjectedBatch({ selectedColumns: SELECTED_COLUMNS });
+  consumeMaterializedRows(batch.rowsInto(rowsBuffer), result);
+  return result;
 }
 
 async function consumeProjectedRowViewsBytes(): Promise<BenchResult> {

@@ -36,48 +36,36 @@ addEventListener('message', async (event: MessageEvent<MaterializeWorkerRunMessa
 });
 
 async function materializeShard(message: MaterializeWorkerRunMessage): Promise<number> {
-  const parser = new NativeCsvParser({ delimiter: message.delimiter });
+  using parser = new NativeCsvParser({ delimiter: message.delimiter });
   const rowsBuffer: string[][] = [];
   let rows = 0;
   const sharedCounts = message.sharedCounts === undefined ? undefined : new Int32Array(message.sharedCounts);
-  try {
-    for await (
-      const chunk of createReadStream(message.path, {
-        start: message.shard.start,
-        end: message.shard.end,
-        highWaterMark: message.chunkSize,
-      })
-    ) {
-      const batch = message.projection
-        ? parser.writeProjectedBatch(chunk as Buffer, { selectedColumns: message.selectedColumns })
-        : parser.writeBatch(chunk as Buffer);
-      try {
-        rows += message.projection
-          ? batch.rowsInto(rowsBuffer).length
-          : batch.rowsInto(rowsBuffer, message.selectedColumns).length;
-        if (sharedCounts !== undefined) {
-          Atomics.add(sharedCounts, message.workerIndex, batch.rowCount);
-        }
-      } finally {
-        batch.close();
-      }
+  for await (
+    const chunk of createReadStream(message.path, {
+      start: message.shard.start,
+      end: message.shard.end,
+      highWaterMark: message.chunkSize,
+    })
+  ) {
+    using batch = message.projection
+      ? parser.writeProjectedBatch(chunk as Buffer, { selectedColumns: message.selectedColumns })
+      : parser.writeBatch(chunk as Buffer);
+    rows += message.projection
+      ? batch.rowsInto(rowsBuffer).length
+      : batch.rowsInto(rowsBuffer, message.selectedColumns).length;
+    if (sharedCounts !== undefined) {
+      Atomics.add(sharedCounts, message.workerIndex, batch.rowCount);
     }
-
-    const batch = message.projection
-      ? parser.endProjectedBatch({ selectedColumns: message.selectedColumns })
-      : parser.endBatch();
-    try {
-      rows += message.projection
-        ? batch.rowsInto(rowsBuffer).length
-        : batch.rowsInto(rowsBuffer, message.selectedColumns).length;
-      if (sharedCounts !== undefined && batch.rowCount > 0) {
-        Atomics.add(sharedCounts, message.workerIndex, batch.rowCount);
-      }
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
   }
+
+  using batch = message.projection
+    ? parser.endProjectedBatch({ selectedColumns: message.selectedColumns })
+    : parser.endBatch();
+  rows += message.projection
+    ? batch.rowsInto(rowsBuffer).length
+    : batch.rowsInto(rowsBuffer, message.selectedColumns).length;
+  if (sharedCounts !== undefined && batch.rowCount > 0) {
+    Atomics.add(sharedCounts, message.workerIndex, batch.rowCount);
+  }
+  return rows;
 }

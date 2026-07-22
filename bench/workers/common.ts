@@ -74,17 +74,13 @@ export async function buildNewlineAlignedShards(path: string, shardCount: number
   }
 
   const starts = [0];
-  const file = await open(path, 'r');
-  try {
-    for (let shardIndex = 1; shardIndex < shardCount; ++shardIndex) {
-      const target = Math.floor((size * shardIndex) / shardCount);
-      const start = await findNextLineStart(file, target, size);
-      if (start > (starts.at(-1) ?? 0)) {
-        starts.push(start);
-      }
+  await using file = await open(path, 'r');
+  for (let shardIndex = 1; shardIndex < shardCount; ++shardIndex) {
+    const target = Math.floor((size * shardIndex) / shardCount);
+    const start = await findNextLineStart(file, target, size);
+    if (start > (starts.at(-1) ?? 0)) {
+      starts.push(start);
     }
-  } finally {
-    await file.close();
   }
 
   starts.push(size);
@@ -239,7 +235,7 @@ export function buildNativeCsvSafeShards(
 }
 
 export async function countTrustedShardRows(options: TrustedWorkerOptions): Promise<number> {
-  const parser = new NativeCsvParser({
+  using parser = new NativeCsvParser({
     delimiter: options.delimiter,
     trusted: {
       fixedColumns: options.fixedColumns,
@@ -247,37 +243,24 @@ export async function countTrustedShardRows(options: TrustedWorkerOptions): Prom
     },
   });
   let rows = 0;
-  try {
-    for await (
-      const chunk of createReadStream(options.path, {
-        start: options.shard.start,
-        end: options.shard.end,
-        highWaterMark: options.chunkSize,
-      })
-    ) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowCount;
-        options.onBatchRows?.(batch.rowCount);
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowCount;
-      if (batch.rowCount > 0) {
-        options.onBatchRows?.(batch.rowCount);
-      }
-    } finally {
-      batch.close();
-    }
-
-    return rows;
-  } finally {
-    parser.close();
+  for await (
+    const chunk of createReadStream(options.path, {
+      start: options.shard.start,
+      end: options.shard.end,
+      highWaterMark: options.chunkSize,
+    })
+  ) {
+    using batch = parser.writeBatch(chunk as Buffer);
+    rows += batch.rowCount;
+    options.onBatchRows?.(batch.rowCount);
   }
+
+  using batch = parser.endBatch();
+  rows += batch.rowCount;
+  if (batch.rowCount > 0) {
+    options.onBatchRows?.(batch.rowCount);
+  }
+  return rows;
 }
 
 async function findNextLineStart(file: FileHandle, offset: number, size: number): Promise<number> {
