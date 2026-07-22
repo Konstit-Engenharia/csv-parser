@@ -87,7 +87,6 @@ export interface CsvNativeProjectionOptions {
 
 export interface CsvApiFileOptions extends CsvFileOptions {
   columns?: CsvColumns;
-  stringCache?: CsvStringCacheOptions;
   trustedFixedColumns?: number;
   workerCount?: number;
   where?: CsvWhereFilter;
@@ -181,19 +180,6 @@ export type CsvWorkerPoolOptions<TColumns extends CsvColumns | undefined = undef
 export type CsvProjectedRow<TColumns extends CsvColumns | undefined> = TColumns extends readonly unknown[]
   ? { -readonly [Index in keyof TColumns]: string; }
   : CsvRow;
-
-export interface CsvStringCacheOptions {
-  columns?: CsvColumns;
-  maxEntriesPerColumn?: number;
-}
-
-export interface CsvStringCacheColumnStats {
-  column: number;
-  entries: number;
-  hits: number;
-  misses: number;
-  full: boolean;
-}
 
 export type CsvRowView<TSelectedColumns extends CsvColumns | undefined = undefined> =
   & Pick<

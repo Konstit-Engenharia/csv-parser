@@ -1,3 +1,4 @@
+import { matchesBenchmarkName } from '../benchmark-filter.ts';
 import {
   BYTES,
   CHUNK_SIZE,
@@ -10,6 +11,10 @@ await runCountOnce('csv-parser utf8');
 await runCountOnce('iconv-lite latin1 + csv-parser', 'latin1');
 
 async function runCountOnce(name: string, encoding?: 'latin1'): Promise<void> {
+  if (!matchesBenchmarkName(name)) {
+    return;
+  }
+
   const startedAt = performance.now();
   const rows = await countFileWithCsvParser(FILE, CHUNK_SIZE, DELIMITER, encoding);
   const seconds = (performance.now() - startedAt) / 1000;

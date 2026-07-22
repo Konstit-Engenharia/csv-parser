@@ -55,28 +55,6 @@ describe('csv high-level API', () => {
     ]);
   });
 
-  test('streams selected rows with string cache', async () => {
-    const path = csvFixturePath('api/quoted-people-string-cache.csv');
-    const rows: string[][] = [];
-
-    for await (
-      const batch of csv.rows(path, {
-        columns: [0, 2] as const,
-        delimiter: ';',
-        stringCache: { columns: [2] },
-      })
-    ) {
-      rows.push(...batch);
-    }
-
-    expect(rows).toEqual([
-      ['id', 'uf'],
-      ['1', 'SP'],
-      ['2', 'SP'],
-      ['3', 'RJ'],
-    ]);
-  });
-
   test('reuses base options across operations', async () => {
     const path = csvFixturePath('api/quoted-people-base-options.csv');
     const base = { delimiter: ';' } as const;
@@ -172,29 +150,6 @@ describe('csv high-level API', () => {
     expect(rows.map((row) => row.join('|')).sort()).toEqual([
       '1|Ana',
       '3|Bia',
-    ]);
-  });
-
-  test('streams selected rows through workers with string cache', async () => {
-    const path = csvFixturePath('api/quoted-people-string-cache.csv');
-    const rows: string[][] = [];
-
-    for await (
-      const batch of csv.rows(path, {
-        columns: [0, 2] as const,
-        delimiter: ';',
-        stringCache: { columns: [2] },
-        workerCount: 2,
-      })
-    ) {
-      rows.push(...batch);
-    }
-
-    expect(rows.map((row) => row.join('|')).sort()).toEqual([
-      '1|SP',
-      '2|SP',
-      '3|RJ',
-      'id|uf',
     ]);
   });
 

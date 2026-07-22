@@ -1,5 +1,6 @@
 import { measure } from 'mitata';
 import { statSync } from 'node:fs';
+import { matchesBenchmarkName } from '../benchmark-filter.ts';
 
 export type ExampleBenchCase = readonly [name: string, fn: () => Promise<number> | number];
 
@@ -7,7 +8,6 @@ export const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
 export const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
 export const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 export const SELECTED_COLUMNS = parseColumns(Bun.env['CSV_BENCH_COLUMNS'] ?? '0,4,19');
-export const STRING_CACHE_COLUMNS = parseColumns(Bun.env['CSV_STRING_CACHE_COLUMNS'] ?? '19');
 export const FILTER_COLUMN = Number(Bun.env['CSV_BENCH_FILTER_COLUMN'] ?? 19);
 export const FILTER_VALUE = Bun.env['CSV_BENCH_FILTER_VALUE'] ?? 'SP';
 export const BYTES = statSync(FILE).size;
@@ -19,12 +19,15 @@ export async function runExampleBenchCases(cases: readonly ExampleBenchCase[]): 
     chunkSize: CHUNK_SIZE,
     delimiter: DELIMITER,
     selectedColumns: SELECTED_COLUMNS,
-    stringCacheColumns: STRING_CACHE_COLUMNS,
     filterColumn: FILTER_COLUMN,
     filterValue: FILTER_VALUE,
   });
 
   for (const [name, fn,] of cases) {
+    if (!matchesBenchmarkName(name)) {
+      continue;
+    }
+
     let rows = 0;
     const stats = await measure(async () => {
       rows = await fn();

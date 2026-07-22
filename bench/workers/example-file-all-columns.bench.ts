@@ -7,6 +7,7 @@ import {
   csv,
   NativeCsvParser,
 } from '../../src/index.ts';
+import { matchesBenchmarkName } from '../benchmark-filter.ts';
 
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
@@ -28,6 +29,10 @@ const cases = [
 ] as const;
 
 for (const [name, fn,] of cases) {
+  if (!matchesBenchmarkName(name)) {
+    continue;
+  }
+
   let rows = 0;
   let cells = 0;
   let chars = 0;

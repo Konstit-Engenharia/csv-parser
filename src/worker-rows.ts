@@ -11,7 +11,6 @@ import type {
   CsvFieldValue,
   CsvParallelRowsOptions,
   CsvProjectedRow,
-  CsvStringCacheOptions,
   CsvWhereFilter,
 } from './types.ts';
 
@@ -26,7 +25,6 @@ interface WorkerRowsMessage {
   encoding?: CsvEncoding;
   path: string;
   selectedColumns?: CsvColumns;
-  stringCache?: CsvStringCacheOptions;
   shard: {
     start: number;
     end: number;
@@ -137,7 +135,6 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
           encoding: options.encoding,
           path,
           selectedColumns: selected,
-          stringCache: options.stringCache,
           shard,
           shardIndex,
           whereEquals: whereEqualsFilter(options.where),

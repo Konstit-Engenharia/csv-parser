@@ -3,10 +3,7 @@ import {
   createReadStream,
   statSync,
 } from 'node:fs';
-import {
-  CsvStringCache,
-  NativeCsvParser,
-} from '../src/index.ts';
+import { NativeCsvParser } from '../src/index.ts';
 
 type Mode = 'selected' | 'full' | 'views';
 
@@ -19,14 +16,7 @@ const SELECTED_COLUMNS = (Bun.env['CSV_BENCH_COLUMNS'] ?? '0,4,19')
   .split(',')
   .map((value) => Number(value.trim()))
   .filter((value) => Number.isInteger(value) && value >= 0);
-const CACHE_COLUMNS = (Bun.env['CSV_STRING_CACHE_COLUMNS'] ?? '')
-  .split(',')
-  .filter((value) => value.trim() !== '')
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isInteger(value) && value >= 0);
-
 const parser = new NativeCsvParser({ delimiter: DELIMITER });
-const stringCache = CACHE_COLUMNS.length === 0 ? undefined : new CsvStringCache({ columns: CACHE_COLUMNS });
 const rowsBuffer: string[][] = [];
 const bytes = statSync(FILE).size;
 let chunks = 0;
@@ -55,7 +45,7 @@ try {
         batch.fieldOffsets();
       } else {
         const columns = MODE === 'selected' ? SELECTED_COLUMNS : undefined;
-        const materialized = batch.rowsInto(rowsBuffer, columns, stringCache);
+        const materialized = batch.rowsInto(rowsBuffer, columns);
         rows += materialized.length;
         cells += countCells(materialized);
       }
@@ -92,8 +82,6 @@ console.log({
   rows,
   cells,
   selectedColumns: SELECTED_COLUMNS,
-  cacheColumns: CACHE_COLUMNS,
-  cacheStats: stringCache?.stats() ?? [],
   seconds,
   decodeSeconds: decodeMs / 1000,
   rowsPerSecond: rows / seconds,

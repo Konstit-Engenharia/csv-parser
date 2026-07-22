@@ -4,7 +4,6 @@ import {
   test,
 } from 'bun:test';
 import {
-  CsvStringCache,
   NativeCsvParser,
   NativeCsvRowView,
   parseCsvBuffer,
@@ -220,32 +219,6 @@ describe('NativeCsvParser batches and materialization', () => {
             ufBuffer: 'RJ',
           },
         ]);
-      } finally {
-        batch.close();
-      }
-    } finally {
-      parser.close();
-    }
-  });
-
-  test('can reuse decoded strings for selected low-cardinality columns', () => {
-    const parser = new NativeCsvParser({ delimiter: ';' });
-    const cache = new CsvStringCache({ columns: [2] });
-    try {
-      const batch = parser.writeBatch(readCsvFixture('native/quoted-semicolon-people-with-repeated-state.csv'), true);
-      try {
-        expect(batch.rowsInto([], [0, 2], cache)).toEqual([
-          ['1', 'SP'],
-          ['2', 'SP'],
-          ['3', 'RJ'],
-        ]);
-        expect(cache.stats()).toEqual([{
-          column: 2,
-          entries: 2,
-          hits: 1,
-          misses: 2,
-          full: false,
-        }]);
       } finally {
         batch.close();
       }

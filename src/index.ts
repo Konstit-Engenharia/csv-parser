@@ -35,8 +35,6 @@ export type {
   CsvShard,
   CsvSingleThreadRowsOptions,
   CsvStartsWithFilter,
-  CsvStringCacheColumnStats,
-  CsvStringCacheOptions,
   CsvTrustedParserOptions,
   CsvWhereEqualsFilter,
   CsvWhereFilter,
@@ -72,4 +70,3 @@ export {
 } from './files.ts';
 export { defineColumnarOptions, defineCountOptions, defineRowsOptions, defineRowViewOptions } from './options.ts';
 export { NativeCsvParser } from './parser.ts';
-export { CsvStringCache } from './string-cache.ts';

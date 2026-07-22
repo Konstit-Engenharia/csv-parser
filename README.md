@@ -223,7 +223,7 @@ for await (const batch of csv.batches('data.csv', { delimiter: ';' })) {
 
 - `rowCount`, `totalFields`
 - `rows()`
-- `rowsInto(target, columns?, stringCache?)`
+- `rowsInto(target, columns?)`
 - `forEachRow(callback)`
 - `data()`, `dataView()`
 - `rowOffsets()`, `fieldOffsets()`

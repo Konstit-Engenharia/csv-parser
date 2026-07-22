@@ -63,6 +63,9 @@ void csv.rows(path, strictRowsOptions);
 void csv.count(path, strictCountOptions);
 void csv.count(path, startsWithCountOptions);
 
+// @ts-expect-error parser options do not support string caching
+void csv.rows(path, { stringCache: { columns: [0] } });
+
 const rowViewOptions = {
   columns,
   delimiter: ';',

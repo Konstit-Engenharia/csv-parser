@@ -2,6 +2,7 @@ import { measure } from 'mitata';
 import { createReadStream } from 'node:fs';
 import { NativeCsvParser } from '../../src/index.ts';
 import type { CsvColumns } from '../../src/types.ts';
+import { matchesBenchmarkName } from '../benchmark-filter.ts';
 import {
   buildCsvSafeShards,
   buildNativeCsvSafeShards,
@@ -56,6 +57,10 @@ const cases = [
 ] as const;
 
 for (const [name, fn,] of cases) {
+  if (!matchesBenchmarkName(name)) {
+    continue;
+  }
+
   let rows = 0;
   const stats = await measure(async () => {
     rows = await fn();

@@ -1,6 +1,7 @@
 import { measure } from 'mitata';
 import { statSync } from 'node:fs';
 import { csv } from '../../src/index.ts';
+import { matchesBenchmarkName } from '../benchmark-filter.ts';
 import { materializeFileWithCsvParser } from './common.ts';
 
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
@@ -23,6 +24,10 @@ const cases = [
 ] as const;
 
 for (const [name, fn,] of cases) {
+  if (!matchesBenchmarkName(name)) {
+    continue;
+  }
+
   let rows = 0;
   let cells = 0;
   let chars = 0;

@@ -8,12 +8,12 @@ import {
   type CsvRowView,
   NativeCsvParser,
 } from '../src/index.ts';
+import { matchesBenchmarkName } from './benchmark-filter.ts';
 import {
   CHUNK_SIZE,
   DELIMITER,
   FILE,
   SELECTED_COLUMNS,
-  STRING_CACHE_COLUMNS,
 } from './example/config.ts';
 
 interface BenchResult {
@@ -27,9 +27,7 @@ const BYTES = statSync(FILE).size;
 const WORKERS = Number(Bun.env['CSV_BENCH_WORKERS'] ?? 4);
 const CASES = [
   ['csv.rows projected selected columns', () => consumeMaterializedRowsFromApi()],
-  ['csv.rows projected selected columns(cached strings)', () => consumeMaterializedRowsFromApiCached()],
   ['csv.rows projected selected columns(workers)', () => consumeMaterializedRowsFromApiWorkers()],
-  ['csv.rows projected selected columns(workers cached strings)', () => consumeMaterializedRowsFromApiWorkersCached()],
   ['native projected rowsInto(reused js arrays)', () => consumeMaterializedRowsFromRowsInto()],
   ['csv.withColumnarBatches projected selected columns(scanColumns)', () => consumeScannedColumns()],
   ['csv.withColumnarBatches projected selected columns(ranges)', () => consumeColumnarBatchRanges()],
@@ -48,12 +46,15 @@ console.log({
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   selectedColumns: SELECTED_COLUMNS,
-  stringCacheColumns: STRING_CACHE_COLUMNS,
   projectedColumns: PROJECTED_COLUMNS,
   workers: WORKERS,
 });
 
 for (const [name, fn,] of CASES) {
+  if (!matchesBenchmarkName(name)) {
+    continue;
+  }
+
   let result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
   const stats = await measure(async () => {
     result = await fn();
@@ -90,21 +91,6 @@ async function consumeMaterializedRowsFromApi(): Promise<BenchResult> {
   return result;
 }
 
-async function consumeMaterializedRowsFromApiCached(): Promise<BenchResult> {
-  const result = emptyResult();
-  for await (
-    const rows of csv.rows(FILE, {
-      chunkSize: CHUNK_SIZE,
-      delimiter: DELIMITER,
-      columns: SELECTED_COLUMNS,
-      stringCache: { columns: STRING_CACHE_COLUMNS },
-    })
-  ) {
-    consumeMaterializedRows(rows, result);
-  }
-  return result;
-}
-
 async function consumeMaterializedRowsFromApiWorkers(): Promise<BenchResult> {
   const result = emptyResult();
   for await (
@@ -112,22 +98,6 @@ async function consumeMaterializedRowsFromApiWorkers(): Promise<BenchResult> {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
       columns: SELECTED_COLUMNS,
-      workerCount: WORKERS,
-    })
-  ) {
-    consumeMaterializedRows(rows, result);
-  }
-  return result;
-}
-
-async function consumeMaterializedRowsFromApiWorkersCached(): Promise<BenchResult> {
-  const result = emptyResult();
-  for await (
-    const rows of csv.rows(FILE, {
-      chunkSize: CHUNK_SIZE,
-      delimiter: DELIMITER,
-      columns: SELECTED_COLUMNS,
-      stringCache: { columns: STRING_CACHE_COLUMNS },
       workerCount: WORKERS,
     })
   ) {

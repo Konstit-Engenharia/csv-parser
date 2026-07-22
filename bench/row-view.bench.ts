@@ -4,6 +4,7 @@ import {
   statSync,
 } from 'node:fs';
 import { NativeCsvParser } from '../src/index.ts';
+import { matchesBenchmarkName } from './benchmark-filter.ts';
 
 interface BenchResult {
   rows: number;
@@ -38,6 +39,10 @@ console.log({
 });
 
 for (const [name, fn,] of cases) {
+  if (!matchesBenchmarkName(name)) {
+    continue;
+  }
+
   let result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
   const stats = await measure(async () => {
     result = await fn();

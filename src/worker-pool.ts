@@ -10,7 +10,6 @@ import type {
   CsvFieldValue,
   CsvProjectedRow,
   CsvShard,
-  CsvStringCacheOptions,
   CsvWhereFilter,
 } from './types.ts';
 
@@ -50,7 +49,6 @@ interface WorkerRowsMessage {
   encoding?: CsvApiFileOptions['encoding'];
   path: string;
   selectedColumns?: CsvColumns;
-  stringCache?: CsvStringCacheOptions;
   shard: CsvShard;
   shardIndex: number;
   whereEquals?: WorkerEqualsFilterMessage;
@@ -245,7 +243,6 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
             encoding: this.#options.encoding,
             path: this.#path,
             selectedColumns: selected,
-            stringCache: this.#options.stringCache,
             shard,
             shardIndex,
             whereEquals: normalizeRowsWhere(this.#options.where),

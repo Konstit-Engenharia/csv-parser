@@ -6,7 +6,6 @@ import {
 import {
   countCsvFile,
   countCsvFileWhereEquals,
-  CsvStringCache,
   NativeCsvParser,
   parseCsvFile,
   parseCsvFileProjected,
@@ -17,7 +16,6 @@ type ProfileMode =
   | 'materialize'
   | 'materialize-reuse'
   | 'materialize-selected'
-  | 'materialize-selected-cache'
   | 'materialize-selected-native'
   | 'count'
   | 'filter-equals'
@@ -29,11 +27,6 @@ const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 const MODE = (Bun.env['CSV_PROFILE_MODE'] ?? Bun.argv[2] ?? 'materialize-reuse') as ProfileMode;
 const SELECTED_COLUMNS = (Bun.env['CSV_BENCH_COLUMNS'] ?? '0,4,19')
   .split(',')
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isInteger(value) && value >= 0);
-const STRING_CACHE_COLUMNS = (Bun.env['CSV_STRING_CACHE_COLUMNS'] ?? '19')
-  .split(',')
-  .filter((value) => value.trim() !== '')
   .map((value) => Number(value.trim()))
   .filter((value) => Number.isInteger(value) && value >= 0);
 const FILTER_COLUMN = Number(Bun.env['CSV_BENCH_FILTER_COLUMN'] ?? 19);
@@ -58,7 +51,6 @@ console.log({
   selectedColumns: SELECTED_COLUMNS,
   filterColumn: FILTER_COLUMN,
   filterValue: FILTER_VALUE,
-  stringCacheColumns: STRING_CACHE_COLUMNS,
   rows,
   seconds,
   mibPerSecond: bytes / 1024 / 1024 / seconds,
@@ -76,8 +68,6 @@ async function runMode(mode: ProfileMode): Promise<number> {
       return countNativeMaterializedRowsReused();
     case 'materialize-selected':
       return countNativeSelectedRows();
-    case 'materialize-selected-cache':
-      return countNativeSelectedRowsCached();
     case 'materialize-selected-native':
       return countNativeProjectedRows();
     case 'count':
@@ -86,32 +76,6 @@ async function runMode(mode: ProfileMode): Promise<number> {
       return countCsvFileWhereEquals(FILE, FILTER_COLUMN, FILTER_VALUE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER });
     case 'project-filter-equals-native':
       return countNativeProjectedFilteredRows();
-  }
-}
-
-async function countNativeSelectedRowsCached(): Promise<number> {
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
-  const rowsBuffer: string[][] = [];
-  const stringCache = new CsvStringCache({ columns: STRING_CACHE_COLUMNS });
-  let rows = 0;
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        rows += batch.rowsInto(rowsBuffer, SELECTED_COLUMNS, stringCache).length;
-      } finally {
-        batch.close();
-      }
-    }
-    const batch = parser.endBatch();
-    try {
-      rows += batch.rowsInto(rowsBuffer, SELECTED_COLUMNS, stringCache).length;
-    } finally {
-      batch.close();
-    }
-    return rows;
-  } finally {
-    parser.close();
   }
 }
 

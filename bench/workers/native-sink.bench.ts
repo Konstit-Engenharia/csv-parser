@@ -1,6 +1,7 @@
 import { measure } from 'mitata';
 import { createReadStream } from 'node:fs';
 import { NativeCsvParser } from '../../src/index.ts';
+import { matchesBenchmarkName } from '../benchmark-filter.ts';
 import {
   buildNativeCsvSafeShards,
   fileSize,
@@ -46,6 +47,10 @@ const cases = [
 ] as const;
 
 for (const [name, fn,] of cases) {
+  if (!matchesBenchmarkName(name)) {
+    continue;
+  }
+
   let result: NativeSinkResult = {
     cells: 0,
     dataBytes: 0,

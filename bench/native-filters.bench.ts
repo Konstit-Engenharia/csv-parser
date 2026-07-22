@@ -9,6 +9,7 @@ import {
   NativeCsvParser,
   parseCsvFileProjected,
 } from '../src/index.ts';
+import { matchesBenchmarkName } from './benchmark-filter.ts';
 
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
@@ -51,6 +52,10 @@ console.log({
 });
 
 for (const [name, fn,] of cases) {
+  if (!matchesBenchmarkName(name)) {
+    continue;
+  }
+
   let rows = 0;
   const stats = await measure(async () => {
     rows = await fn();

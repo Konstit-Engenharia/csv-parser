@@ -10,7 +10,6 @@ import {
   normalizeColumns,
   normalizeFilterColumn,
 } from './normalize.ts';
-import type { CsvStringCache } from './string-cache.ts';
 import type {
   CsvColumnBytesCallback,
   CsvColumnRangeCallback,
@@ -170,7 +169,7 @@ export class NativeCsvBatch {
     }
   }
 
-  rowsInto(target: CsvRow[], columns?: CsvColumns, stringCache?: CsvStringCache): CsvRow[] {
+  rowsInto(target: CsvRow[], columns?: CsvColumns): CsvRow[] {
     normalizeColumns(columns);
     const rowCount = this.rowCount;
     const totalFields = this.totalFields;
@@ -197,9 +196,7 @@ export class NativeCsvBatch {
 
           const start = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
           const end = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
-          row[outputIndex] = stringCache === undefined
-            ? data.toString('utf8', start, end)
-            : stringCache.decode(data, start, end, column);
+          row[outputIndex] = data.toString('utf8', start, end);
         }
         target[rowIndex] = row;
       }
@@ -217,9 +214,7 @@ export class NativeCsvBatch {
         const start = offsetAt(fieldOffsets, fieldIndex, 'field offset', data.byteLength);
         const end = offsetAt(fieldOffsets, fieldIndex + 1, 'field offset', data.byteLength);
         const column = fieldIndex - fieldStart;
-        row[column] = stringCache === undefined
-          ? data.toString('utf8', start, end)
-          : stringCache.decode(data, start, end, column);
+        row[column] = data.toString('utf8', start, end);
       }
       target[rowIndex] = row;
     }

@@ -1,9 +1,39 @@
 // Discovers, filters, imports, and runs the repository's mitata benchmarks.
 import { Glob } from 'bun';
 import { run } from 'mitata';
+import { setBenchmarkNameFilter } from '../bench/benchmark-filter.ts';
 
 const benchmarkDirectory = new URL('../bench/', import.meta.url);
-const fileFilters = Bun.argv.slice(2);
+const arguments_ = Bun.argv.slice(2);
+const fileFilters: string[] = [];
+let benchmarkFilter = /.*/;
+
+for (let index = 0; index < arguments_.length; ++index) {
+  const argument = arguments_[index];
+  if (argument === undefined) {
+    break;
+  }
+  if (argument !== '--filter') {
+    fileFilters.push(argument);
+    continue;
+  }
+
+  const pattern = arguments_[++index];
+  if (pattern === undefined) {
+    console.error('Missing benchmark name regex after --filter');
+    process.exit(1);
+  }
+
+  try {
+    benchmarkFilter = new RegExp(pattern);
+  } catch {
+    console.error(`Invalid benchmark name regex: ${pattern}`);
+    process.exit(1);
+  }
+}
+
+setBenchmarkNameFilter(benchmarkFilter);
+
 const glob = new Glob('**/*.bench.{js,jsx,mjs,cjs,ts,tsx,mts,cts}');
 const benchmarkFiles: string[] = [];
 
@@ -33,4 +63,4 @@ for (const path of benchmarkFiles) {
   await import(new URL(path, benchmarkDirectory).href);
 }
 
-await run({ throw: true, colors: true });
+await run({ throw: true, colors: true, filter: benchmarkFilter });

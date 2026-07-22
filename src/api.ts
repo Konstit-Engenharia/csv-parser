@@ -12,7 +12,6 @@ import {
   rejectStrictSchemaUnsupported,
   strictSchemaValidator,
 } from './strict-schema.ts';
-import { CsvStringCache } from './string-cache.ts';
 import type {
   CsvApiFileOptions,
   CsvBatchesOptions,
@@ -56,13 +55,12 @@ export async function parse<TColumns extends CsvColumns | undefined = undefined>
   rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
-  const stringCache = createStringCache(options);
   try {
     const batch = writeMaterializeBatch(parser, buffer, options, true);
     try {
       validator?.validateBatch(batch);
       validator?.finish();
-      return materializeRows(batch, options, stringCache);
+      return materializeRows(batch, options);
     } finally {
       batch.close();
     }
@@ -90,14 +88,13 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
   rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
-  const stringCache = createStringCache(options);
   try {
     for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
       const batch = writeMaterializeBatch(parser, chunk as Buffer, options);
       if (batch.rowCount > 0) {
         try {
           validator?.validateBatch(batch);
-          const values = materializeRows(batch, options, stringCache);
+          const values = materializeRows(batch, options);
           if (values.length > 0) {
             yield values;
           }
@@ -114,7 +111,7 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
       try {
         validator?.validateBatch(batch);
         validator?.finish();
-        const values = materializeRows(batch, options, stringCache);
+        const values = materializeRows(batch, options);
         if (values.length > 0) {
           yield values;
         }
@@ -473,52 +470,12 @@ function selectedColumns(options: CsvApiFileOptions): CsvColumns | undefined {
 function materializeRows<TColumns extends CsvColumns | undefined>(
   batch: NativeCsvBatch,
   options: CsvApiFileOptions & { columns?: TColumns; },
-  stringCache?: CsvStringCache,
 ): CsvProjectedRow<TColumns>[] {
   const columns = selectedColumns(options);
   if (usesProjectedMaterialization(options)) {
-    if (stringCache !== undefined && columns !== undefined) {
-      return materializeProjectedRows(batch, columns, stringCache) as CsvProjectedRow<TColumns>[];
-    }
     return batch.rowsInto([]) as CsvProjectedRow<TColumns>[];
   }
-  return batch.rowsInto([], columns, stringCache) as CsvProjectedRow<TColumns>[];
-}
-
-function materializeProjectedRows(batch: NativeCsvBatch, columns: CsvColumns, stringCache: CsvStringCache): string[][] {
-  const rows: string[][] = [];
-  rows.length = batch.rowCount;
-  const projectedColumns = projectedColumnIndexes(columns);
-  batch.scanColumns(projectedColumns, (rowIndex, ranges, data) => {
-    const row: string[] = [];
-    row.length = columns.length;
-    for (let columnIndex = 0; columnIndex < columns.length; ++columnIndex) {
-      const rangeIndex = columnIndex * 2;
-      const start = ranges[rangeIndex] ?? -1;
-      const end = ranges[rangeIndex + 1] ?? -1;
-      row[columnIndex] = start === -1 || end === -1
-        ? ''
-        : stringCache.decode(data, start, end, columns[columnIndex] ?? 0);
-    }
-    rows[rowIndex] = row;
-  });
-  return rows;
-}
-
-function projectedColumnIndexes(columns: CsvColumns): CsvColumns {
-  const projected: number[] = [];
-  projected.length = columns.length;
-  for (let index = 0; index < columns.length; ++index) {
-    projected[index] = index;
-  }
-  return projected;
-}
-
-function createStringCache(options: CsvApiFileOptions): CsvStringCache | undefined {
-  if (options.stringCache === undefined) {
-    return undefined;
-  }
-  return new CsvStringCache(options.stringCache);
+  return batch.rowsInto([], columns) as CsvProjectedRow<TColumns>[];
 }
 
 function usesProjectedMaterialization(options: CsvApiFileOptions): boolean {
