@@ -32,53 +32,37 @@ for (const row of await readCsvParserRows()) {
 async function readNativeRows(): Promise<string[][]> {
   // The parser keeps incomplete quoted records between `writeBatch()` calls,
   // which is why arbitrary stream chunks are safe to pass directly.
-  const parser = new NativeCsvParser({ delimiter: DELIMITER });
+  using parser = new NativeCsvParser({ delimiter: DELIMITER });
 
   // `rowsInto()` reuses both this outer array and its existing row arrays across
   // batches. Reuse avoids allocating a fresh array shape for every native batch.
   const rowsBuffer: string[][] = [];
   const output: string[][] = [];
-  try {
-    for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
-      // `writeBatch()` emits only complete records currently available. The
-      // parser retains any partial trailing record for the next call.
-      const batch = parser.writeBatch(chunk as Buffer);
-      try {
-        for (const row of batch.rowsInto(rowsBuffer)) {
-          // Copy before retaining: the next `rowsInto()` call may overwrite this
-          // reused row array in place.
-          output.push([...row]);
-          if (output.length >= LIMIT) {
-            return output;
-          }
-        }
-      } finally {
-        // Every batch owns native resources and must be closed independently of
-        // the parser, including when the row limit returns from this function.
-        batch.close();
+  for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
+    // `writeBatch()` emits only complete records currently available. The
+    // parser retains any partial trailing record for the next call.
+    using batch = parser.writeBatch(chunk as Buffer);
+    for (const row of batch.rowsInto(rowsBuffer)) {
+      // Copy before retaining: the next `rowsInto()` call may overwrite this
+      // reused row array in place.
+      output.push([...row]);
+      if (output.length >= LIMIT) {
+        return output;
       }
     }
-
-    // Finalization flushes a last record even when the file does not end with a
-    // newline and reports any error that is only knowable at end-of-input.
-    const batch = parser.endBatch();
-    try {
-      for (const row of batch.rowsInto(rowsBuffer)) {
-        // The final batch uses the same reusable row storage as regular batches.
-        output.push([...row]);
-        if (output.length >= LIMIT) {
-          return output;
-        }
-      }
-    } finally {
-      batch.close();
-    }
-    return output;
-  } finally {
-    // Closing in `finally` covers normal EOF, early LIMIT returns, stream errors,
-    // decoding errors, and failures raised by parser finalization.
-    parser.close();
   }
+
+  // Finalization flushes a last record even when the file does not end with a
+  // newline and reports any error that is only knowable at end-of-input.
+  using batch = parser.endBatch();
+  for (const row of batch.rowsInto(rowsBuffer)) {
+    // The final batch uses the same reusable row storage as regular batches.
+    output.push([...row]);
+    if (output.length >= LIMIT) {
+      return output;
+    }
+  }
+  return output;
 }
 
 function readCsvParserRows(): Promise<Record<string, string>[]> {

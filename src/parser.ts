@@ -23,6 +23,10 @@ import type {
   CsvStartsWithFilter,
 } from './types.ts';
 
+const nativeCsvParserFinalizer = new FinalizationRegistry<Pointer>((handle) => {
+  native.symbols.csv_parser_destroy(handle);
+});
+
 export class NativeCsvParser {
   #handle: Pointer | null;
   readonly #strict: boolean;
@@ -42,10 +46,12 @@ export class NativeCsvParser {
       throw new Error('use fixedColumns or trusted.fixedColumns, not both');
     }
 
-    this.#handle = native.symbols.csv_parser_create(encodingCode(options.encoding), delimiter.charCodeAt(0));
-    if (this.#handle === null) {
+    const handle = native.symbols.csv_parser_create(encodingCode(options.encoding), delimiter.charCodeAt(0));
+    if (handle === null) {
       throw new Error('failed to create native CSV parser');
     }
+    this.#handle = handle;
+    nativeCsvParserFinalizer.register(this, handle, this);
   }
 
   get closed(): boolean {
@@ -328,10 +334,14 @@ export class NativeCsvParser {
   }
 
   close(): void {
-    if (this.#handle !== null) {
-      native.symbols.csv_parser_destroy(this.#handle);
-      this.#handle = null;
+    const handle = this.#handle;
+    if (handle === null) {
+      return;
     }
+
+    this.#handle = null;
+    nativeCsvParserFinalizer.unregister(this);
+    native.symbols.csv_parser_destroy(handle);
   }
 
   dispose(): void {

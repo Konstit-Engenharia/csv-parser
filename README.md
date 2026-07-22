@@ -207,15 +207,11 @@ await csv.withBatches(
 If you requested projected columns elsewhere in the API, `row.selectedColumns` is metadata that lets you map projected
 positions back to source columns.
 
-If you use `csv.batches()` directly, close each batch:
+If you use `csv.batches()` directly, declare each batch with `using` so it is disposed after its iteration:
 
 ```ts
-for await (const batch of csv.batches('data.csv', { delimiter: ';' })) {
-  try {
-    console.log(batch.rowCount);
-  } finally {
-    batch.close();
-  }
+for await (using batch of csv.batches('data.csv', { delimiter: ';' })) {
+  console.log(batch.rowCount);
 }
 ```
 
@@ -246,22 +242,14 @@ Use `NativeCsvParser` when you already own chunking:
 ```ts
 import { NativeCsvParser } from '@konstit/csv-parser';
 
-const parser = new NativeCsvParser({ delimiter: ';' });
+using parser = new NativeCsvParser({ delimiter: ';' });
 const rowsBuffer: string[][] = [];
 
-try {
-  const batch = parser.writeBatch(Buffer.from('1;Ana\n2;Bia\n'), true);
-  try {
-    console.log(batch.rowsInto(rowsBuffer));
-  } finally {
-    batch.close();
-  }
-} finally {
-  parser.close();
-}
+using batch = parser.writeBatch(Buffer.from('1;Ana\n2;Bia\n'), true);
+console.log(batch.rowsInto(rowsBuffer));
 ```
 
-Always close parser-owned batches and the parser. `NativeCsvParser` supports row batches, projected batches, and direct
+Always dispose parser-owned batches and the parser. `NativeCsvParser` supports row batches, projected batches, and direct
 count filters.
 
 Resource objects expose `close()`, `dispose()`, `closed`, and `Symbol.dispose`, so explicit-resource-management syntax works
