@@ -10,6 +10,20 @@ set(CSV_NATIVE_ARCH "" CACHE STRING "Native target architecture (x86_64 or arm64
 set_property(CACHE CSV_NATIVE_ARCH PROPERTY STRINGS x86_64 arm64)
 option(CSV_NATIVE_SANITIZERS "Build native targets with sanitizers" OFF)
 set(CSV_NATIVE_SANITIZER_LIST "address,undefined" CACHE STRING "Comma-separated sanitizer list for native sanitizer builds")
+option(CSV_NATIVE_PGO_INSTRUMENT "Build native targets with Clang IR-PGO instrumentation" OFF)
+set(CSV_NATIVE_PGO_PROFILE "" CACHE FILEPATH "Clang IR-PGO .profdata file used to optimize native targets")
+
+if(CSV_NATIVE_PGO_INSTRUMENT AND NOT CSV_NATIVE_PGO_PROFILE STREQUAL "")
+  message(FATAL_ERROR "CSV_NATIVE_PGO_INSTRUMENT and CSV_NATIVE_PGO_PROFILE are mutually exclusive")
+endif()
+
+if(CSV_NATIVE_SANITIZERS AND (CSV_NATIVE_PGO_INSTRUMENT OR NOT CSV_NATIVE_PGO_PROFILE STREQUAL ""))
+  message(FATAL_ERROR "Native sanitizers cannot be combined with PGO instrumentation or profile use")
+endif()
+
+if(NOT CSV_NATIVE_PGO_PROFILE STREQUAL "" AND NOT EXISTS "${CSV_NATIVE_PGO_PROFILE}")
+  message(FATAL_ERROR "CSV_NATIVE_PGO_PROFILE does not exist: ${CSV_NATIVE_PGO_PROFILE}")
+endif()
 
 if(CSV_NATIVE_ARCH STREQUAL "")
   if(CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64|x86_64)$")
@@ -80,6 +94,14 @@ function(csv_native_target_options target)
     target_link_options(${target} PRIVATE -fsanitize=${CSV_NATIVE_SANITIZER_LIST})
   else()
     target_compile_options(${target} PRIVATE ${CSV_NATIVE_OPTIMIZED_FLAGS})
+  endif()
+
+  if(CSV_NATIVE_PGO_INSTRUMENT)
+    target_compile_options(${target} PRIVATE -fprofile-instr-generate)
+    target_link_options(${target} PRIVATE -fprofile-instr-generate)
+  elseif(NOT CSV_NATIVE_PGO_PROFILE STREQUAL "")
+    target_compile_options(${target} PRIVATE "-fprofile-instr-use=${CSV_NATIVE_PGO_PROFILE}")
+    target_link_options(${target} PRIVATE "-fprofile-instr-use=${CSV_NATIVE_PGO_PROFILE}")
   endif()
 endfunction()
 
