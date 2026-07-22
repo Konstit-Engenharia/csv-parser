@@ -148,4 +148,19 @@ describe('NativeCsvParser file streams', () => {
       rmSync(path, { force: true });
     }
   });
+
+  test('keeps CRLF and quoted newlines intact at exact split offsets', async () => {
+    const crlfPath = join(import.meta.dir, 'tmp-split-crlf.csv');
+    const escapedPath = join(import.meta.dir, 'tmp-split-escaped.csv');
+    await Bun.write(crlfPath, 'a;b\r\n1;"x\r\ny"\r\n2;z\r\n');
+    await Bun.write(escapedPath, 'a;"b""\nc";d\nx;y;z\n');
+    try {
+      expect(findCsvSafeSplitOffsets(crlfPath, 2, { delimiter: ';' })).toEqual([0, 15, 20]);
+      expect(findCsvSafeSplitOffsets(crlfPath, 4, { delimiter: ';' })).toEqual([0, 5, 15, 20]);
+      expect(findCsvSafeSplitOffsets(escapedPath, 2, { delimiter: ';' })).toEqual([0, 12, 18]);
+    } finally {
+      rmSync(crlfPath, { force: true });
+      rmSync(escapedPath, { force: true });
+    }
+  });
 });

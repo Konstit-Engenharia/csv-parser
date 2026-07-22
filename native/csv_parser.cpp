@@ -1,6 +1,7 @@
 #include <ankerl/unordered_dense.h>
 #include <hwy/highway.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -12,13 +13,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#if defined(__ARM_NEON)
-#include <arm_neon.h>
-#endif
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
 
 #if defined(_WIN32)
 #define CSV_EXPORT extern "C" __declspec(dllexport)
@@ -185,28 +179,149 @@ constexpr size_t npos = std::numeric_limits<size_t>::max();
 constexpr uint32_t max_column_index = 2024;
 constexpr uint64_t max_projection_length = 2024;
 
-uint64_t count_trusted_newlines(const uint8_t* data, size_t len) {
+struct csv_structural_state {
+  bool in_quotes = false;
+  bool pending_quote = false;
+  bool at_field_start = true;
+  bool previous_was_cr = false;
+  bool saw_row_data = false;
+  uint64_t deferred_cr_row_end = 0;
+};
+
+template <bool defer_crlf, typename OnRowEnd>
+HWY_ATTR bool scan_csv_row_ends(const uint8_t* data, size_t len, uint8_t delimiter, uint64_t base_offset,
+                                csv_structural_state& state, OnRowEnd&& on_row_end) {
+  // BitsFromMask exposes one bit per lane in a uint64_t, so keep blocks at most 64 bytes wide.
+  const hn::CappedTag<uint8_t, 64> du8;
+  const size_t lanes = hn::Lanes(du8);
+  const auto quote_v = hn::Set(du8, static_cast<uint8_t>('"'));
+  const auto lf_v = hn::Set(du8, static_cast<uint8_t>('\n'));
+  const auto cr_v = hn::Set(du8, static_cast<uint8_t>('\r'));
+
+  for (size_t block_start = 0; block_start < len; block_start += lanes) {
+    const size_t block_size = std::min(lanes, len - block_start);
+    const auto bytes =
+        block_size == lanes ? hn::LoadU(du8, data + block_start) : hn::LoadN(du8, data + block_start, block_size);
+    const auto quote_mask = hn::Eq(bytes, quote_v);
+    const auto row_end_mask = hn::Or(hn::Eq(bytes, lf_v), hn::Eq(bytes, cr_v));
+    // Delimiters only affect whether a later quote opens a field. The byte immediately before that
+    // quote is sufficient, which keeps common delimiter-heavy CSV data out of the scalar event loop.
+    const auto special_mask = hn::Or(quote_mask, row_end_mask);
+    const uint64_t valid_bits =
+        block_size == 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << block_size) - 1;
+    const uint64_t quote_bits = hn::BitsFromMask(du8, quote_mask) & valid_bits;
+    const uint64_t special_bits = hn::BitsFromMask(du8, special_mask) & valid_bits;
+    size_t cursor = 0;
+
+    while (cursor < block_size) {
+      if (state.in_quotes) {
+        if (state.pending_quote) {
+          if (data[block_start + cursor] == '"') {
+            state.pending_quote = false;
+            state.saw_row_data = true;
+            state.at_field_start = false;
+            ++cursor;
+            continue;
+          }
+          state.pending_quote = false;
+          state.in_quotes = false;
+          continue;
+        }
+
+        const uint64_t candidates = quote_bits & (std::numeric_limits<uint64_t>::max() << cursor);
+        state.saw_row_data = true;
+        state.at_field_start = false;
+        if (candidates == 0) {
+          cursor = block_size;
+          continue;
+        }
+
+        cursor = hwy::Num0BitsBelowLS1Bit_Nonzero64(candidates) + 1;
+        state.pending_quote = true;
+        continue;
+      }
+
+      if (state.previous_was_cr) {
+        state.previous_was_cr = false;
+        if (data[block_start + cursor] == '\n') {
+          if constexpr (defer_crlf) {
+            const uint64_t row_end = state.deferred_cr_row_end + 1;
+            state.deferred_cr_row_end = 0;
+            if (!on_row_end(row_end)) {
+              return false;
+            }
+          }
+          ++cursor;
+          continue;
+        }
+        if constexpr (defer_crlf) {
+          const uint64_t row_end = state.deferred_cr_row_end;
+          state.deferred_cr_row_end = 0;
+          if (!on_row_end(row_end)) {
+            return false;
+          }
+        }
+      }
+
+      const uint64_t candidates = special_bits & (std::numeric_limits<uint64_t>::max() << cursor);
+      if (candidates == 0) {
+        state.saw_row_data = true;
+        state.at_field_start = data[block_start + block_size - 1] == delimiter;
+        cursor = block_size;
+        continue;
+      }
+
+      const size_t event = hwy::Num0BitsBelowLS1Bit_Nonzero64(candidates);
+      if (event > cursor) {
+        state.saw_row_data = true;
+        state.at_field_start = data[block_start + event - 1] == delimiter;
+      }
+
+      const uint8_t byte = data[block_start + event];
+      cursor = event + 1;
+      if (byte == '"') {
+        if (state.at_field_start) {
+          state.in_quotes = true;
+          state.pending_quote = false;
+        }
+        state.saw_row_data = true;
+        state.at_field_start = false;
+        continue;
+      }
+      state.saw_row_data = false;
+      state.at_field_start = true;
+      state.previous_was_cr = byte == '\r';
+      const uint64_t row_end = base_offset + block_start + event + 1;
+      if constexpr (defer_crlf) {
+        // Safe file splits must include a following LF instead of landing inside a CRLF pair.
+        if (state.previous_was_cr) {
+          state.deferred_cr_row_end = row_end;
+          continue;
+        }
+      }
+      if (!on_row_end(row_end)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+HWY_ATTR uint64_t count_trusted_newlines(const uint8_t* data, size_t len) {
   if (data == nullptr || len == 0) {
     return 0;
   }
 
+  const hn::ScalableTag<uint8_t> du8;
+  const size_t lanes = hn::Lanes(du8);
+  const auto newline = hn::Set(du8, static_cast<uint8_t>('\n'));
   uint64_t rows = 0;
   size_t i = 0;
-#if defined(__AVX2__)
-  const __m256i newline = _mm256_set1_epi8('\n');
-  for (; i + 32 <= len; i += 32) {
-    const __m256i bytes = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data + i));
-    const __m256i matches = _mm256_cmpeq_epi8(bytes, newline);
-    rows += static_cast<uint64_t>(__builtin_popcount(static_cast<unsigned>(_mm256_movemask_epi8(matches))));
+  for (; i + lanes <= len; i += lanes) {
+    const auto bytes = hn::LoadU(du8, data + i);
+    rows += static_cast<uint64_t>(hn::CountTrue(du8, hn::Eq(bytes, newline)));
   }
-#elif defined(__ARM_NEON)
-  const uint8x16_t newline = vdupq_n_u8('\n');
-  for (; i + 16 <= len; i += 16) {
-    const uint8x16_t bytes = vld1q_u8(data + i);
-    const uint8x16_t matches = vceqq_u8(bytes, newline);
-    rows += static_cast<uint64_t>(vaddvq_u8(vcntq_u8(matches)) >> 3);
-  }
-#endif
   for (; i < len; ++i) {
     rows += data[i] == '\n' ? 1 : 0;
   }
@@ -256,94 +371,45 @@ std::unique_ptr<csv_split_offsets_batch> find_csv_safe_split_offsets(const char*
   for (size_t shard_index = 1; shard_index < shard_count; ++shard_index) {
     targets.push_back((file_size * static_cast<uint64_t>(shard_index)) / static_cast<uint64_t>(shard_count));
   }
+  if (targets.empty()) {
+    batch->offsets.push_back(file_size);
+    std::fclose(file);
+    return batch;
+  }
 
   std::vector<uint8_t> buffer(8 * 1024 * 1024);
   size_t target_index = 0;
   uint64_t absolute = 0;
-  bool in_quotes = false;
-  bool at_field_start = true;
-  bool pending_quote = false;
-  bool previous_was_cr = false;
+  csv_structural_state state;
+  const auto on_row_end = [&](uint64_t row_end) {
+    bool crossed_target = false;
+    while (target_index < targets.size() && row_end >= targets[target_index]) {
+      crossed_target = true;
+      ++target_index;
+    }
+    if (crossed_target && row_end > batch->offsets.back()) {
+      batch->offsets.push_back(row_end);
+    }
+    return target_index < targets.size();
+  };
 
-  while (true) {
+  while (target_index < targets.size()) {
     const size_t bytes_read = std::fread(buffer.data(), 1, buffer.size(), file);
     if (bytes_read == 0) {
       break;
     }
 
-    size_t index = 0;
-    while (index < bytes_read && target_index < targets.size()) {
-      const uint8_t byte = buffer[index];
-
-      if (pending_quote) {
-        if (byte == '"') {
-          pending_quote = false;
-          at_field_start = false;
-          ++index;
-          ++absolute;
-          continue;
-        }
-        pending_quote = false;
-        in_quotes = false;
-        continue;
-      }
-
-      if (in_quotes) {
-        if (byte == '"') {
-          pending_quote = true;
-        }
-        ++index;
-        ++absolute;
-        continue;
-      }
-
-      if (previous_was_cr && byte == '\n') {
-        previous_was_cr = false;
-        ++index;
-        ++absolute;
-        continue;
-      }
-      previous_was_cr = false;
-
-      if (byte == '"' && at_field_start) {
-        in_quotes = true;
-        at_field_start = false;
-        ++index;
-        ++absolute;
-        continue;
-      }
-
-      if (byte == '\n' || byte == '\r') {
-        const uint64_t row_end = absolute + 1;
-        previous_was_cr = byte == '\r';
-        at_field_start = true;
-        bool crossed_target = false;
-        while (target_index < targets.size() && row_end >= targets[target_index]) {
-          crossed_target = true;
-          ++target_index;
-        }
-        if (crossed_target && row_end > batch->offsets.back()) {
-          batch->offsets.push_back(row_end);
-        }
-        ++index;
-        ++absolute;
-        continue;
-      }
-
-      if (byte == delimiter) {
-        at_field_start = true;
-      } else {
-        at_field_start = false;
-      }
-
-      ++index;
-      ++absolute;
-    }
-
-    absolute += static_cast<uint64_t>(bytes_read - index);
-    if (target_index >= targets.size()) {
+    if (!scan_csv_row_ends<true>(buffer.data(), bytes_read, delimiter, absolute, state, on_row_end)) {
       break;
     }
+    absolute += static_cast<uint64_t>(bytes_read);
+  }
+
+  if (target_index < targets.size() && state.previous_was_cr) {
+    state.previous_was_cr = false;
+    const uint64_t row_end = state.deferred_cr_row_end;
+    state.deferred_cr_row_end = 0;
+    on_row_end(row_end);
   }
 
   std::fclose(file);
@@ -375,86 +441,36 @@ void append_latin1_scalar_byte(std::string& out, uint8_t byte) {
   }
 }
 
-#if defined(__AVX2__)
-constexpr size_t latin1_simd_block = 16;
-
-bool latin1_simd_block_all_non_ascii(const uint8_t* data) {
-  const __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
-  return _mm_movemask_epi8(bytes) == 0xFFFF;
-}
-
-void append_latin1_simd_non_ascii_block(std::string& out, const uint8_t* data) {
-  const __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
-  const __m256i widened = _mm256_cvtepu8_epi16(bytes);
-  const __m256i leading =
-      _mm256_or_si256(_mm256_srli_epi16(widened, 6), _mm256_set1_epi16(static_cast<int16_t>(0x00C0)));
-  const __m256i trailing = _mm256_or_si256(_mm256_and_si256(widened, _mm256_set1_epi16(0x003F)),
-                                           _mm256_set1_epi16(static_cast<int16_t>(0x0080)));
-  const __m256i packed = _mm256_or_si256(leading, _mm256_slli_epi16(trailing, 8));
-
-  const size_t offset = out.size();
-  out.resize(offset + latin1_simd_block * 2);
-  _mm256_storeu_si256(reinterpret_cast<__m256i*>(out.data() + offset), packed);
-}
-#define CSV_NATIVE_LATIN1_SIMD_BLOCK 1
-#elif defined(__ARM_NEON) && defined(__aarch64__)
-constexpr size_t latin1_simd_block = 16;
-
-bool latin1_simd_block_all_non_ascii(const uint8_t* data) {
-  const uint8x16_t bytes = vld1q_u8(data);
-  return vminvq_u8(bytes) >= 0x80;
-}
-
-uint16x8_t latin1_neon_encode_half(uint8x8_t bytes) {
-  const uint16x8_t widened = vmovl_u8(bytes);
-  const uint16x8_t leading = vorrq_u16(vshrq_n_u16(widened, 6), vdupq_n_u16(0x00C0));
-  const uint16x8_t trailing = vorrq_u16(vandq_u16(widened, vdupq_n_u16(0x003F)), vdupq_n_u16(0x0080));
-  return vorrq_u16(leading, vshlq_n_u16(trailing, 8));
-}
-
-void append_latin1_simd_non_ascii_block(std::string& out, const uint8_t* data) {
-  const uint8x16_t bytes = vld1q_u8(data);
-  const uint16x8_t low = latin1_neon_encode_half(vget_low_u8(bytes));
-  const uint16x8_t high = latin1_neon_encode_half(vget_high_u8(bytes));
-
-  const size_t offset = out.size();
-  out.resize(offset + latin1_simd_block * 2);
-  auto* dst = reinterpret_cast<uint8_t*>(out.data() + offset);
-  vst1q_u8(dst, vreinterpretq_u8_u16(low));
-  vst1q_u8(dst + 16, vreinterpretq_u8_u16(high));
-}
-#define CSV_NATIVE_LATIN1_SIMD_BLOCK 1
-#endif
-
-void append_latin1(std::string& out, const uint8_t* data, size_t len) {
+HWY_ATTR void append_latin1(std::string& out, const uint8_t* data, size_t len) {
   const hn::ScalableTag<uint8_t> du8;
   const size_t lanes = hn::Lanes(du8);
   const auto limit = hn::Set(du8, static_cast<uint8_t>(0x80));
-  const auto high_bit = hn::Set(du8, static_cast<uint8_t>(0x80));
+  const auto leading_bits = hn::Set(du8, static_cast<uint8_t>(0xC0));
+  const auto trailing_mask = hn::Set(du8, static_cast<uint8_t>(0x3F));
+  const auto trailing_bits = hn::Set(du8, static_cast<uint8_t>(0x80));
   size_t i = 0;
 
   while (i < len) {
-    while (i + lanes <= len) {
-      const auto bytes = hn::LoadU(du8, data + i);
-      if (!hn::AllTrue(du8, hn::Lt(bytes, limit))) {
-        break;
-      }
-      out.append(reinterpret_cast<const char*>(data + i), lanes);
-      i += lanes;
-    }
-
-#if defined(CSV_NATIVE_LATIN1_SIMD_BLOCK)
-    if (i + latin1_simd_block <= len && latin1_simd_block_all_non_ascii(data + i)) {
-      append_latin1_simd_non_ascii_block(out, data + i);
-      i += latin1_simd_block;
-      continue;
-    }
-#endif
-
     if (i + lanes <= len) {
       const auto bytes = hn::LoadU(du8, data + i);
-      const auto non_ascii = hn::Eq(hn::And(bytes, high_bit), high_bit);
-      const intptr_t first_non_ascii = hn::FindFirstTrue(du8, non_ascii);
+      const auto ascii = hn::Lt(bytes, limit);
+      if (hn::AllTrue(du8, ascii)) {
+        out.append(reinterpret_cast<const char*>(data + i), lanes);
+        i += lanes;
+        continue;
+      }
+
+      if (hn::AllFalse(du8, ascii)) {
+        const auto leading = hn::Or(hn::ShiftRight<6>(bytes), leading_bits);
+        const auto trailing = hn::Or(hn::And(bytes, trailing_mask), trailing_bits);
+        const size_t offset = out.size();
+        out.resize(offset + lanes * 2);
+        hn::StoreInterleaved2(leading, trailing, du8, reinterpret_cast<uint8_t*>(out.data() + offset));
+        i += lanes;
+        continue;
+      }
+
+      const intptr_t first_non_ascii = hn::FindFirstTrue(du8, hn::Not(ascii));
       if (first_non_ascii > 0) {
         out.append(reinterpret_cast<const char*>(data + i), static_cast<size_t>(first_non_ascii));
         i += static_cast<size_t>(first_non_ascii);
@@ -472,7 +488,7 @@ void append_latin1(std::string& out, const uint8_t* data, size_t len) {
   }
 }
 
-size_t find_byte_simd(const uint8_t* data, size_t len, uint8_t needle) {
+HWY_ATTR size_t find_byte_simd(const uint8_t* data, size_t len, uint8_t needle) {
   const hn::ScalableTag<uint8_t> du8;
   const size_t lanes = hn::Lanes(du8);
   const auto wanted = hn::Set(du8, needle);
@@ -495,7 +511,7 @@ size_t find_byte_simd(const uint8_t* data, size_t len, uint8_t needle) {
   return npos;
 }
 
-size_t find_plain_special_simd(const uint8_t* data, size_t len, uint8_t delimiter) {
+HWY_ATTR size_t find_plain_special_simd(const uint8_t* data, size_t len, uint8_t delimiter) {
   const hn::ScalableTag<uint8_t> du8;
   const size_t lanes = hn::Lanes(du8);
   const auto delimiter_v = hn::Set(du8, delimiter);
@@ -523,7 +539,7 @@ size_t find_plain_special_simd(const uint8_t* data, size_t len, uint8_t delimite
   return npos;
 }
 
-size_t find_strict_plain_special_simd(const uint8_t* data, size_t len, uint8_t delimiter) {
+HWY_ATTR size_t find_strict_plain_special_simd(const uint8_t* data, size_t len, uint8_t delimiter) {
   const hn::ScalableTag<uint8_t> du8;
   const size_t lanes = hn::Lanes(du8);
   const auto delimiter_v = hn::Set(du8, delimiter);
@@ -1173,72 +1189,24 @@ private:
   }
 
   void parse_count_only(const uint8_t* data, size_t len) {
-    size_t i = 0;
-    while (i < len) {
-      if (in_quotes_) {
-        if (pending_quote_) {
-          if (data[i] == '"') {
-            pending_quote_ = false;
-            saw_row_data_ = true;
-            at_field_start_ = false;
-            ++i;
-            continue;
-          }
-          pending_quote_ = false;
-          in_quotes_ = false;
-          continue;
-        }
-
-        const size_t quote = find_byte_simd(data + i, len - i, '"');
-        saw_row_data_ = true;
-        at_field_start_ = false;
-        if (quote == npos) {
-          return;
-        }
-        i += quote + 1;
-        pending_quote_ = true;
-        continue;
-      }
-
-      const uint8_t byte = data[i];
-      if (previous_was_cr_ && byte == '\n') {
-        previous_was_cr_ = false;
-        ++i;
-        continue;
-      }
-      previous_was_cr_ = false;
-
-      if (byte == '"' && at_field_start_) {
-        in_quotes_ = true;
-        pending_quote_ = false;
-        saw_row_data_ = true;
-        at_field_start_ = false;
-        ++i;
-        continue;
-      }
-
-      if (byte == '\n' || byte == '\r') {
-        ++emitted_rows_;
-        previous_was_cr_ = byte == '\r';
-        saw_row_data_ = false;
-        at_field_start_ = true;
-        current_column_ = 0;
-        ++i;
-        continue;
-      }
-
-      if (byte == delimiter_) {
-        saw_row_data_ = true;
-        at_field_start_ = true;
-        ++i;
-        continue;
-      }
-
-      const size_t span = find_plain_span(data + i, len - i);
-      saw_row_data_ = true;
-      at_field_start_ = false;
-      i += span;
-    }
+    csv_structural_state state{
+        .in_quotes = in_quotes_,
+        .pending_quote = pending_quote_,
+        .at_field_start = at_field_start_,
+        .previous_was_cr = previous_was_cr_,
+        .saw_row_data = saw_row_data_,
+    };
+    const auto on_row_end = [this](uint64_t) {
+      ++emitted_rows_;
+      current_column_ = 0;
+      return true;
+    };
+    scan_csv_row_ends<false>(data, len, delimiter_, 0, state, on_row_end);
+    in_quotes_ = state.in_quotes;
+    pending_quote_ = state.pending_quote;
+    at_field_start_ = state.at_field_start;
+    previous_was_cr_ = state.previous_was_cr;
+    saw_row_data_ = state.saw_row_data;
   }
 
   bool parse_trusted_fixed_rows(const uint8_t* data, size_t len, bool final, uint32_t fixed_columns, bool strict) {
@@ -1403,7 +1371,7 @@ private:
     return found == npos ? len : found;
   }
 
-  size_t find_complete_quoted_field_close(const uint8_t* data, size_t len) const {
+  HWY_ATTR size_t find_complete_quoted_field_close(const uint8_t* data, size_t len) const {
     complete_quoted_field_has_escape_ = false;
 
     const hn::CappedTag<uint8_t, 64> du8;

@@ -3,7 +3,10 @@ import {
   expect,
   test,
 } from 'bun:test';
-import { parseCsvBuffer } from '../../src/index.ts';
+import {
+  NativeCsvParser,
+  parseCsvBuffer,
+} from '../../src/index.ts';
 import {
   parseChunkedRows,
   parseRows,
@@ -27,6 +30,10 @@ describe('generated CSV property tests', () => {
           expect(parseChunkedRows(fixture.csv, chunkSize, { delimiter })).toEqual(fixture.rows);
           expect(parseChunkedRows(fixture.csv, chunkSize, { delimiter, strict: true })).toEqual(fixture.rows);
         }
+
+        for (const chunkSize of [1, 2, 15, 16, 17, 31, 32, 33, 63, 64, 65]) {
+          expect(countChunkedRows(fixture.csv, chunkSize, delimiter)).toBe(fixture.rows.length);
+        }
       }
     });
   }
@@ -44,6 +51,20 @@ describe('generated CSV property tests', () => {
     }
   });
 });
+
+function countChunkedRows(csv: string, chunkSize: number, delimiter: string): number {
+  const input = Buffer.from(csv);
+  const parser = new NativeCsvParser({ delimiter });
+  let rows = 0;
+  try {
+    for (let offset = 0; offset < input.length; offset += chunkSize) {
+      rows += parser.writeCount(input.subarray(offset, offset + chunkSize));
+    }
+    return rows + parser.endCount();
+  } finally {
+    parser.close();
+  }
+}
 
 function generateCase(seed: number, delimiter: string): GeneratedCase {
   const random = createRandom(seed);

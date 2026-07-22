@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -95,6 +96,21 @@ void write_count_chunk(void* parser, std::string_view chunk, uint64_t& rows) {
   rows += csv_parser_write_count(parser, reinterpret_cast<const uint8_t*>(chunk.data()), chunk.size(), false);
 }
 
+std::string decode_latin1_reference(const uint8_t* data, size_t len) {
+  std::string decoded;
+  decoded.reserve(len * 2);
+  for (size_t index = 0; index < len; ++index) {
+    const uint8_t byte = data[index];
+    if (byte < 0x80) {
+      decoded.push_back(static_cast<char>(byte));
+    } else {
+      decoded.push_back(static_cast<char>(0xC0 | (byte >> 6)));
+      decoded.push_back(static_cast<char>(0x80 | (byte & 0x3F)));
+    }
+  }
+  return decoded;
+}
+
 std::string make_fuzz_bytes(uint32_t seed) {
   static constexpr uint8_t alphabet[] = {
       'a', 'b', 'c', '0', '1', ',', ';', '"', '\n', '\r', ' ', 0x80, 0xE1,
@@ -159,10 +175,19 @@ void fuzz_count_mode(std::string_view input) {
   void* parser = csv_parser_create(0, ',');
   REQUIRE(parser != nullptr);
   const size_t split = input.size() / 3;
-  csv_parser_write_count(parser, reinterpret_cast<const uint8_t*>(input.data()), split, false);
-  csv_parser_write_count(parser, reinterpret_cast<const uint8_t*>(input.data() + split), input.size() - split, false);
-  csv_parser_finish_count(parser);
+  uint64_t rows = csv_parser_write_count(parser, reinterpret_cast<const uint8_t*>(input.data()), split, false);
+  rows += csv_parser_write_count(parser, reinterpret_cast<const uint8_t*>(input.data() + split), input.size() - split,
+                                 false);
+  rows += csv_parser_finish_count(parser);
   csv_parser_destroy(parser);
+
+  parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  void* batch = csv_parser_write_batch(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true);
+  csv_parser_destroy(parser);
+  REQUIRE(batch != nullptr);
+  REQUIRE(rows == csv_batch_row_count(batch));
+  csv_batch_destroy(batch);
 }
 
 void fuzz_aggregate_modes(std::string_view input) {
@@ -303,6 +328,57 @@ TEST_CASE("native C ABI decodes full latin1 high range to utf8") {
   REQUIRE(std::string(data, len) == expected);
 
   csv_batch_destroy(batch);
+}
+
+TEST_CASE("native C ABI decodes latin1 SIMD tails and mixed runs") {
+  for (const size_t len : {15, 16, 17, 31, 32, 33, 63, 64, 65}) {
+    std::vector<uint8_t> input(len, 0xE1);
+    const std::string expected = decode_latin1_reference(input.data(), input.size());
+    input.push_back('\n');
+
+    void* parser = csv_parser_create(1, ',');
+    REQUIRE(parser != nullptr);
+    void* batch = csv_parser_write_batch(parser, input.data(), input.size(), true);
+    csv_parser_destroy(parser);
+
+    REQUIRE(batch != nullptr);
+    REQUIRE(csv_batch_row_count(batch) == 1);
+    const auto* data = reinterpret_cast<const char*>(csv_batch_data_ptr(batch));
+    const auto data_len = static_cast<size_t>(csv_batch_data_len(batch));
+    REQUIRE(std::string(data, data_len) == expected);
+    csv_batch_destroy(batch);
+  }
+
+  std::vector<uint8_t> mixed;
+  mixed.insert(mixed.end(), 15, 'A');
+  mixed.insert(mixed.end(), 16, 0x80);
+  mixed.push_back('B');
+  mixed.insert(mixed.end(), 17, 0xFF);
+  mixed.insert(mixed.end(), 31, 'C');
+  mixed.push_back(0x81);
+  const std::string expected = decode_latin1_reference(mixed.data(), mixed.size());
+
+  for (const size_t chunk_size : {1, 15, 16, 17, 31, 32, 33}) {
+    void* parser = csv_parser_create(1, ',');
+    REQUIRE(parser != nullptr);
+    for (size_t offset = 0; offset < mixed.size(); offset += chunk_size) {
+      const size_t len = std::min(chunk_size, mixed.size() - offset);
+      void* partial = csv_parser_write_batch(parser, mixed.data() + offset, len, false);
+      REQUIRE(partial != nullptr);
+      REQUIRE(csv_batch_row_count(partial) == 0);
+      csv_batch_destroy(partial);
+    }
+
+    static constexpr uint8_t newline = '\n';
+    void* batch = csv_parser_write_batch(parser, &newline, 1, true);
+    csv_parser_destroy(parser);
+    REQUIRE(batch != nullptr);
+    REQUIRE(csv_batch_row_count(batch) == 1);
+    const auto* data = reinterpret_cast<const char*>(csv_batch_data_ptr(batch));
+    const auto data_len = static_cast<size_t>(csv_batch_data_len(batch));
+    REQUIRE(std::string(data, data_len) == expected);
+    csv_batch_destroy(batch);
+  }
 }
 
 TEST_CASE("native C ABI trusted fixed batch parses chunked rows") {
