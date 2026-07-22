@@ -13,7 +13,7 @@ export const FILTER_VALUE = Bun.env['CSV_BENCH_FILTER_VALUE'] ?? 'SP';
 export const BYTES = statSync(FILE).size;
 
 export async function runExampleBenchCases(cases: readonly ExampleBenchCase[]): Promise<void> {
-  console.log(JSON.stringify({
+  console.log({
     file: FILE,
     bytes: BYTES,
     chunkSize: CHUNK_SIZE,
@@ -22,7 +22,7 @@ export async function runExampleBenchCases(cases: readonly ExampleBenchCase[]): 
     stringCacheColumns: STRING_CACHE_COLUMNS,
     filterColumn: FILTER_COLUMN,
     filterValue: FILTER_VALUE,
-  }));
+  });
 
   for (const [name, fn,] of cases) {
     let rows = 0;
@@ -41,12 +41,12 @@ export async function runExampleBenchCases(cases: readonly ExampleBenchCase[]): 
     const seconds = stats.avg / 1e9;
     const mibPerSecond = BYTES / 1024 / 1024 / seconds;
 
-    console.log(JSON.stringify({
+    console.log({
       name,
       rows,
       seconds,
       mibPerSecond,
-    }));
+    });
   }
 }
 

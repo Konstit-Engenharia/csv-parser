@@ -28,14 +28,14 @@ const cases = [
   ['rowsInto selected fields(print first rows)', () => printSelectedFieldsWithRowsInto()],
 ] as const;
 
-console.log(JSON.stringify({
+console.log({
   file: FILE,
   bytes,
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   selectedColumns: SELECTED_COLUMNS,
   printRows: PRINT_ROWS,
-}));
+});
 
 for (const [name, fn,] of cases) {
   let result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
@@ -54,12 +54,12 @@ for (const [name, fn,] of cases) {
   const seconds = stats.avg / 1e9;
   const mibPerSecond = bytes / 1024 / 1024 / seconds;
 
-  console.log(JSON.stringify({
+  console.log({
     name,
     ...result,
     seconds,
     mibPerSecond,
-  }));
+  });
 }
 
 async function countSelectedFieldsWithRowView(): Promise<BenchResult> {

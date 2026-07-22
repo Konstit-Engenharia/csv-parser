@@ -1,15 +1,5 @@
 # Engineering Guidelines
 
-## Native Code (C++)
-
-- Assume clang as the default and only supported compiler.
-- Use C++20 as the default standard.
-- Use cmake as the default build system.
-- Assume little-endian (x86-64, aarch64) architectures.
-- Assume AVX2 and NEON instruction sets are available.
-- Do not use x86-32 or other legacy architectures.
-- Benchmarks should run in serial, not in parallel agents to avoid CPU sharing and maximize benchmark accuracy.
-
 ## Interpretation
 
 - Security and correctness take precedence over minimizing diff size or preserving a flawed convention.
@@ -70,7 +60,7 @@
 - Avoid introducing abstractions for hypothetical future requirements.
 - Do not duplicate an existing abstraction without first understanding why it exists.
 
-## Variables and Data Flow
+## TypeScript
 
 - Use `const` by default.
 - Use `let` when a value genuinely represents changing local state.
@@ -81,9 +71,6 @@
 - Initialize objects with their complete expected shape when practical.
 - Make ownership of mutable data clear. Do not mutate values owned by callers unless the API contract permits it.
 - Avoid hidden shared state. When shared state is necessary, make its lifecycle and synchronization explicit.
-
-## TypeScript
-
 - Use inference for obvious local variables, callbacks, and private implementation details.
 - Exported functions and public methods must have explicit return types.
 - Add explicit return types to private functions when they document a non-obvious contract, prevent accidental widening, or improve error detection.
@@ -107,6 +94,7 @@
 - Use `field: T | undefined` when a property must exist but its value may be `undefined`.
 - Do not interchange optional and explicitly undefined properties solely for stylistic consistency.
 - Enable `exactOptionalPropertyTypes` for new configurations when compatible with the project. Do not change compiler options in a focused task without assessing repository-wide impact.
+- If `[Symbol.dispose]` is implemented on a resource, prefer a `using` declaration over a `try-finally` block.
 
 ## Error Handling
 
@@ -145,7 +133,29 @@
 - For production logs, follow the project's logging and serialization conventions. Use `JSON.stringify` when the logging contract requires serialized JSON, not solely for cosmetic formatting.
 - Redact sensitive fields before logging or serialization.
 
-## HTML Parsing and Generation
+### Bun FFI
+
+- When declaring a FFI symbol table, add the function signature as a comment above each symbol. Example:
+
+  ```typescript
+  // C signature:
+  // uint64_t csv_parser_finish_count_where_in(void* parser, uint32_t filter_column, const uint8_t* values_data,
+  //                                          uint64_t values_data_len, const uint32_t* value_offsets,
+  //                                          uint64_t value_count)
+  csv_parser_finish_count_where_in: {
+    args: [
+      'ptr', // void* parser
+      'u32', // uint32_t filter_column
+      'buffer', // const uint8_t* values_data
+      'u64', // uint64_t values_data_len
+      'buffer', // const uint32_t* value_offsets
+      'u64' // uint64_t value_count
+    ],
+    returns: 'u64',
+  },
+  ```
+
+### Bun HTML Parsing and Generation
 
 - Prefer Bun's `HTMLRewriter` for selector-based HTML extraction or transformation in Bun-only code.
 - Use `HTMLRewriter` when processing can be performed incrementally without constructing a complete DOM.
@@ -284,3 +294,13 @@ If this repository defines the following package scripts, invoke them explicitly
 - `bun run bench -- <filter>`
 
 Use only scripts that actually exist in the repository, and preserve any repository-specific arguments or ordering documented for them.
+
+## Native Code (C++)
+
+- Assume clang as the default and only supported compiler.
+- Use C++20 as the default standard.
+- Use cmake as the default build system.
+- Assume little-endian (x86-64, aarch64) architectures.
+- Assume AVX2 and NEON instruction sets are available.
+- Do not use x86-32 or other legacy architectures.
+- Benchmarks should run in serial, not in parallel agents to avoid CPU sharing and maximize benchmark accuracy.

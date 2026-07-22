@@ -29,7 +29,8 @@ if (benchmarkFiles.length === 0) {
 }
 
 for (const path of benchmarkFiles) {
+  console.info(`Importing ${path}`);
   await import(new URL(path, benchmarkDirectory).href);
 }
 
-await run({ throw: true });
+await run({ throw: true, colors: true });

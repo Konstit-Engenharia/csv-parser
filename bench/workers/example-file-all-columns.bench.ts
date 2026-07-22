@@ -14,13 +14,13 @@ const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 const WORKERS = Number(Bun.env['CSV_WORKERS'] ?? 4);
 const bytes = statSync(FILE).size;
 
-console.log(JSON.stringify({
+console.log({
   bytes,
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   file: FILE,
   workers: WORKERS,
-}));
+});
 
 const cases = [
   ['native single-thread materialize all columns', () => materializeSingleThread()],
@@ -47,14 +47,14 @@ for (const [name, fn,] of cases) {
   });
 
   const seconds = stats.avg / 1e9;
-  console.log(JSON.stringify({
+  console.log({
     cells,
     chars,
     mibPerSecond: bytes / 1024 / 1024 / seconds,
     name,
     rows,
     seconds,
-  }));
+  });
 }
 
 async function materializeSingleThread(): Promise<{ cells: number; chars: number; rows: number; }> {

@@ -18,14 +18,10 @@ const offsets = csv.findCsvSafeSplitOffsets(FILE, SHARDS, { delimiter: DELIMITER
 // non-empty shards than requested.
 const shards = csv.findCsvSafeShards(FILE, SHARDS, { delimiter: DELIMITER });
 
-console.log(JSON.stringify(
-  {
-    delimiter: DELIMITER,
-    file: FILE,
-    offsets,
-    shardCount: SHARDS,
-    shards,
-  },
-  null,
-  2,
-));
+console.log({
+  delimiter: DELIMITER,
+  file: FILE,
+  offsets,
+  shardCount: SHARDS,
+  shards,
+});

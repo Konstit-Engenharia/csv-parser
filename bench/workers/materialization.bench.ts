@@ -36,7 +36,7 @@ const shardStartedAt = performance.now();
 const shards = await loadShards();
 const shardSeconds = (performance.now() - shardStartedAt) / 1000;
 
-console.log(JSON.stringify({
+console.log({
   bytes,
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
@@ -46,7 +46,7 @@ console.log(JSON.stringify({
   shardBuildSeconds: shardSeconds,
   shardCount: shards.length,
   splitter: SPLITTER,
-}));
+});
 
 const cases = [
   ['single-thread rowsInto selected', () => materializeSingleThread(false)],
@@ -70,12 +70,12 @@ for (const [name, fn,] of cases) {
   });
 
   const seconds = stats.avg / 1e9;
-  console.log(JSON.stringify({
+  console.log({
     mibPerSecond: bytes / 1024 / 1024 / seconds,
     name,
     rows,
     seconds,
-  }));
+  });
 }
 
 async function materializeSingleThread(projection: boolean): Promise<number> {

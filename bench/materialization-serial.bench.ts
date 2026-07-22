@@ -42,7 +42,7 @@ if (SELECTED_COLUMNS.length === 0) {
   throw new Error('CSV_BENCH_COLUMNS must select at least one column');
 }
 
-console.log(JSON.stringify({
+console.log({
   file: FILE,
   bytes: BYTES,
   chunkSize: CHUNK_SIZE,
@@ -51,7 +51,7 @@ console.log(JSON.stringify({
   stringCacheColumns: STRING_CACHE_COLUMNS,
   projectedColumns: PROJECTED_COLUMNS,
   workers: WORKERS,
-}));
+});
 
 for (const [name, fn,] of CASES) {
   let result: BenchResult = { rows: 0, fields: 0, bytes: 0 };
@@ -68,12 +68,12 @@ for (const [name, fn,] of CASES) {
   const seconds = stats.avg / 1e9;
   const mibPerSecond = BYTES / 1024 / 1024 / seconds;
 
-  console.log(JSON.stringify({
+  console.log({
     name,
     ...result,
     seconds,
     mibPerSecond,
-  }));
+  });
 }
 
 async function consumeMaterializedRowsFromApi(): Promise<BenchResult> {

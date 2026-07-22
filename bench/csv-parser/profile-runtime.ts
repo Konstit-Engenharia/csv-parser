@@ -19,22 +19,18 @@ const endedAt = performance.now();
 const after = heapStats();
 const seconds = (endedAt - startedAt) / 1000;
 
-console.log(JSON.stringify(
-  {
-    mode: MODE,
-    file: FILE,
-    bytes,
-    chunkSize: CHUNK_SIZE,
-    delimiter: DELIMITER,
-    rows,
-    seconds,
-    mibPerSecond: bytes / 1024 / 1024 / seconds,
-    heapBefore: summarizeHeap(before),
-    heapAfter: summarizeHeap(after),
-  },
-  null,
-  2,
-));
+console.log({
+  mode: MODE,
+  file: FILE,
+  bytes,
+  chunkSize: CHUNK_SIZE,
+  delimiter: DELIMITER,
+  rows,
+  seconds,
+  mibPerSecond: bytes / 1024 / 1024 / seconds,
+  heapBefore: summarizeHeap(before),
+  heapAfter: summarizeHeap(after),
+});
 
 function runMode(mode: CsvParserProfileMode): Promise<number> {
   switch (mode) {

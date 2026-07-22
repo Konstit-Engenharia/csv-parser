@@ -61,31 +61,27 @@ try {
   parser.close();
 }
 
-console.log(JSON.stringify(
-  {
-    file: FILE,
-    chunkSize: CHUNK_SIZE,
-    chunks,
-    rows,
-    selectedColumns: SELECTED_COLUMNS,
-    seconds: (performance.now() - startedAt) / 1000,
-    columns: SELECTED_COLUMNS.map((column, index) => {
-      const counts = maps[index] ?? new Map<string, number>();
-      const top = [...counts.entries()]
-        .sort((left, right) => right[1] - left[1])
-        .slice(0, TOP_N)
-        .map(([value, count,]) => ({ value, count }));
-      return {
-        column,
-        unique: counts.size,
-        duplicateRatio: rows === 0 ? 0 : 1 - counts.size / rows,
-        top,
-      };
-    }),
-  },
-  null,
-  2,
-));
+console.log({
+  file: FILE,
+  chunkSize: CHUNK_SIZE,
+  chunks,
+  rows,
+  selectedColumns: SELECTED_COLUMNS,
+  seconds: (performance.now() - startedAt) / 1000,
+  columns: SELECTED_COLUMNS.map((column, index) => {
+    const counts = maps[index] ?? new Map<string, number>();
+    const top = [...counts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, TOP_N)
+      .map(([value, count,]) => ({ value, count }));
+    return {
+      column,
+      unique: counts.size,
+      duplicateRatio: rows === 0 ? 0 : 1 - counts.size / rows,
+      top,
+    };
+  }),
+});
 
 function offsetAt(offsets: BigUint64Array, index: number, label: string, upperBound: number): number {
   const value = offsets[index];

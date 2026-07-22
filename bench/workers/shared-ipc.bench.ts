@@ -47,7 +47,7 @@ const shardStartedAt = performance.now();
 const shards = await loadShards();
 const shardSeconds = (performance.now() - shardStartedAt) / 1000;
 
-console.log(JSON.stringify({
+console.log({
   bytes,
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
@@ -58,7 +58,7 @@ console.log(JSON.stringify({
   shardCount: shards.length,
   shards,
   splitter: SPLITTER,
-}));
+});
 
 const cases = [
   ['native trusted single-thread', () => countCsvFile(FILE, trustedOptions())],
@@ -82,12 +82,12 @@ for (const [name, fn,] of cases) {
   });
 
   const seconds = stats.avg / 1e9;
-  console.log(JSON.stringify({
+  console.log({
     mibPerSecond: bytes / 1024 / 1024 / seconds,
     name,
     rows,
     seconds,
-  }));
+  });
 }
 
 function trustedOptions() {

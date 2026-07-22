@@ -31,14 +31,14 @@ const WORKERS = Number(Bun.env['CSV_WORKERS'] ?? Bun.env['CSV_BENCH_WORKERS'] ??
 const bytes = fileSize(FILE);
 const shards = buildNativeCsvSafeShards(FILE, WORKERS, DELIMITER);
 
-console.log(JSON.stringify({
+console.log({
   bytes,
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   file: FILE,
   shardCount: shards.length,
   workers: WORKERS,
-}));
+});
 
 const cases = [
   ['native single-thread sink all columns', () => sinkSingleThread()],
@@ -65,14 +65,14 @@ for (const [name, fn,] of cases) {
   });
 
   const seconds = stats.avg / 1e9;
-  console.log(JSON.stringify({
+  console.log({
     cells: result.cells,
     dataBytes: result.dataBytes,
     mibPerSecond: bytes / 1024 / 1024 / seconds,
     name,
     rows: result.rows,
     seconds,
-  }));
+  });
 }
 
 async function sinkSingleThread(): Promise<NativeSinkResult> {

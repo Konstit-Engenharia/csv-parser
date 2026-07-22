@@ -40,7 +40,7 @@ const cases = [
     })],
 ] as const;
 
-console.log(JSON.stringify({
+console.log({
   file: FILE,
   bytes,
   chunkSize: CHUNK_SIZE,
@@ -48,7 +48,7 @@ console.log(JSON.stringify({
   filterColumn: FILTER_COLUMN,
   filterValues: FILTER_VALUES,
   filterPrefix: FILTER_PREFIX,
-}));
+});
 
 for (const [name, fn,] of cases) {
   let rows = 0;
@@ -64,12 +64,12 @@ for (const [name, fn,] of cases) {
   const seconds = stats.avg / 1e9;
   const mibPerSecond = bytes / 1024 / 1024 / seconds;
 
-  console.log(JSON.stringify({
+  console.log({
     name,
     rows,
     seconds,
     mibPerSecond,
-  }));
+  });
 }
 
 async function countJsMaterializedSelectedIn(): Promise<number> {

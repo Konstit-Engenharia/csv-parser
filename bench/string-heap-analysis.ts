@@ -83,34 +83,30 @@ Bun.gc(true);
 const after = summarizeHeap(heapStats());
 const seconds = (performance.now() - startedAt) / 1000;
 
-console.log(JSON.stringify(
-  {
-    mode: MODE,
-    file: FILE,
-    bytes,
-    chunkSize: CHUNK_SIZE,
-    chunks,
-    rows,
-    cells,
-    selectedColumns: SELECTED_COLUMNS,
-    cacheColumns: CACHE_COLUMNS,
-    cacheStats: stringCache?.stats() ?? [],
-    seconds,
-    decodeSeconds: decodeMs / 1000,
-    rowsPerSecond: rows / seconds,
-    cellsPerSecond: cells / seconds,
-    heapBefore: before,
-    heapPeak: {
-      heapSize: maxHeapSize,
-      objectCount: maxObjectCount,
-      arrayCount: maxArrayCount,
-      stringCount: maxStringCount,
-    },
-    heapAfter: after,
+console.log({
+  mode: MODE,
+  file: FILE,
+  bytes,
+  chunkSize: CHUNK_SIZE,
+  chunks,
+  rows,
+  cells,
+  selectedColumns: SELECTED_COLUMNS,
+  cacheColumns: CACHE_COLUMNS,
+  cacheStats: stringCache?.stats() ?? [],
+  seconds,
+  decodeSeconds: decodeMs / 1000,
+  rowsPerSecond: rows / seconds,
+  cellsPerSecond: cells / seconds,
+  heapBefore: before,
+  heapPeak: {
+    heapSize: maxHeapSize,
+    objectCount: maxObjectCount,
+    arrayCount: maxArrayCount,
+    stringCount: maxStringCount,
   },
-  null,
-  2,
-));
+  heapAfter: after,
+});
 
 function countCells(rows: string[][]): number {
   let count = 0;
