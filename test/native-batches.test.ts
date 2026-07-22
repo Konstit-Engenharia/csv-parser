@@ -40,32 +40,6 @@ describe('NativeCsvParser batches and materialization', () => {
     expect(batch.countWhereEquals(2, 'SP')).toBe(1);
   });
 
-  test('parses trusted fixed-column batches without quoted newlines', () => {
-    using parser = new NativeCsvParser({
-      delimiter: ';',
-      trusted: { fixedColumns: 3, noNewlinesInQuotes: true },
-    });
-    const input = readCsvFixture('native/trusted-fixed-columns-mixed-newlines.csv');
-    const rows: string[][] = [];
-    {
-      using batch = parser.writeBatch(input.subarray(0, 15));
-      expect(batch.rows()).toEqual([]);
-    }
-    {
-      using batch = parser.writeBatch(input.subarray(15));
-      rows.push(...batch.rows());
-    }
-    {
-      using batch = parser.endBatch();
-      rows.push(...batch.rows());
-    }
-
-    expect(rows).toEqual([
-      ['1', 'Ana; A', 'SP'],
-      ['2', 'Joao "J"', 'RJ'],
-    ]);
-  });
-
   test('parses fixed-column batches with quoted newlines', () => {
     using parser = new NativeCsvParser({
       delimiter: ';',
@@ -95,26 +69,6 @@ describe('NativeCsvParser batches and materialization', () => {
   test('fixed-column batches reject column count mismatch', () => {
     using parser = new NativeCsvParser({ delimiter: ';', fixedColumns: 3 });
     expect(() => parser.writeBatch(readCsvFixture('native/fixed-column-mismatch.csv'))).toThrow('fixed row column count mismatch');
-  });
-
-  test('trusted fixed-column batches decode latin1', () => {
-    using parser = new NativeCsvParser({
-      delimiter: ';',
-      encoding: 'latin1',
-      trusted: { fixedColumns: 2, noNewlinesInQuotes: true },
-    });
-    using batch = parser.writeBatch(readCsvFixture('native/latin1-one-name.csv'), true);
-    expect(batch.rows()).toEqual([['1', 'João']]);
-  });
-
-  test('trusted fixed-column batches reject column count mismatch', () => {
-    using parser = new NativeCsvParser({
-      delimiter: ';',
-      trusted: { fixedColumns: 3, noNewlinesInQuotes: true },
-    });
-    expect(() => parser.writeBatch(readCsvFixture('native/fixed-column-mismatch.csv'))).toThrow(
-      'trusted fixed row column count mismatch',
-    );
   });
 
   test('iterates rows with one reusable row view', () => {

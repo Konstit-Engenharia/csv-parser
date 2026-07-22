@@ -62,7 +62,7 @@ console.log({
 });
 
 const cases = [
-  ['native trusted single-thread', () => countCsvFile(FILE, trustedOptions())],
+  ['native fixed-column single-thread', () => countCsvFile(FILE, fixedColumnOptions())],
   ['workers postMessage final', () => countShardedWorkers('message-final', shards)],
   ['workers postMessage progress', () => countShardedWorkers('message-progress', shards)],
   ['workers shared progress', () => countShardedWorkers('shared-progress', shards)],
@@ -95,14 +95,11 @@ for (const [name, fn,] of cases) {
   });
 }
 
-function trustedOptions() {
+function fixedColumnOptions() {
   return {
     chunkSize: CHUNK_SIZE,
     delimiter: DELIMITER,
-    trusted: {
-      fixedColumns: FIXED_COLUMNS,
-      noNewlinesInQuotes: true as const,
-    },
+    fixedColumns: FIXED_COLUMNS,
   };
 }
 

@@ -12,7 +12,6 @@ import {
   normalizeFixedColumnsCount,
   normalizeInFilter,
   normalizeStartsWithFilter,
-  normalizeTrustedFixedColumns,
 } from './normalize.ts';
 import type {
   CsvEqualsFilter,
@@ -31,7 +30,6 @@ export class NativeCsvParser {
   #handle: Pointer | null;
   readonly #strict: boolean;
   readonly #fixedColumns: number | undefined;
-  readonly #trustedFixedColumns: number | undefined;
 
   constructor(options: CsvParserOptions = {}) {
     const delimiter = options.delimiter ?? ',';
@@ -41,10 +39,6 @@ export class NativeCsvParser {
     this.#strict = options.strict === true;
     normalizeColumns(options.selectedColumns);
     this.#fixedColumns = normalizeFixedColumnsCount(options.fixedColumns, 'fixed column count');
-    this.#trustedFixedColumns = normalizeTrustedFixedColumns(options.trusted);
-    if (this.#fixedColumns !== undefined && this.#trustedFixedColumns !== undefined) {
-      throw new Error('use fixedColumns or trusted.fixedColumns, not both');
-    }
 
     const handle = native.symbols.csv_parser_create(encodingCode(options.encoding), delimiter.charCodeAt(0));
     if (handle === null) {
@@ -74,15 +68,7 @@ export class NativeCsvParser {
 
     const handle = this.#requireHandle();
     const input = normalizeChunk(chunk);
-    const batch = this.#strict && this.#trustedFixedColumns !== undefined
-      ? native.symbols.csv_parser_write_strict_trusted_fixed_batch(
-        handle,
-        input,
-        BigInt(input.byteLength),
-        final,
-        this.#trustedFixedColumns,
-      )
-      : this.#strict && this.#fixedColumns !== undefined
+    const batch = this.#strict && this.#fixedColumns !== undefined
       ? native.symbols.csv_parser_write_strict_fixed_batch(
         handle,
         input,
@@ -92,14 +78,6 @@ export class NativeCsvParser {
       )
       : this.#strict
       ? native.symbols.csv_parser_write_strict_batch(handle, input, BigInt(input.byteLength), final)
-      : this.#trustedFixedColumns !== undefined
-      ? native.symbols.csv_parser_write_trusted_fixed_batch(
-        handle,
-        input,
-        BigInt(input.byteLength),
-        final,
-        this.#trustedFixedColumns,
-      )
       : this.#fixedColumns !== undefined
       ? native.symbols.csv_parser_write_fixed_batch(
         handle,
@@ -158,14 +136,10 @@ export class NativeCsvParser {
   }
 
   endBatch(): NativeCsvBatch {
-    const batch = this.#strict && this.#trustedFixedColumns !== undefined
-      ? native.symbols.csv_parser_finish_strict_trusted_fixed_batch(this.#requireHandle(), this.#trustedFixedColumns)
-      : this.#strict && this.#fixedColumns !== undefined
+    const batch = this.#strict && this.#fixedColumns !== undefined
       ? native.symbols.csv_parser_finish_strict_fixed_batch(this.#requireHandle(), this.#fixedColumns)
       : this.#strict
       ? native.symbols.csv_parser_finish_strict_batch(this.#requireHandle())
-      : this.#trustedFixedColumns !== undefined
-      ? native.symbols.csv_parser_finish_trusted_fixed_batch(this.#requireHandle(), this.#trustedFixedColumns)
       : this.#fixedColumns !== undefined
       ? native.symbols.csv_parser_finish_fixed_batch(this.#requireHandle(), this.#fixedColumns)
       : native.symbols.csv_parser_finish_batch(this.#requireHandle());

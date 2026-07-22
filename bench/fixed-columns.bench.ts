@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { NativeCsvParser } from '../src/index.ts';
 
+// Measures the supported fixed-column materialization path against the general parser baseline.
 const GENERATED_ROWS = Number(Bun.env['CSV_BENCH_GENERATED_ROWS'] ?? 5_000_000);
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? await generateFixture(GENERATED_ROWS);
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
@@ -17,8 +18,7 @@ const bytes = statSync(FILE).size;
 
 const cases = [
   ['native batch parser', () => countRows(false)],
-  ['native fixed-column batch parser', () => countRows('fixed')],
-  ['native trusted fixed batch parser', () => countRows('trusted')],
+  ['native fixed-column batch parser', () => countRows(true)],
 ] as const;
 
 console.log({
@@ -35,16 +35,10 @@ summary(async () => {
   }
 });
 
-async function countRows(mode: false | 'fixed' | 'trusted'): Promise<number> {
+async function countRows(fixedColumns: boolean): Promise<number> {
   using parser = new NativeCsvParser({
     delimiter: DELIMITER,
-    fixedColumns: mode === 'fixed' ? FIXED_COLUMNS : undefined,
-    trusted: mode === 'trusted'
-      ? {
-        fixedColumns: FIXED_COLUMNS,
-        noNewlinesInQuotes: true,
-      }
-      : undefined,
+    fixedColumns: fixedColumns ? FIXED_COLUMNS : undefined,
   });
   let rows = 0;
   for await (const chunk of createReadStream(FILE, { highWaterMark: CHUNK_SIZE })) {
@@ -82,7 +76,7 @@ async function inferFixedColumns(path: string, delimiter: string): Promise<numbe
 }
 
 async function generateFixture(rows: number): Promise<string> {
-  const path = `/tmp/csv-trusted-fixed-${rows}.csv`;
+  const path = `/tmp/csv-fixed-columns-${rows}.csv`;
   const writer = Bun.file(path).writer();
   for (let row = 0; row < rows; ++row) {
     void writer.write(`${row};Ana${row % 10};SP\n`);

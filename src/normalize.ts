@@ -9,7 +9,6 @@ import type {
   CsvFieldValue,
   CsvInFilter,
   CsvStartsWithFilter,
-  CsvTrustedParserOptions,
 } from './types.ts';
 
 export const MAX_COLUMN_INDEX = 2024;
@@ -28,16 +27,6 @@ export function encodingCode(encoding: CsvEncoding = 'utf8'): number {
 
 export function normalizeChunk(chunk: NodeJS.TypedArray | DataView): NodeJS.TypedArray | DataView {
   return chunk.byteLength === 0 ? EMPTY_BUFFER : chunk;
-}
-
-export function normalizeTrustedFixedColumns(trusted: CsvTrustedParserOptions | undefined): number | undefined {
-  if (trusted === undefined) {
-    return undefined;
-  }
-  if (trusted.noNewlinesInQuotes !== true) {
-    throw new Error('trusted.noNewlinesInQuotes must be true');
-  }
-  return normalizeFixedColumnsCount(trusted.fixedColumns, 'trusted fixed column count');
 }
 
 export function normalizeFixedColumnsCount(value: number | undefined, label: string): number | undefined {

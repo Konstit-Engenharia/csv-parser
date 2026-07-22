@@ -13,8 +13,6 @@ void* csv_parser_finish_batch(void* parser);
 void* csv_parser_write_strict_batch(void* parser, const uint8_t* data, uint64_t len, bool final);
 void* csv_parser_finish_strict_batch(void* parser);
 void* csv_parser_write_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final, uint32_t fixed_columns);
-void* csv_parser_write_trusted_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
-                                           uint32_t fixed_columns);
 uint64_t csv_parser_write_count(void* parser, const uint8_t* data, uint64_t len, bool final);
 uint64_t csv_parser_finish_count(void* parser);
 void csv_batch_destroy(void* batch);
@@ -103,15 +101,13 @@ void fuzz_batch_mode(std::string_view input, bool strict) {
   csv_parser_destroy(parser);
 }
 
-void fuzz_fixed_mode(std::string_view input, bool trusted) {
+void fuzz_fixed_mode(std::string_view input) {
   void* parser = csv_parser_create(0, ',');
   if (!ensure_parser(parser)) {
     std::exit(1);
   }
-  void* batch = trusted ? csv_parser_write_trusted_fixed_batch(parser, reinterpret_cast<const uint8_t*>(input.data()),
-                                                               input.size(), true, 3)
-                        : csv_parser_write_fixed_batch(parser, reinterpret_cast<const uint8_t*>(input.data()),
-                                                       input.size(), true, 3);
+  void* batch =
+      csv_parser_write_fixed_batch(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true, 3);
   destroy_batch_if_present(batch);
   csv_parser_destroy(parser);
 }
@@ -131,8 +127,7 @@ void fuzz_count_mode(std::string_view input) {
 void fuzz_one(std::string_view input) {
   fuzz_batch_mode(input, false);
   fuzz_batch_mode(input, true);
-  fuzz_fixed_mode(input, false);
-  fuzz_fixed_mode(input, true);
+  fuzz_fixed_mode(input);
   fuzz_count_mode(input);
 }
 

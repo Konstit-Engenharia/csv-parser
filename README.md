@@ -113,8 +113,6 @@ Supported helpers:
 `delimiter` suggests common CSV delimiters in TypeScript while accepting any string. Runtime parsing still requires
 exactly one character.
 
-`trustedFixedColumns(count)` enables the fastest fixed-column path for trusted input with no newlines in quoted fields.
-
 ## Strict Validation
 
 `strict: true` validates RFC-style quote syntax for row materialization:
@@ -138,9 +136,8 @@ await csv.parse(Buffer.from('id,name\n1,Ada\n'), {
 - `requireHeader` rejects empty input when a header row is required.
 - `minDataRows` validates row count after the header row.
 
-Strict mode currently covers row batches, `count()` without filters, `fixedColumns`, the fast `trustedFixedColumns` path,
-and row schema metadata. Projected batches and count filters reject `strict: true` explicitly until they have strict native
-variants.
+Strict mode currently covers row batches, `count()` without filters, `fixedColumns`, and row schema metadata. Projected
+batches and count filters reject `strict: true` explicitly until they have strict native variants.
 
 ## Typed Options
 

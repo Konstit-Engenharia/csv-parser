@@ -153,10 +153,10 @@ describe('csv high-level API', () => {
     ]);
   });
 
-  test('counts rows with filters and trusted fixed-column shortcut', async () => {
+  test('counts rows with filters', async () => {
     const path = csvFixturePath('api/unquoted-people-sp-filter.csv');
 
-    expect(await csv.count(path, { delimiter: ';', trustedFixedColumns: 3 })).toBe(4);
+    expect(await csv.count(path, { delimiter: ';' })).toBe(4);
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, equals: 'SP' } })).toBe(2);
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
     expect(await csv.count(path, { delimiter: ';', where: { column: 1, startsWith: 'A' } })).toBe(1);

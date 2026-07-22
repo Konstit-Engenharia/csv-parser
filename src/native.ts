@@ -89,32 +89,6 @@ const CSV_SYMBOLS = {
     returns: 'ptr',
   },
   // C signature:
-  // void* csv_parser_write_trusted_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
-  //                                            uint32_t fixed_columns);
-  csv_parser_write_trusted_fixed_batch: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
-    returns: 'ptr',
-  },
-  // C signature:
-  // void* csv_parser_finish_trusted_fixed_batch(void* parser, uint32_t fixed_columns);
-  csv_parser_finish_trusted_fixed_batch: {
-    args: ['ptr', 'u32'],
-    returns: 'ptr',
-  },
-  // C signature:
-  // void* csv_parser_write_strict_trusted_fixed_batch(void* parser, const uint8_t* data, uint64_t len,
-  //                                                   bool final, uint32_t fixed_columns);
-  csv_parser_write_strict_trusted_fixed_batch: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
-    returns: 'ptr',
-  },
-  // C signature:
-  // void* csv_parser_finish_strict_trusted_fixed_batch(void* parser, uint32_t fixed_columns);
-  csv_parser_finish_strict_trusted_fixed_batch: {
-    args: ['ptr', 'u32'],
-    returns: 'ptr',
-  },
-  // C signature:
   // void* csv_parser_write_projected_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
   //                                        bool has_projection, const uint32_t* selected_columns,
   //                                        uint64_t selected_columns_len, bool has_filter,

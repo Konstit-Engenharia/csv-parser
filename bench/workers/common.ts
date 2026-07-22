@@ -237,10 +237,7 @@ export function buildNativeCsvSafeShards(
 export async function countTrustedShardRows(options: TrustedWorkerOptions): Promise<number> {
   using parser = new NativeCsvParser({
     delimiter: options.delimiter,
-    trusted: {
-      fixedColumns: options.fixedColumns,
-      noNewlinesInQuotes: true,
-    },
+    fixedColumns: options.fixedColumns,
   });
   let rows = 0;
   for await (

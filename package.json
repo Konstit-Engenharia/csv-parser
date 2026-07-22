@@ -62,7 +62,7 @@
     "bench:row-view": "bun run bench -- row-view.bench.ts",
     "bench:synthetic:latin1": "bun run bench -- synthetic-latin1.bench.ts",
     "bench:synthetic:utf8": "bun run bench -- synthetic-utf8.bench.ts",
-    "bench:trusted-fixed": "bun run bench -- trusted-fixed.bench.ts",
+    "bench:fixed-columns": "bun run bench -- fixed-columns.bench.ts",
     "bench:workers:materialize": "bun run bench -- workers/materialization.bench.ts",
     "bench:workers:all-columns": "bun run bench -- workers/example-file-all-columns.bench.ts",
     "bench:workers:native-sink": "bun run bench -- workers/native-sink.bench.ts",

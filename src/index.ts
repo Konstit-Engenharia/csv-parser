@@ -35,7 +35,6 @@ export type {
   CsvShard,
   CsvSingleThreadRowsOptions,
   CsvStartsWithFilter,
-  CsvTrustedParserOptions,
   CsvWhereEqualsFilter,
   CsvWhereFilter,
   CsvWhereInFilter,

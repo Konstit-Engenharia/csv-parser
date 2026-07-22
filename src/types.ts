@@ -33,16 +33,10 @@ export interface CsvParserOptions {
   expectedHeaders?: readonly string[];
   requireHeader?: boolean;
   minDataRows?: number;
-  trusted?: CsvTrustedParserOptions;
 }
 
 export interface CsvFileOptions extends CsvParserOptions {
   chunkSize?: number;
-}
-
-export interface CsvTrustedParserOptions {
-  fixedColumns: number;
-  noNewlinesInQuotes: true;
 }
 
 export type CsvWhereFilter =
@@ -87,7 +81,6 @@ export interface CsvNativeProjectionOptions {
 
 export interface CsvApiFileOptions extends CsvFileOptions {
   columns?: CsvColumns;
-  trustedFixedColumns?: number;
   workerCount?: number;
   where?: CsvWhereFilter;
 }

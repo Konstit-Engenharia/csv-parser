@@ -430,31 +430,12 @@ function toParserOptions(options: CsvApiFileOptions | CsvFileOptions): CsvParser
   if ('columns' in options && options.columns !== undefined && options.selectedColumns !== undefined) {
     throw new Error('use columns or selectedColumns, not both');
   }
-  if ('trustedFixedColumns' in options && options.trustedFixedColumns !== undefined) {
-    if (options.trusted !== undefined) {
-      throw new Error('use trustedFixedColumns or trusted, not both');
-    }
-    if (options.fixedColumns !== undefined) {
-      throw new Error('use trustedFixedColumns or fixedColumns, not both');
-    }
-    return {
-      delimiter: options.delimiter,
-      encoding: options.encoding,
-      strict: options.strict,
-      selectedColumns,
-      trusted: {
-        fixedColumns: options.trustedFixedColumns,
-        noNewlinesInQuotes: true,
-      },
-    };
-  }
   return {
     delimiter: options.delimiter,
     encoding: options.encoding,
     strict: options.strict,
     selectedColumns,
     fixedColumns: options.fixedColumns,
-    trusted: options.trusted,
   };
 }
 

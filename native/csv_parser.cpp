@@ -62,14 +62,6 @@ struct csv_batch {
     row_offsets.reserve((input_len / 160) + 32);
   }
 
-  void reserve_trusted(size_t input_len, csv_encoding encoding, uint32_t fixed_columns, size_t rows_hint) {
-    const size_t data_capacity = encoding == csv_encoding::latin1 ? input_len * 2 : input_len;
-    data.reserve(data_capacity);
-    const size_t fields_hint = rows_hint * static_cast<size_t>(fixed_columns) + 1;
-    field_offsets.reserve(fields_hint);
-    row_offsets.reserve(rows_hint + 1);
-  }
-
   void reserve_fixed(size_t input_len, csv_encoding encoding, uint32_t fixed_columns) {
     const size_t data_capacity = encoding == csv_encoding::latin1 ? input_len * 2 : input_len;
     data.reserve(data_capacity);
@@ -538,35 +530,6 @@ public:
     return batch.release();
   }
 
-  csv_batch* write_trusted_fixed_batch(const uint8_t* data, size_t len, bool final, uint32_t fixed_columns) {
-    return write_trusted_fixed_batch_impl(data, len, final, fixed_columns, false);
-  }
-
-  csv_batch* write_strict_trusted_fixed_batch(const uint8_t* data, size_t len, bool final, uint32_t fixed_columns) {
-    return write_trusted_fixed_batch_impl(data, len, final, fixed_columns, true);
-  }
-
-  csv_batch* write_trusted_fixed_batch_impl(const uint8_t* data, size_t len, bool final, uint32_t fixed_columns,
-                                            bool strict) {
-    if (fixed_columns == 0) {
-      set_error("trusted fixed columns must be greater than zero");
-      return nullptr;
-    }
-
-    auto batch = std::make_unique<csv_batch>();
-    batch->reserve_trusted(len, encoding_, fixed_columns, static_cast<size_t>(count_trusted_newlines(data, len)));
-    mode_ = output_mode::batch;
-    batch_ = batch.get();
-    configure(nullptr, 0, row_filter{});
-    emitted_rows_ = 0;
-    if (!parse_trusted_fixed_rows(data, len, final, fixed_columns, strict)) {
-      batch_ = nullptr;
-      return nullptr;
-    }
-    batch_ = nullptr;
-    return batch.release();
-  }
-
   csv_batch* write_projected_batch(const uint8_t* data, size_t len, bool final, const uint32_t* selected_columns,
                                    size_t selected_columns_len, row_filter filter) {
     auto batch = std::make_unique<csv_batch>();
@@ -595,14 +558,6 @@ public:
 
   csv_batch* finish_strict_fixed_batch(uint32_t fixed_columns) {
     return write_strict_fixed_batch(nullptr, 0, true, fixed_columns);
-  }
-
-  csv_batch* finish_trusted_fixed_batch(uint32_t fixed_columns) {
-    return write_trusted_fixed_batch(nullptr, 0, true, fixed_columns);
-  }
-
-  csv_batch* finish_strict_trusted_fixed_batch(uint32_t fixed_columns) {
-    return write_strict_trusted_fixed_batch(nullptr, 0, true, fixed_columns);
   }
 
   csv_batch* finish_projected_batch(const uint32_t* selected_columns, size_t selected_columns_len, row_filter filter) {
@@ -651,7 +606,6 @@ public:
 
   void reset() {
     field_.clear();
-    trusted_row_buffer_.clear();
     row_fields_.clear();
     projected_fields_.clear();
     error_.clear();
@@ -914,162 +868,6 @@ private:
     at_field_start_ = state.at_field_start;
     previous_was_cr_ = state.previous_was_cr;
     saw_row_data_ = state.saw_row_data;
-  }
-
-  bool parse_trusted_fixed_rows(const uint8_t* data, size_t len, bool final, uint32_t fixed_columns, bool strict) {
-    size_t row_start = 0;
-    while (row_start < len) {
-      const size_t newline = find_byte_simd(data + row_start, len - row_start, static_cast<uint8_t>('\n'));
-      if (newline == npos) {
-        break;
-      }
-
-      size_t row_len = newline;
-      if (row_len != 0 && data[row_start + row_len - 1] == '\r') {
-        --row_len;
-      }
-
-      if (!trusted_row_buffer_.empty()) {
-        trusted_row_buffer_.append(reinterpret_cast<const char*>(data + row_start), row_len);
-        if (!parse_trusted_fixed_buffered_row(fixed_columns, strict)) {
-          return false;
-        }
-      } else if (!parse_trusted_fixed_row(data + row_start, row_len, fixed_columns, strict)) {
-        return false;
-      }
-
-      row_start += newline + 1;
-    }
-
-    if (row_start < len) {
-      trusted_row_buffer_.append(reinterpret_cast<const char*>(data + row_start), len - row_start);
-    }
-
-    if (final && !trusted_row_buffer_.empty()) {
-      if (!parse_trusted_fixed_buffered_row(fixed_columns, strict)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  bool parse_trusted_fixed_buffered_row(uint32_t fixed_columns, bool strict) {
-    size_t row_len = trusted_row_buffer_.size();
-    if (row_len != 0 && trusted_row_buffer_[row_len - 1] == '\r') {
-      --row_len;
-    }
-    const bool ok = parse_trusted_fixed_row(reinterpret_cast<const uint8_t*>(trusted_row_buffer_.data()), row_len,
-                                            fixed_columns, strict);
-    trusted_row_buffer_.clear();
-    return ok;
-  }
-
-  bool parse_trusted_fixed_row(const uint8_t* row, size_t len, uint32_t fixed_columns, bool strict) {
-    if (len == 0) {
-      return true;
-    }
-    if (batch_ == nullptr) {
-      set_error("trusted fixed batch is null");
-      return false;
-    }
-
-    uint32_t parsed_columns = 0;
-    size_t i = 0;
-    while (true) {
-      if (i < len && row[i] == '"') {
-        ++i;
-        bool closed = false;
-        while (i < len) {
-          const size_t quote = find_byte_simd(row + i, len - i, static_cast<uint8_t>('"'));
-          const size_t span = quote == npos ? len - i : quote;
-          append_trusted_fixed_span(row + i, span);
-          i += span;
-          if (quote == npos) {
-            break;
-          }
-          ++i;
-          if (i < len && row[i] == '"') {
-            append_trusted_fixed_byte(static_cast<uint8_t>('"'));
-            ++i;
-            continue;
-          }
-          closed = true;
-          break;
-        }
-
-        if (!closed) {
-          set_error("trusted fixed quoted field is not closed before row end");
-          return false;
-        }
-        if (strict && i < len && row[i] != delimiter_) {
-          set_error("strict CSV quote syntax error: unescaped quote in quoted field");
-          return false;
-        }
-        while (i < len && row[i] != delimiter_) {
-          ++i;
-        }
-      } else {
-        const size_t special = strict ? find_trusted_fixed_unquoted_special(row + i, len - i)
-                                      : find_byte_simd(row + i, len - i, delimiter_);
-        const size_t span = special == npos ? len - i : special;
-        append_trusted_fixed_span(row + i, span);
-        i += span;
-        if (strict && i < len && row[i] == '"') {
-          set_error("strict CSV quote syntax error: unescaped quote in "
-                    "unquoted field");
-          return false;
-        }
-      }
-
-      finish_trusted_fixed_field();
-      ++parsed_columns;
-
-      if (i >= len) {
-        break;
-      }
-
-      if (row[i] != delimiter_) {
-        set_error("trusted fixed row parser stopped before delimiter");
-        return false;
-      }
-      ++i;
-
-      if (i == len) {
-        finish_trusted_fixed_field();
-        ++parsed_columns;
-        break;
-      }
-    }
-
-    if (parsed_columns != fixed_columns) {
-      set_error("trusted fixed row column count mismatch");
-      return false;
-    }
-
-    finish_batch_row();
-    ++emitted_rows_;
-    return true;
-  }
-
-  void append_trusted_fixed_byte(uint8_t byte) { append_trusted_fixed_span(&byte, 1); }
-
-  void append_trusted_fixed_span(const uint8_t* data, size_t len) {
-    if (len == 0) {
-      return;
-    }
-    if (encoding_ == csv_encoding::utf8) {
-      batch_->data.append(reinterpret_cast<const char*>(data), len);
-      return;
-    }
-    append_latin1(batch_->data, data, len);
-  }
-
-  void finish_trusted_fixed_field() { batch_->field_offsets.push_back(batch_->data.size()); }
-
-  size_t find_trusted_fixed_unquoted_special(const uint8_t* data, size_t len) const {
-    const size_t found = find_strict_plain_special_simd(data, len, delimiter_);
-    return found == npos || data[found] == '\n' || data[found] == '\r' ? npos : found;
   }
 
   size_t find_plain_span(const uint8_t* data, size_t len) const {
@@ -1643,7 +1441,6 @@ private:
   size_t direct_projection_carry_count_ = 0;
   row_filter filter_;
   std::string field_;
-  std::string trusted_row_buffer_;
   std::vector<std::string> row_fields_;
   std::vector<std::string> projected_fields_;
   std::vector<std::string> in_filter_values_;
@@ -1808,42 +1605,6 @@ CSV_EXPORT void* csv_parser_finish_strict_fixed_batch(void* parser, uint32_t fix
   }
 
   return csv_native::checked_parser(parser)->finish_strict_fixed_batch(fixed_columns);
-}
-
-CSV_EXPORT void* csv_parser_write_trusted_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
-                                                      uint32_t fixed_columns) {
-  if (parser == nullptr || len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-    return nullptr;
-  }
-
-  return csv_native::checked_parser(parser)->write_trusted_fixed_batch(data, static_cast<size_t>(len), final,
-                                                                       fixed_columns);
-}
-
-CSV_EXPORT void* csv_parser_write_strict_trusted_fixed_batch(void* parser, const uint8_t* data, uint64_t len,
-                                                             bool final, uint32_t fixed_columns) {
-  if (parser == nullptr || len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-    return nullptr;
-  }
-
-  return csv_native::checked_parser(parser)->write_strict_trusted_fixed_batch(data, static_cast<size_t>(len), final,
-                                                                              fixed_columns);
-}
-
-CSV_EXPORT void* csv_parser_finish_trusted_fixed_batch(void* parser, uint32_t fixed_columns) {
-  if (parser == nullptr) {
-    return nullptr;
-  }
-
-  return csv_native::checked_parser(parser)->finish_trusted_fixed_batch(fixed_columns);
-}
-
-CSV_EXPORT void* csv_parser_finish_strict_trusted_fixed_batch(void* parser, uint32_t fixed_columns) {
-  if (parser == nullptr) {
-    return nullptr;
-  }
-
-  return csv_native::checked_parser(parser)->finish_strict_trusted_fixed_batch(fixed_columns);
 }
 
 CSV_EXPORT void* csv_parser_write_projected_batch(void* parser, const uint8_t* data, uint64_t len, bool final,

@@ -60,22 +60,6 @@ describe('strict RFC 4180 quote syntax validation', () => {
     );
   });
 
-  test('strict trusted fixedColumns keeps trusted fixed-column path checks', () => {
-    const trusted = { fixedColumns: 3, noNewlinesInQuotes: true } as const;
-
-    expect(parseRows(readCsvFixture('rfc4180-invalid/trusted-fixed-columns-valid.csv'), { trusted, strict: true })).toEqual([[
-      '1',
-      'Ada',
-      'SP',
-    ]]);
-    expect(() => parseRows(readCsvFixture('rfc4180-invalid/fixed-columns-too-few.csv'), { trusted, strict: true })).toThrow(
-      'trusted fixed row column count mismatch',
-    );
-    expect(() => parseRows(readCsvFixture('rfc4180-invalid/fixed-columns-unescaped-quote.csv'), { trusted, strict: true })).toThrow(
-      'unescaped quote in unquoted field',
-    );
-  });
-
   const columnCountCases = [
     {
       name: 'header-too-few-fields',

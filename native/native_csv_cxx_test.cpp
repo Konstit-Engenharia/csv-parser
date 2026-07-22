@@ -19,9 +19,6 @@ void* csv_parser_write_strict_batch(void* parser, const uint8_t* data, uint64_t 
 void* csv_parser_finish_strict_batch(void* parser);
 void* csv_parser_write_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final, uint32_t fixed_columns);
 void* csv_parser_finish_fixed_batch(void* parser, uint32_t fixed_columns);
-void* csv_parser_write_trusted_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
-                                           uint32_t fixed_columns);
-void* csv_parser_finish_trusted_fixed_batch(void* parser, uint32_t fixed_columns);
 void* csv_parser_write_projected_batch(void* parser, const uint8_t* data, uint64_t len, bool final, bool has_projection,
                                        const uint32_t* selected_columns, uint64_t selected_columns_len, bool has_filter,
                                        uint32_t filter_column, const uint8_t* filter_value, uint64_t filter_value_len);
@@ -124,13 +121,11 @@ void fuzz_batch_mode(std::string_view input, bool strict) {
   csv_parser_destroy(parser);
 }
 
-void fuzz_fixed_mode(std::string_view input, bool trusted) {
+void fuzz_fixed_mode(std::string_view input) {
   void* parser = csv_parser_create(0, ',');
   REQUIRE(parser != nullptr);
-  void* batch = trusted ? csv_parser_write_trusted_fixed_batch(parser, reinterpret_cast<const uint8_t*>(input.data()),
-                                                               input.size(), true, 3)
-                        : csv_parser_write_fixed_batch(parser, reinterpret_cast<const uint8_t*>(input.data()),
-                                                       input.size(), true, 3);
+  void* batch =
+      csv_parser_write_fixed_batch(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true, 3);
   destroy_batch_if_present(batch);
   csv_parser_destroy(parser);
 }
@@ -321,39 +316,6 @@ TEST_CASE("native C ABI decodes latin1 SIMD tails and mixed runs") {
   }
 }
 
-TEST_CASE("native C ABI trusted fixed batch parses chunked rows") {
-  const std::string first = R"("1";"Ana; A";"S)";
-  const std::string second = "P\"\r\n\"2\";\"Joao \"\"J\"\"\";\"RJ\"\n";
-
-  void* parser = csv_parser_create(0, ';');
-  REQUIRE(parser != nullptr);
-  void* first_batch = csv_parser_write_trusted_fixed_batch(parser, reinterpret_cast<const uint8_t*>(first.data()),
-                                                           first.size(), false, 3);
-  REQUIRE(first_batch != nullptr);
-  REQUIRE(csv_batch_row_count(first_batch) == 0);
-  csv_batch_destroy(first_batch);
-
-  void* second_batch = csv_parser_write_trusted_fixed_batch(parser, reinterpret_cast<const uint8_t*>(second.data()),
-                                                            second.size(), false, 3);
-  REQUIRE(second_batch != nullptr);
-  REQUIRE(csv_batch_row_count(second_batch) == 2);
-  REQUIRE(csv_batch_total_fields(second_batch) == 6);
-
-  const auto* data = reinterpret_cast<const char*>(csv_batch_data_ptr(second_batch));
-  const auto len = static_cast<size_t>(csv_batch_data_len(second_batch));
-  const std::string values(data, len);
-  REQUIRE(values.find("Ana; A") != std::string::npos);
-  REQUIRE(values.find("Joao \"J\"") != std::string::npos);
-
-  void* end_batch = csv_parser_finish_trusted_fixed_batch(parser, 3);
-  csv_parser_destroy(parser);
-  REQUIRE(end_batch != nullptr);
-  REQUIRE(csv_batch_row_count(end_batch) == 0);
-
-  csv_batch_destroy(second_batch);
-  csv_batch_destroy(end_batch);
-}
-
 TEST_CASE("native C ABI batch parses dense escaped quotes before close") {
   std::string escaped_quotes;
   for (int i = 0; i < 96; ++i) {
@@ -505,8 +467,7 @@ TEST_CASE("native C ABI fuzzes deterministic byte streams across parser modes") 
     const std::string input = make_fuzz_bytes(seed);
     fuzz_batch_mode(input, false);
     fuzz_batch_mode(input, true);
-    fuzz_fixed_mode(input, false);
-    fuzz_fixed_mode(input, true);
+    fuzz_fixed_mode(input);
     fuzz_count_mode(input);
   }
 }
