@@ -1,9 +1,4 @@
 import { createReadStream } from 'node:fs';
-import type {
-  NativeCsvColumnStatsBatch,
-  NativeCsvDictionaryBatch,
-  NativeCsvGroupByCountBatch,
-} from './batches.ts';
 import {
   DEFAULT_CHUNK_SIZE,
   native,
@@ -20,7 +15,6 @@ import {
   strictSchemaValidator,
 } from './strict-schema.ts';
 import type {
-  CsvColumns,
   CsvFieldValue,
   CsvFileOptions,
   CsvNativeProjectionOptions,
@@ -169,89 +163,6 @@ export async function* parseCsvFileProjected(
     } finally {
       batch.close();
     }
-  } finally {
-    parser.close();
-  }
-}
-
-export async function* parseCsvFileDictionary(
-  path: string,
-  columnIndex: number,
-  options: CsvFileOptions = {},
-): AsyncGenerator<NativeCsvDictionaryBatch, void> {
-  rejectStrictSchemaUnsupported(options, 'dictionary batches');
-  const parser = new NativeCsvParser(options);
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      const batch = parser.writeDictionaryBatch(chunk as Buffer, columnIndex);
-      if (batch.rowCount > 0) {
-        yield batch;
-      } else {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endDictionaryBatch(columnIndex);
-    if (batch.rowCount > 0) {
-      yield batch;
-    } else {
-      batch.close();
-    }
-  } finally {
-    parser.close();
-  }
-}
-
-export async function parseCsvFileGroupByCount(
-  path: string,
-  columnIndex: number,
-  options: CsvFileOptions = {},
-): Promise<NativeCsvGroupByCountBatch> {
-  rejectStrictSchemaUnsupported(options, 'groupBy count');
-  const parser = new NativeCsvParser(options);
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      parser.writeGroupByCount(chunk as Buffer, columnIndex);
-    }
-    return parser.endGroupByCount(columnIndex);
-  } finally {
-    parser.close();
-  }
-}
-
-export async function parseCsvFileColumnStats(
-  path: string,
-  columnIndex: number,
-  options: CsvFileOptions = {},
-): Promise<NativeCsvColumnStatsBatch> {
-  rejectStrictSchemaUnsupported(options, 'column stats');
-  const parser = new NativeCsvParser(options);
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      parser.writeColumnStats(chunk as Buffer, columnIndex);
-    }
-    return parser.endColumnStats(columnIndex);
-  } finally {
-    parser.close();
-  }
-}
-
-export async function parseCsvFileMultiColumnStats(
-  path: string,
-  columns: CsvColumns,
-  options: CsvFileOptions = {},
-): Promise<NativeCsvColumnStatsBatch[]> {
-  rejectStrictSchemaUnsupported(options, 'multi-column stats');
-  if (columns.length === 0) {
-    return [];
-  }
-
-  const parser = new NativeCsvParser(options);
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      parser.writeMultiColumnStats(chunk as Buffer, columns);
-    }
-    return parser.endMultiColumnStats(columns);
   } finally {
     parser.close();
   }

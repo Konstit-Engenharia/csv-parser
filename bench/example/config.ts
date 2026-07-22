@@ -10,8 +10,6 @@ export const SELECTED_COLUMNS = parseColumns(Bun.env['CSV_BENCH_COLUMNS'] ?? '0,
 export const STRING_CACHE_COLUMNS = parseColumns(Bun.env['CSV_STRING_CACHE_COLUMNS'] ?? '19');
 export const FILTER_COLUMN = Number(Bun.env['CSV_BENCH_FILTER_COLUMN'] ?? 19);
 export const FILTER_VALUE = Bun.env['CSV_BENCH_FILTER_VALUE'] ?? 'SP';
-export const DICTIONARY_COLUMN = Number(Bun.env['CSV_BENCH_DICTIONARY_COLUMN'] ?? 19);
-export const GROUP_BY_COLUMN = Number(Bun.env['CSV_BENCH_GROUPBY_COLUMN'] ?? 19);
 export const BYTES = statSync(FILE).size;
 
 export async function runExampleBenchCases(cases: readonly ExampleBenchCase[]): Promise<void> {
@@ -24,8 +22,6 @@ export async function runExampleBenchCases(cases: readonly ExampleBenchCase[]): 
     stringCacheColumns: STRING_CACHE_COLUMNS,
     filterColumn: FILTER_COLUMN,
     filterValue: FILTER_VALUE,
-    dictionaryColumn: DICTIONARY_COLUMN,
-    groupByColumn: GROUP_BY_COLUMN,
   }));
 
   for (const [name, fn,] of cases) {

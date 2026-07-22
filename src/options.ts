@@ -1,9 +1,7 @@
 import type {
-  CsvAggregateOptions,
   CsvColumnarBatchOptions,
   CsvColumns,
   CsvCountOptions,
-  CsvDictionaryOptions,
   CsvRowsOptions,
   CsvRowViewsOptions,
 } from './types.ts';
@@ -42,19 +40,5 @@ export function defineRowViewOptions<
   const TColumns extends CsvColumns | undefined,
   const TOptions extends CsvRowViewsOptions<TColumns>,
 >(options: TOptions): TOptions {
-  return options;
-}
-
-/**
- * Preserve literal inference for aggregate options.
- */
-export function defineAggregateOptions<const TOptions extends CsvAggregateOptions>(options: TOptions): TOptions {
-  return options;
-}
-
-/**
- * Preserve literal inference for dictionary options.
- */
-export function defineDictionaryOptions<const TOptions extends CsvDictionaryOptions>(options: TOptions): TOptions {
   return options;
 }

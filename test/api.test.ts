@@ -129,9 +129,6 @@ describe('csv high-level API', () => {
       where: { column: 2025, equals: 'a' },
     }));
     expect(filterError.message).toContain('filter column out of range: 2025');
-
-    const aggregateError = await rejectedError(csv.groupByCount(path, 2025, { workerCount: 2 }));
-    expect(aggregateError.message).toContain('groupBy count column out of range: 2025');
   });
 
   test('streams rows through workers with shard-safe splitting', async () => {
@@ -219,65 +216,6 @@ describe('csv high-level API', () => {
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 1, startsWith: 'A' } })).toBe(1);
   });
 
-  test('aggregates groupBy count through workers with shard-safe splitting', async () => {
-    const path = csvFixturePath('api/quoted-states-multiline.csv');
-    const batch = await csv.groupByCount(path, 1, { delimiter: ';', workerCount: 2 });
-    try {
-      expect(batch.rowCount).toBe(5);
-      expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
-      expect(batch.dictionaryOffsets().at(-1)).toBe(BigInt(batch.dictionaryData().byteLength));
-      expect(batch.entries()).toEqual([
-        { value: 'uf', count: 1 },
-        { value: 'SP', count: 2 },
-        { value: 'RJ', count: 1 },
-        { value: 'S\nP', count: 1 },
-      ]);
-    } finally {
-      batch.close();
-    }
-  });
-
-  test('aggregates column stats through workers preserving row order', async () => {
-    const path = csvFixturePath('api/quoted-states-multiline.csv');
-    const batch = await csv.columnStats(path, 1, { delimiter: ';', workerCount: 2 });
-    try {
-      expect(batch.rowCount).toBe(5);
-      expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
-      expect(batch.dictionaryOffsets().at(-1)).toBe(BigInt(batch.dictionaryData().byteLength));
-      expect(batch.entries()).toEqual([
-        { value: 'uf', count: 1 },
-        { value: 'SP', count: 2 },
-        { value: 'RJ', count: 1 },
-        { value: 'S\nP', count: 1 },
-      ]);
-      expect([...batch.ids()]).toEqual([0, 1, 2, 3, 1]);
-    } finally {
-      batch.close();
-    }
-  });
-
-  test('aggregates multi-column stats through workers', async () => {
-    const path = csvFixturePath('api/quoted-state-kind-stats.csv');
-    const batches = await csv.multiColumnStats(path, [1, 2], { delimiter: ';', workerCount: 2 });
-    try {
-      expect(batches.map((batch) => batch.column)).toEqual([1, 2]);
-      expect(batches[0]?.entries()).toEqual([
-        { value: 'uf', count: 1 },
-        { value: 'SP', count: 2 },
-        { value: 'RJ', count: 1 },
-      ]);
-      expect(batches[1]?.entries()).toEqual([
-        { value: 'kind', count: 1 },
-        { value: 'A', count: 2 },
-        { value: 'B', count: 1 },
-      ]);
-    } finally {
-      for (const batch of batches) {
-        batch.close();
-      }
-    }
-  });
-
   test('reuses worker pool across repeated count and rows calls', async () => {
     const path = csvFixturePath('api/quoted-people-sp-filter.csv');
     using pool = csv.workerPool(path, {
@@ -306,50 +244,6 @@ describe('csv high-level API', () => {
       'id|name',
     ]);
     expect(seenB.map((row) => row.join('|')).sort()).toEqual(seenA.map((row) => row.join('|')).sort());
-  });
-
-  test('reuses worker pool across aggregate calls', async () => {
-    const path = csvFixturePath('api/quoted-state-kind-stats.csv');
-    using pool = csv.workerPool(path, { delimiter: ';', workerCount: 2 });
-
-    const groupA = await pool.groupByCount(1);
-    const groupB = await pool.groupByCount(1);
-    const stats = await pool.columnStats(2);
-    const multi = await pool.multiColumnStats([1, 2]);
-
-    try {
-      expect(groupA.entries()).toEqual([
-        { value: 'uf', count: 1 },
-        { value: 'SP', count: 2 },
-        { value: 'RJ', count: 1 },
-      ]);
-      expect(groupB.entries()).toEqual(groupA.entries());
-      expect(stats.entries()).toEqual([
-        { value: 'kind', count: 1 },
-        { value: 'A', count: 2 },
-        { value: 'B', count: 1 },
-      ]);
-      expect([...stats.ids()]).toEqual([0, 1, 2, 1]);
-      expect(multi.map((batch) => batch.entries())).toEqual([
-        [
-          { value: 'uf', count: 1 },
-          { value: 'SP', count: 2 },
-          { value: 'RJ', count: 1 },
-        ],
-        [
-          { value: 'kind', count: 1 },
-          { value: 'A', count: 2 },
-          { value: 'B', count: 1 },
-        ],
-      ]);
-    } finally {
-      groupA.close();
-      groupB.close();
-      stats.close();
-      for (const batch of multi) {
-        batch.close();
-      }
-    }
   });
 
   test('runs safe row view callbacks through both aliases', async () => {
@@ -567,22 +461,6 @@ describe('csv high-level API', () => {
     expect((strictError as Error).message).toContain('parallel count does not support strict CSV validation');
   });
 
-  test('keeps unsupported worker aggregate modes explicit', async () => {
-    const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
-    const invalidOptions = { delimiter: ';', strict: true, workerCount: 2 } as unknown as Parameters<
-      typeof csv.groupByCount
-    >[2];
-
-    let strictGroupByError: unknown;
-    try {
-      await csv.groupByCount(path, 2, invalidOptions);
-    } catch (caught) {
-      strictGroupByError = caught;
-    }
-    expect(strictGroupByError).toBeInstanceOf(Error);
-    expect((strictGroupByError as Error).message).toContain('parallel groupByCount does not support strict CSV validation');
-  });
-
   test('rejects use after worker pool close', async () => {
     const path = csvFixturePath('api/unquoted-name.csv');
     const pool = csv.workerPool(path, { delimiter: ';', workerCount: 2 });
@@ -673,7 +551,7 @@ describe('csv high-level API', () => {
     ]);
   });
 
-  test('keeps strict unsupported filtered and aggregate paths explicit', async () => {
+  test('keeps strict unsupported filtered paths explicit', async () => {
     const path = csvFixturePath('api/comma-name.csv');
 
     let countError: unknown;

@@ -3,16 +3,8 @@ import {
   expect,
   test,
 } from 'bun:test';
-import {
-  NativeCsvParser,
-  parseCsvFileColumnStats,
-  parseCsvFileDictionary,
-  parseCsvFileGroupByCount,
-} from '../src/index.ts';
-import {
-  csvFixturePath,
-  readCsvFixture,
-} from './fixtures.ts';
+import { NativeCsvParser } from '../src/index.ts';
+import { readCsvFixture } from './fixtures.ts';
 
 describe('native resource lifecycle', () => {
   test('parser and row batches expose dispose state and use-after-close errors', () => {
@@ -55,36 +47,5 @@ describe('native resource lifecycle', () => {
 
     expect(parserRef.closed).toBe(true);
     expect(batchRef.closed).toBe(true);
-  });
-
-  test('aggregate batches expose dispose state', async () => {
-    const path = csvFixturePath('native/resource-lifecycle.csv');
-
-    const dictionaryIterator = parseCsvFileDictionary(path, 2);
-    const firstDictionary = await dictionaryIterator.next();
-    const dictionary = firstDictionary.value;
-    if (dictionary === undefined) {
-      throw new Error('expected dictionary batch');
-    }
-    try {
-      expect(dictionary.closed).toBe(false);
-      dictionary.dispose();
-      expect(dictionary.closed).toBe(true);
-      expect(() => dictionary.dictionaryStrings()).toThrow('native CSV dictionary batch is closed');
-    } finally {
-      await dictionaryIterator.return(undefined);
-    }
-
-    const groupBy = await parseCsvFileGroupByCount(path, 2);
-    expect(groupBy.closed).toBe(false);
-    groupBy.dispose();
-    expect(groupBy.closed).toBe(true);
-    expect(() => groupBy.entries()).toThrow('native CSV groupBy count batch is closed');
-
-    const columnStats = await parseCsvFileColumnStats(path, 2);
-    expect(columnStats.closed).toBe(false);
-    columnStats.dispose();
-    expect(columnStats.closed).toBe(true);
-    expect(() => columnStats.entries()).toThrow('native CSV column stats batch is closed');
   });
 });

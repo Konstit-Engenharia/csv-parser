@@ -176,17 +176,6 @@ export type CsvCountOptions =
   | CsvCountSingleThreadOptions
   | CsvParallelCountOptions;
 
-export type CsvDictionaryOptions = Omit<CsvFileOptions, 'strict'> & {
-  strict?: false | undefined;
-};
-
-export type CsvAggregateOptions = Omit<CsvApiFileOptions, 'where' | 'strict'> & {
-  where?: undefined;
-  strict?: false | undefined;
-};
-
-export type CsvParallelAggregateOptions = CsvAggregateOptions & { workerCount: number; };
-
 export type CsvWorkerPoolOptions<TColumns extends CsvColumns | undefined = undefined> = CsvParallelRowsOptions<TColumns>;
 
 export type CsvProjectedRow<TColumns extends CsvColumns | undefined> = TColumns extends readonly unknown[]
@@ -204,11 +193,6 @@ export interface CsvStringCacheColumnStats {
   hits: number;
   misses: number;
   full: boolean;
-}
-
-export interface CsvGroupByCountEntry {
-  value: string;
-  count: number;
 }
 
 export type CsvRowView<TSelectedColumns extends CsvColumns | undefined = undefined> =

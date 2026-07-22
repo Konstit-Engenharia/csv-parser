@@ -3,7 +3,6 @@ if (!process.versions.bun) {
 }
 
 export type {
-  CsvAggregateOptions,
   CsvApiFileOptions,
   CsvBatchesOptions,
   CsvColumnarBatchCallback,
@@ -15,16 +14,13 @@ export type {
   CsvColumnSelection,
   CsvCountOptions,
   CsvDelimiter,
-  CsvDictionaryOptions,
   CsvEncoding,
   CsvEqualsFilter,
   CsvFieldRange,
   CsvFieldValue,
   CsvFileOptions,
-  CsvGroupByCountEntry,
   CsvInFilter,
   CsvNativeProjectionOptions,
-  CsvParallelAggregateOptions,
   CsvParallelCountOptions,
   CsvParallelRowsOptions,
   CsvParseOptions,
@@ -51,33 +47,19 @@ export type {
 } from './types.ts';
 
 export {
-  columnStats,
   csv,
   CsvWorkerPool,
   findCsvSafeShards,
   findCsvSafeSplitOffsets,
   forEachColumnarBatches,
   forEachRowViews,
-  groupByCount,
-  multiColumnStats,
-  parallelColumnStats,
   parallelCount,
-  parallelGroupByCount,
-  parallelMultiColumnStats,
   parallelRows,
   withColumnarBatches,
   withRowViews,
   workerPool,
 } from './api.ts';
-export {
-  createNativeCsvColumnStatsBatch,
-  createNativeCsvGroupByCountBatch,
-  NativeCsvBatch,
-  NativeCsvColumnStatsBatch,
-  NativeCsvDictionaryBatch,
-  NativeCsvGroupByCountBatch,
-  NativeCsvRowView,
-} from './batches.ts';
+export { NativeCsvBatch, NativeCsvRowView } from './batches.ts';
 export {
   countCsvFile,
   countCsvFileWhereEquals,
@@ -86,19 +68,8 @@ export {
   countTrustedNewlineRows,
   parseCsvBuffer,
   parseCsvFile,
-  parseCsvFileColumnStats,
-  parseCsvFileDictionary,
-  parseCsvFileGroupByCount,
-  parseCsvFileMultiColumnStats,
   parseCsvFileProjected,
 } from './files.ts';
-export {
-  defineAggregateOptions,
-  defineColumnarOptions,
-  defineCountOptions,
-  defineDictionaryOptions,
-  defineRowsOptions,
-  defineRowViewOptions,
-} from './options.ts';
+export { defineColumnarOptions, defineCountOptions, defineRowsOptions, defineRowViewOptions } from './options.ts';
 export { NativeCsvParser } from './parser.ts';
 export { CsvStringCache } from './string-cache.ts';

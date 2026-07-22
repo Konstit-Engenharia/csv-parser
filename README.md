@@ -2,7 +2,7 @@
 
 Bun-native CSV parser using `bun:ffi` and the shared library built from `native/csv_parser.cpp`.
 
-Use it when large CSV files need streaming rows, selected columns, simple filters, dictionary batches, group-by counts, or low-allocation row access.
+Use it when large CSV files need streaming rows, selected columns, simple filters, or low-allocation row access.
 
 ## Setup
 
@@ -103,10 +103,6 @@ Supported helpers:
 - `csv.batches(path, options)` streams `NativeCsvBatch` objects.
 - `csv.withBatches(path, options, callback)` owns batch close handling around a callback.
 - `csv.count(path, options)` counts rows, optionally with `equals`, `in`, or `startsWith`.
-- `csv.dictionary(path, column, options)` streams dictionary-encoded batches for one column.
-- `csv.groupByCount(path, column, options)` returns grouped counts for one column.
-- `csv.columnStats(path, column, options)` returns dictionary/count stats for one column.
-- `csv.multiColumnStats(path, columns, options)` returns stats for multiple columns.
 - `csv.withRowViews(path, options, callback)` streams reusable row views with managed lifetimes.
 - `csv.withColumnarBatches(path, options, callback)` streams reusable columnar batch views.
 - `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
@@ -143,8 +139,8 @@ await csv.parse(Buffer.from('id,name\n1,Ada\n'), {
 - `minDataRows` validates row count after the header row.
 
 Strict mode currently covers row batches, `count()` without filters, `fixedColumns`, the fast `trustedFixedColumns` path,
-and row schema metadata. Projected batches, dictionary batches, count filters, and aggregate APIs reject `strict: true`
-explicitly until they have strict native variants.
+and row schema metadata. Projected batches and count filters reject `strict: true` explicitly until they have strict native
+variants.
 
 ## Typed Options
 
@@ -239,10 +235,9 @@ for await (const batch of csv.batches('data.csv', { delimiter: ';' })) {
 - `countWhereEquals(columnIndex, value)`
 - `close()`
 
-`rowOffsets()`, `fieldOffsets()`, and aggregate `dictionaryOffsets()` return `BigUint64Array`. Convert individual
-offsets to `number` only after checking that they are within `Number.MAX_SAFE_INTEGER` and the associated backing data.
-`scanColumns()` supplies its JavaScript-safe numeric ranges in a `Float64Array`. Column and dictionary IDs remain
-`Uint32Array`.
+`rowOffsets()` and `fieldOffsets()` return `BigUint64Array`. Convert individual offsets to `number` only after checking
+that they are within `Number.MAX_SAFE_INTEGER` and the associated backing data. `scanColumns()` supplies its
+JavaScript-safe numeric ranges in a `Float64Array`.
 
 ## Manual Parser API
 
@@ -266,7 +261,8 @@ try {
 }
 ```
 
-Always close parser-owned batches and the parser. `NativeCsvParser` supports row batches, projected batches, dictionary batches, group-by counts, column stats, multi-column stats, and direct count filters.
+Always close parser-owned batches and the parser. `NativeCsvParser` supports row batches, projected batches, and direct
+count filters.
 
 Resource objects expose `close()`, `dispose()`, `closed`, and `Symbol.dispose`, so explicit-resource-management syntax works
 in Bun:
@@ -283,7 +279,6 @@ console.log(batch.rows());
 bun run example:api:rows
 bun run example:api:batches
 bun run example:api:count
-bun run example:api:aggregates
 bun run example:first-rows
 ```
 
@@ -296,7 +291,6 @@ Example environment variables:
 - `CSV_EXAMPLE_LIMIT` or `CSV_PRINT_ROWS`
 - `CSV_EXAMPLE_FILTER_COLUMN`
 - `CSV_EXAMPLE_FILTER_VALUE`
-- `CSV_EXAMPLE_GROUP_COLUMN`
 
 ## Validation
 

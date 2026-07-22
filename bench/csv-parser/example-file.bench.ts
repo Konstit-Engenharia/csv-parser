@@ -1,4 +1,3 @@
-import { aggregateCases } from '../example/aggregates.ts';
 import {
   CHUNK_SIZE,
   DELIMITER,
@@ -17,7 +16,6 @@ const csvParserCases = [
 
 await runExampleBenchCases([
   ...materializationCases,
-  ...aggregateCases,
   ...filterCases,
   ...csvParserCases,
 ]);

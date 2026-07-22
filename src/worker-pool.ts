@@ -1,7 +1,3 @@
-import type {
-  NativeCsvColumnStatsBatch,
-  NativeCsvGroupByCountBatch,
-} from './batches.ts';
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import {
@@ -17,11 +13,6 @@ import type {
   CsvStringCacheOptions,
   CsvWhereFilter,
 } from './types.ts';
-import {
-  runColumnStatsWithWorkers,
-  runGroupByCountWithWorkers,
-  runMultiColumnStatsWithWorkers,
-} from './worker-aggregates.ts';
 
 interface WorkerEqualsFilterMessage {
   column: number;
@@ -91,7 +82,6 @@ type CsvSelectedColumnsFromOptions<TOptions extends CsvApiFileOptions> = TOption
 export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> {
   readonly #path: string;
   readonly #options: CsvApiFileOptions;
-  #aggregateWorkers: Worker[] | undefined;
   #countWorkers: Worker[] | undefined;
   #rowsWorkers: Worker[] | undefined;
   #shards: CsvShard[] | undefined;
@@ -291,54 +281,6 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
     }
   }
 
-  async groupByCount(column: number): Promise<NativeCsvGroupByCountBatch> {
-    this.#assertOpen();
-
-    this.#busy = true;
-    try {
-      const shards = this.#ensureShards();
-      return await runGroupByCountWithWorkers(this.#path, column, this.#options, {
-        shards,
-        workers: this.#ensureAggregateWorkers(shards.length),
-      });
-    } finally {
-      this.#busy = false;
-    }
-  }
-
-  async columnStats(column: number): Promise<NativeCsvColumnStatsBatch> {
-    this.#assertOpen();
-
-    this.#busy = true;
-    try {
-      const shards = this.#ensureShards();
-      return await runColumnStatsWithWorkers(this.#path, column, this.#options, {
-        shards,
-        workers: this.#ensureAggregateWorkers(shards.length),
-      });
-    } finally {
-      this.#busy = false;
-    }
-  }
-
-  async multiColumnStats(columns: CsvColumns): Promise<NativeCsvColumnStatsBatch[]> {
-    this.#assertOpen();
-    if (columns.length === 0) {
-      return [];
-    }
-
-    this.#busy = true;
-    try {
-      const shards = this.#ensureShards();
-      return await runMultiColumnStatsWithWorkers(this.#path, columns, this.#options, {
-        shards,
-        workers: this.#ensureAggregateWorkers(shards.length),
-      });
-    } finally {
-      this.#busy = false;
-    }
-  }
-
   close(): void {
     if (this.#closed) {
       return;
@@ -350,10 +292,6 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
     for (const worker of this.#rowsWorkers ?? []) {
       worker.terminate();
     }
-    for (const worker of this.#aggregateWorkers ?? []) {
-      worker.terminate();
-    }
-    this.#aggregateWorkers = undefined;
     this.#countWorkers = undefined;
     this.#rowsWorkers = undefined;
   }
@@ -405,21 +343,6 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
         type: 'module',
       }));
     return this.#rowsWorkers;
-  }
-
-  #ensureAggregateWorkers(count: number): Worker[] {
-    if (this.#aggregateWorkers !== undefined) {
-      return this.#aggregateWorkers;
-    }
-    this.#aggregateWorkers = Array.from(
-      { length: count },
-      () =>
-        new Worker(new URL('./workers/aggregates.worker.ts', import.meta.url).href, {
-          preload: [],
-          type: 'module',
-        }),
-    );
-    return this.#aggregateWorkers;
   }
 }
 

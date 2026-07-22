@@ -1,11 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { NativeCsvRowView } from './batches.ts';
-import type {
-  NativeCsvBatch,
-  NativeCsvColumnStatsBatch,
-  NativeCsvDictionaryBatch,
-  NativeCsvGroupByCountBatch,
-} from './batches.ts';
+import type { NativeCsvBatch } from './batches.ts';
 import {
   findCsvSafeShards as findCsvSafeShardsNative,
   findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
@@ -19,7 +14,6 @@ import {
 } from './strict-schema.ts';
 import { CsvStringCache } from './string-cache.ts';
 import type {
-  CsvAggregateOptions,
   CsvApiFileOptions,
   CsvBatchesOptions,
   CsvColumnarBatchCallback,
@@ -27,9 +21,7 @@ import type {
   CsvColumnarBatchView,
   CsvColumns,
   CsvCountOptions,
-  CsvDictionaryOptions,
   CsvFileOptions,
-  CsvParallelAggregateOptions,
   CsvParallelCountOptions,
   CsvParallelRowsOptions,
   CsvParseOptions,
@@ -43,11 +35,6 @@ import type {
   CsvWhereFilter,
   CsvWorkerPoolOptions,
 } from './types.ts';
-import {
-  parallelColumnStats,
-  parallelGroupByCount,
-  parallelMultiColumnStats,
-} from './worker-aggregates.ts';
 import { parallelCount } from './worker-count.ts';
 import {
   createWorkerPool,
@@ -145,7 +132,6 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
 
 export { parallelRows };
 export { CsvWorkerPool };
-export { parallelColumnStats, parallelGroupByCount, parallelMultiColumnStats };
 
 /**
  * Stream native batches with explicit lifetime control.
@@ -410,117 +396,12 @@ export function findCsvSafeShards(path: string, shardCount: number, options: Csv
   return findCsvSafeShardsNative(path, shardCount, options.delimiter ?? ',');
 }
 
-/**
- * Stream dictionary batches for one column.
- */
-export async function* dictionary(
-  path: string,
-  column: number,
-  options: CsvDictionaryOptions = {},
-): AsyncGenerator<NativeCsvDictionaryBatch, void> {
-  const parser = new NativeCsvParser(toParserOptions(options));
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      const batch = parser.writeDictionaryBatch(chunk as Buffer, column);
-      if (batch.rowCount > 0) {
-        yield batch;
-      } else {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endDictionaryBatch(column);
-    if (batch.rowCount > 0) {
-      yield batch;
-    } else {
-      batch.close();
-    }
-  } finally {
-    parser.close();
-  }
-}
-
-/**
- * Aggregate value counts for one column.
- */
-export async function groupByCount(
-  path: string,
-  column: number,
-  options: CsvAggregateOptions = {},
-): Promise<NativeCsvGroupByCountBatch> {
-  if ((options.workerCount ?? 1) > 1) {
-    return parallelGroupByCount(path, column, options as CsvParallelAggregateOptions);
-  }
-  const parser = new NativeCsvParser(toParserOptions(options));
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      parser.writeGroupByCount(chunk as Buffer, column);
-    }
-    return parser.endGroupByCount(column);
-  } finally {
-    parser.close();
-  }
-}
-
-/**
- * Aggregate stats for one column.
- */
-export async function columnStats(
-  path: string,
-  column: number,
-  options: CsvAggregateOptions = {},
-): Promise<NativeCsvColumnStatsBatch> {
-  if ((options.workerCount ?? 1) > 1) {
-    return parallelColumnStats(path, column, options as CsvParallelAggregateOptions);
-  }
-  const parser = new NativeCsvParser(toParserOptions(options));
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      parser.writeColumnStats(chunk as Buffer, column);
-    }
-    return parser.endColumnStats(column);
-  } finally {
-    parser.close();
-  }
-}
-
-/**
- * Aggregate stats for multiple columns in one pass.
- */
-export async function multiColumnStats(
-  path: string,
-  columns: CsvColumns,
-  options: CsvAggregateOptions = {},
-): Promise<NativeCsvColumnStatsBatch[]> {
-  if ((options.workerCount ?? 1) > 1) {
-    return parallelMultiColumnStats(path, columns, options as CsvParallelAggregateOptions);
-  }
-  if (columns.length === 0) {
-    return [];
-  }
-
-  const parser = new NativeCsvParser(toParserOptions(options));
-  try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      parser.writeMultiColumnStats(chunk as Buffer, columns);
-    }
-    return parser.endMultiColumnStats(columns);
-  } finally {
-    parser.close();
-  }
-}
-
-export const stats = {
-  column: columnStats,
-  multi: multiColumnStats,
-};
-
 export function workerPool<TColumns extends CsvColumns | undefined = undefined>(
   path: string,
   options: CsvWorkerPoolOptions<TColumns>,
 ): CsvWorkerPool<TColumns>;
 /**
- * Create a reusable worker pool for repeated row and aggregate operations.
+ * Create a reusable worker pool for repeated row operations.
  *
  * Use this when one-off worker startup becomes noticeable across repeated calls.
  */
@@ -533,9 +414,6 @@ export const csv = {
   parse,
   rows,
   parallelCount,
-  parallelGroupByCount,
-  parallelColumnStats,
-  parallelMultiColumnStats,
   parallelRows,
   batches,
   withBatches,
@@ -546,11 +424,6 @@ export const csv = {
   count,
   findCsvSafeSplitOffsets,
   findCsvSafeShards,
-  dictionary,
-  groupByCount,
-  columnStats,
-  multiColumnStats,
-  stats,
 };
 
 function toParserOptions(options: CsvApiFileOptions | CsvFileOptions): CsvParserOptions {

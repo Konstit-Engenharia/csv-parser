@@ -25,13 +25,6 @@ void* csv_parser_finish_trusted_fixed_batch(void* parser, uint32_t fixed_columns
 void* csv_parser_write_projected_batch(void* parser, const uint8_t* data, uint64_t len, bool final, bool has_projection,
                                        const uint32_t* selected_columns, uint64_t selected_columns_len, bool has_filter,
                                        uint32_t filter_column, const uint8_t* filter_value, uint64_t filter_value_len);
-void* csv_parser_write_dictionary_batch(void* parser, const uint8_t* data, uint64_t len, bool final, uint32_t column);
-uint64_t csv_parser_write_group_by_count(void* parser, const uint8_t* data, uint64_t len, uint32_t column);
-void* csv_parser_finish_group_by_count(void* parser, uint32_t column);
-uint64_t csv_parser_write_column_stats(void* parser, const uint8_t* data, uint64_t len, uint32_t column);
-uint64_t csv_parser_write_multi_column_stats(void* parser, const uint8_t* data, uint64_t len, const uint32_t* columns,
-                                             uint64_t columns_len);
-void* csv_parser_finish_multi_column_stats(void* parser, const uint32_t* columns, uint64_t columns_len);
 void* csv_parser_find_split_offsets(const char* path, uint64_t shard_count, uint8_t delimiter);
 uint64_t csv_parser_write_count(void* parser, const uint8_t* data, uint64_t len, bool final);
 uint64_t csv_parser_finish_count(void* parser);
@@ -40,10 +33,6 @@ uint64_t csv_parser_write_count_where_equals(void* parser, const uint8_t* data, 
                                              uint64_t filter_value_len);
 const char* csv_parser_last_error(void* parser);
 void csv_batch_destroy(void* batch);
-void csv_dictionary_batch_destroy(void* batch);
-void csv_group_by_count_batch_destroy(void* batch);
-void csv_column_stats_batch_destroy(void* batch);
-void csv_multi_column_stats_batch_destroy(void* batch);
 void csv_split_offsets_batch_destroy(void* batch);
 uint64_t csv_batch_row_count(void* batch);
 uint64_t csv_batch_total_fields(void* batch);
@@ -53,35 +42,10 @@ const uint64_t* csv_batch_row_offsets_ptr(void* batch);
 const uint64_t* csv_batch_field_offsets_ptr(void* batch);
 uint64_t csv_split_offsets_batch_count(void* batch);
 const uint64_t* csv_split_offsets_batch_ptr(void* batch);
-uint64_t csv_dictionary_batch_row_count(void* batch);
-uint64_t csv_dictionary_batch_dict_count(void* batch);
-const uint32_t* csv_dictionary_batch_ids_ptr(void* batch);
-const uint64_t* csv_dictionary_batch_offsets_ptr(void* batch);
-uint64_t csv_group_by_count_batch_row_count(void* batch);
-uint64_t csv_group_by_count_batch_dict_count(void* batch);
-const uint64_t* csv_group_by_count_batch_counts_ptr(void* batch);
-const uint64_t* csv_group_by_count_batch_offsets_ptr(void* batch);
-uint64_t csv_column_stats_batch_row_count(void* batch);
-uint64_t csv_column_stats_batch_dict_count(void* batch);
-const uint32_t* csv_column_stats_batch_ids_ptr(void* batch);
-const uint64_t* csv_column_stats_batch_counts_ptr(void* batch);
-const uint64_t* csv_column_stats_batch_offsets_ptr(void* batch);
-void* csv_group_by_count_batch_create(const uint8_t* dict_data, uint64_t dict_data_len, const uint64_t* dict_offsets,
-                                      uint64_t dict_offsets_len, const uint64_t* counts, uint64_t counts_len,
-                                      uint64_t row_count);
-void* csv_column_stats_batch_create(const uint32_t* ids, uint64_t ids_len, const uint64_t* counts, uint64_t counts_len,
-                                    const uint64_t* dict_offsets, uint64_t dict_offsets_len, const uint8_t* dict_data,
-                                    uint64_t dict_data_len);
-uint64_t csv_multi_column_stats_batch_column_count(void* batch);
-uint32_t csv_multi_column_stats_batch_column_at(void* batch, uint64_t index);
-void* csv_multi_column_stats_batch_take_column_batch(void* batch, uint64_t index);
 }
 
 static_assert(std::is_same_v<decltype(csv_batch_row_offsets_ptr(nullptr)), const uint64_t*>);
 static_assert(std::is_same_v<decltype(csv_batch_field_offsets_ptr(nullptr)), const uint64_t*>);
-static_assert(std::is_same_v<decltype(csv_dictionary_batch_offsets_ptr(nullptr)), const uint64_t*>);
-static_assert(std::is_same_v<decltype(csv_group_by_count_batch_offsets_ptr(nullptr)), const uint64_t*>);
-static_assert(std::is_same_v<decltype(csv_column_stats_batch_offsets_ptr(nullptr)), const uint64_t*>);
 
 namespace {
 
@@ -188,30 +152,6 @@ void fuzz_count_mode(std::string_view input) {
   REQUIRE(batch != nullptr);
   REQUIRE(rows == csv_batch_row_count(batch));
   csv_batch_destroy(batch);
-}
-
-void fuzz_aggregate_modes(std::string_view input) {
-  {
-    void* parser = csv_parser_create(0, ',');
-    REQUIRE(parser != nullptr);
-    void* batch = csv_parser_write_dictionary_batch(parser, reinterpret_cast<const uint8_t*>(input.data()),
-                                                    input.size(), true, 1);
-    if (batch != nullptr) {
-      csv_dictionary_batch_destroy(batch);
-    }
-    csv_parser_destroy(parser);
-  }
-
-  {
-    void* parser = csv_parser_create(0, ',');
-    REQUIRE(parser != nullptr);
-    csv_parser_write_group_by_count(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), 1);
-    void* batch = csv_parser_finish_group_by_count(parser, 1);
-    if (batch != nullptr) {
-      csv_group_by_count_batch_destroy(batch);
-    }
-    csv_parser_destroy(parser);
-  }
 }
 
 } // namespace
@@ -469,98 +409,7 @@ TEST_CASE("native C ABI fixed batch allows quoted newlines") {
   csv_batch_destroy(end_batch);
 }
 
-TEST_CASE("native C ABI dictionary returns ids and unique values") {
-  const std::string input = "\"id\";\"uf\"\n\"1\";\"SP\"\n\"2\";\"SP\"\n\"3\";\"RJ\"\n";
-
-  void* parser = csv_parser_create(0, ';');
-  REQUIRE(parser != nullptr);
-  void* batch =
-      csv_parser_write_dictionary_batch(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true, 1);
-  csv_parser_destroy(parser);
-
-  REQUIRE(batch != nullptr);
-  REQUIRE(csv_dictionary_batch_row_count(batch) == 4);
-  REQUIRE(csv_dictionary_batch_dict_count(batch) == 3);
-
-  const uint32_t* ids = csv_dictionary_batch_ids_ptr(batch);
-  REQUIRE(ids != nullptr);
-  REQUIRE(ids[0] == 0);
-  REQUIRE(ids[1] == 1);
-  REQUIRE(ids[2] == 1);
-  REQUIRE(ids[3] == 2);
-
-  csv_dictionary_batch_destroy(batch);
-}
-
-TEST_CASE("native C ABI groupBy count aggregates dictionary values") {
-  const std::string first = "\"id\";\"uf\"\n\"1\";\"SP\"\n\"2\";";
-  const std::string second = "\"SP\"\n\"3\";\"RJ\"\n";
-
-  void* parser = csv_parser_create(0, ';');
-  REQUIRE(parser != nullptr);
-  csv_parser_write_group_by_count(parser, reinterpret_cast<const uint8_t*>(first.data()), first.size(), 1);
-  csv_parser_write_group_by_count(parser, reinterpret_cast<const uint8_t*>(second.data()), second.size(), 1);
-  void* batch = csv_parser_finish_group_by_count(parser, 1);
-  csv_parser_destroy(parser);
-
-  REQUIRE(batch != nullptr);
-  REQUIRE(csv_group_by_count_batch_row_count(batch) == 4);
-  REQUIRE(csv_group_by_count_batch_dict_count(batch) == 3);
-
-  const uint64_t* counts = csv_group_by_count_batch_counts_ptr(batch);
-  REQUIRE(counts != nullptr);
-  REQUIRE(counts[0] == 1);
-  REQUIRE(counts[1] == 2);
-  REQUIRE(counts[2] == 1);
-
-  csv_group_by_count_batch_destroy(batch);
-}
-
-TEST_CASE("native C ABI multi-column stats returns per-column batches") {
-  const std::string first = "\"id\";\"uf\";\"kind\"\n\"1\";";
-  const std::string second = "\"SP\";\"A\"\n\"2\";\"SP\";\"B\"\n";
-  const uint32_t columns[] = {1, 2};
-
-  void* parser = csv_parser_create(0, ';');
-  REQUIRE(parser != nullptr);
-  REQUIRE(csv_parser_write_multi_column_stats(parser, reinterpret_cast<const uint8_t*>(first.data()), first.size(),
-                                              columns, 2) == 1);
-  REQUIRE(csv_parser_write_multi_column_stats(parser, reinterpret_cast<const uint8_t*>(second.data()), second.size(),
-                                              columns, 2) == 2);
-  void* multi = csv_parser_finish_multi_column_stats(parser, columns, 2);
-  csv_parser_destroy(parser);
-
-  REQUIRE(multi != nullptr);
-  REQUIRE(csv_multi_column_stats_batch_column_count(multi) == 2);
-  REQUIRE(csv_multi_column_stats_batch_column_at(multi, 0) == 1);
-  REQUIRE(csv_multi_column_stats_batch_column_at(multi, 1) == 2);
-
-  void* uf = csv_multi_column_stats_batch_take_column_batch(multi, 0);
-  void* kind = csv_multi_column_stats_batch_take_column_batch(multi, 1);
-  csv_multi_column_stats_batch_destroy(multi);
-
-  REQUIRE(uf != nullptr);
-  REQUIRE(kind != nullptr);
-  REQUIRE(csv_column_stats_batch_row_count(uf) == 3);
-  REQUIRE(csv_column_stats_batch_row_count(kind) == 3);
-  REQUIRE(csv_column_stats_batch_dict_count(uf) == 2);
-  REQUIRE(csv_column_stats_batch_dict_count(kind) == 3);
-
-  const uint32_t* uf_ids = csv_column_stats_batch_ids_ptr(uf);
-  const uint64_t* uf_counts = csv_column_stats_batch_counts_ptr(uf);
-  REQUIRE(uf_ids != nullptr);
-  REQUIRE(uf_counts != nullptr);
-  REQUIRE(uf_ids[0] == 0);
-  REQUIRE(uf_ids[1] == 1);
-  REQUIRE(uf_ids[2] == 1);
-  REQUIRE(uf_counts[0] == 1);
-  REQUIRE(uf_counts[1] == 2);
-
-  csv_column_stats_batch_destroy(uf);
-  csv_column_stats_batch_destroy(kind);
-}
-
-TEST_CASE("native C ABI exposes 64-bit batch and dictionary offsets") {
+TEST_CASE("native C ABI exposes 64-bit batch offsets") {
   const std::string input = "a,b\n";
   void* parser = csv_parser_create(0, ',');
   REQUIRE(parser != nullptr);
@@ -578,35 +427,6 @@ TEST_CASE("native C ABI exposes 64-bit batch and dictionary offsets") {
   REQUIRE(field_offsets[1] == 1);
   REQUIRE(field_offsets[2] == 2);
   csv_batch_destroy(batch);
-
-  parser = csv_parser_create(0, ',');
-  REQUIRE(parser != nullptr);
-  void* dictionary =
-      csv_parser_write_dictionary_batch(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true, 1);
-  csv_parser_destroy(parser);
-
-  REQUIRE(dictionary != nullptr);
-  const uint64_t* dictionary_offsets = csv_dictionary_batch_offsets_ptr(dictionary);
-  REQUIRE(dictionary_offsets != nullptr);
-  REQUIRE(dictionary_offsets[0] == 0);
-  REQUIRE(dictionary_offsets[1] == 1);
-  csv_dictionary_batch_destroy(dictionary);
-
-  const uint8_t dict_data[] = {'x'};
-  const uint64_t dict_offsets[] = {0, 1};
-  const uint64_t counts[] = {1};
-  void* group = csv_group_by_count_batch_create(dict_data, sizeof(dict_data), dict_offsets, std::size(dict_offsets),
-                                                counts, std::size(counts), 1);
-  REQUIRE(group != nullptr);
-  REQUIRE(csv_group_by_count_batch_offsets_ptr(group)[1] == 1);
-  csv_group_by_count_batch_destroy(group);
-
-  const uint32_t ids[] = {0};
-  void* stats = csv_column_stats_batch_create(ids, std::size(ids), counts, std::size(counts), dict_offsets,
-                                              std::size(dict_offsets), dict_data, sizeof(dict_data));
-  REQUIRE(stats != nullptr);
-  REQUIRE(csv_column_stats_batch_offsets_ptr(stats)[1] == 1);
-  csv_column_stats_batch_destroy(stats);
 }
 
 TEST_CASE("native C ABI validates projection limits before allocation") {
@@ -662,50 +482,17 @@ TEST_CASE("native C ABI validates projection limits before allocation") {
   }
 }
 
-TEST_CASE("native C ABI validates aggregate and filter column indexes") {
-  SECTION("maximum aggregate and filter column index is accepted") {
+TEST_CASE("native C ABI validates filter column indexes") {
+  SECTION("maximum filter column index is accepted") {
     void* parser = csv_parser_create(0, ',');
-    REQUIRE(parser != nullptr);
-    void* dictionary = csv_parser_write_dictionary_batch(parser, nullptr, 0, true, 2024);
-    REQUIRE(dictionary != nullptr);
-    REQUIRE(std::string_view(csv_parser_last_error(parser)).empty());
-    csv_dictionary_batch_destroy(dictionary);
-    csv_parser_destroy(parser);
-
-    parser = csv_parser_create(0, ',');
     REQUIRE(parser != nullptr);
     REQUIRE(csv_parser_write_count_where_equals(parser, nullptr, 0, true, 2024, nullptr, 0) == 0);
     REQUIRE(std::string_view(csv_parser_last_error(parser)).empty());
     csv_parser_destroy(parser);
   }
 
-  SECTION("aggregate and filter column indexes above maximum are rejected") {
+  SECTION("filter column index above maximum is rejected") {
     void* parser = csv_parser_create(0, ',');
-    REQUIRE(parser != nullptr);
-    REQUIRE(csv_parser_write_dictionary_batch(parser, nullptr, 0, true, 2025) == nullptr);
-    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
-    csv_parser_destroy(parser);
-
-    parser = csv_parser_create(0, ',');
-    REQUIRE(parser != nullptr);
-    REQUIRE(csv_parser_write_group_by_count(parser, nullptr, 0, 2025) == 0);
-    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
-    csv_parser_destroy(parser);
-
-    parser = csv_parser_create(0, ',');
-    REQUIRE(parser != nullptr);
-    REQUIRE(csv_parser_write_column_stats(parser, nullptr, 0, 2025) == 0);
-    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
-    csv_parser_destroy(parser);
-
-    parser = csv_parser_create(0, ',');
-    REQUIRE(parser != nullptr);
-    const uint32_t columns[] = {2025};
-    REQUIRE(csv_parser_write_multi_column_stats(parser, nullptr, 0, columns, std::size(columns)) == 0);
-    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
-    csv_parser_destroy(parser);
-
-    parser = csv_parser_create(0, ',');
     REQUIRE(parser != nullptr);
     REQUIRE(csv_parser_write_count_where_equals(parser, nullptr, 0, true, 2025, nullptr, 0) == 0);
     REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
@@ -721,6 +508,5 @@ TEST_CASE("native C ABI fuzzes deterministic byte streams across parser modes") 
     fuzz_fixed_mode(input, false);
     fuzz_fixed_mode(input, true);
     fuzz_count_mode(input);
-    fuzz_aggregate_modes(input);
   }
 }

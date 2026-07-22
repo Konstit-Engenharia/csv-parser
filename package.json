@@ -1,7 +1,7 @@
 {
   "name": "@konstit/csv-parser",
   "version": "0.0.1",
-  "description": "Bun-native CSV parser with streaming rows, filters, and aggregate batches.",
+  "description": "Bun-native CSV parser with streaming rows, filters, and low-allocation batches.",
   "author": {
     "name": "KONSTIT ENGENHARIA E TECNOLOGIA LTDA",
     "email": "opensource@konstit.com.br"
@@ -55,7 +55,6 @@
     "bench:field-access": "bun run bench -- field-access.bench.ts",
     "bench:latin1-decode": "bun run bench -- latin1-decode.bench.ts",
     "bench:materialization:serial": "bun run bench -- materialization-serial.bench.ts",
-    "bench:multi-column-stats": "bun run bench -- multi-column-stats.bench.ts",
     "bench:native-filters": "bun run bench -- native-filters.bench.ts",
     "bench:native": "bun run build:native && bun scripts/native-bench.ts",
     "bench:quoted-close": "bun run bench -- quoted-close.bench.ts",
@@ -66,10 +65,8 @@
     "bench:trusted-fixed": "bun run bench -- trusted-fixed.bench.ts",
     "bench:workers:materialize": "bun run bench -- workers/materialization.bench.ts",
     "bench:workers:all-columns": "bun run bench -- workers/example-file-all-columns.bench.ts",
-    "bench:workers:aggregates": "bun run bench -- workers/aggregates-api.bench.ts",
     "bench:workers:native-sink": "bun run bench -- workers/native-sink.bench.ts",
     "bench:workers:shared-ipc": "bun run bench -- workers/shared-ipc.bench.ts",
-    "example:api:aggregates": "bun examples/api-aggregates.ts",
     "example:api:batches": "bun examples/api-batches.ts",
     "example:api:count": "bun examples/api-count.ts",
     "example:api:worker-count": "bun examples/api-worker-count.ts",

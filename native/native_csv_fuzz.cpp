@@ -15,14 +15,9 @@ void* csv_parser_finish_strict_batch(void* parser);
 void* csv_parser_write_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final, uint32_t fixed_columns);
 void* csv_parser_write_trusted_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
                                            uint32_t fixed_columns);
-void* csv_parser_write_dictionary_batch(void* parser, const uint8_t* data, uint64_t len, bool final, uint32_t column);
-uint64_t csv_parser_write_group_by_count(void* parser, const uint8_t* data, uint64_t len, uint32_t column);
-void* csv_parser_finish_group_by_count(void* parser, uint32_t column);
 uint64_t csv_parser_write_count(void* parser, const uint8_t* data, uint64_t len, bool final);
 uint64_t csv_parser_finish_count(void* parser);
 void csv_batch_destroy(void* batch);
-void csv_dictionary_batch_destroy(void* batch);
-void csv_group_by_count_batch_destroy(void* batch);
 }
 
 namespace {
@@ -133,41 +128,12 @@ void fuzz_count_mode(std::string_view input) {
   csv_parser_destroy(parser);
 }
 
-void fuzz_aggregate_modes(std::string_view input) {
-  {
-    void* parser = csv_parser_create(0, ',');
-    if (!ensure_parser(parser)) {
-      std::exit(1);
-    }
-    void* batch = csv_parser_write_dictionary_batch(parser, reinterpret_cast<const uint8_t*>(input.data()),
-                                                    input.size(), true, 1);
-    if (batch != nullptr) {
-      csv_dictionary_batch_destroy(batch);
-    }
-    csv_parser_destroy(parser);
-  }
-
-  {
-    void* parser = csv_parser_create(0, ',');
-    if (!ensure_parser(parser)) {
-      std::exit(1);
-    }
-    csv_parser_write_group_by_count(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), 1);
-    void* batch = csv_parser_finish_group_by_count(parser, 1);
-    if (batch != nullptr) {
-      csv_group_by_count_batch_destroy(batch);
-    }
-    csv_parser_destroy(parser);
-  }
-}
-
 void fuzz_one(std::string_view input) {
   fuzz_batch_mode(input, false);
   fuzz_batch_mode(input, true);
   fuzz_fixed_mode(input, false);
   fuzz_fixed_mode(input, true);
   fuzz_count_mode(input);
-  fuzz_aggregate_modes(input);
 }
 
 } // namespace

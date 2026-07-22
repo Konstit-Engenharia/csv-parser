@@ -17,38 +17,22 @@ void* csv_parser_write_batch(void* parser, const uint8_t* data, uint64_t len, bo
 void* csv_parser_write_projected_batch(void* parser, const uint8_t* data, uint64_t len, bool final, bool has_projection,
                                        const uint32_t* selected_columns, uint64_t selected_columns_len, bool has_filter,
                                        uint32_t filter_column, const uint8_t* filter_value, uint64_t filter_value_len);
-void* csv_parser_write_dictionary_batch(void* parser, const uint8_t* data, uint64_t len, bool final, uint32_t column);
 void* csv_parser_find_split_offsets(const char* path, uint64_t shard_count, uint8_t delimiter);
-uint64_t csv_parser_write_group_by_count(void* parser, const uint8_t* data, uint64_t len, uint32_t column);
-void* csv_parser_finish_group_by_count(void* parser, uint32_t column);
-uint64_t csv_parser_write_column_stats(void* parser, const uint8_t* data, uint64_t len, uint32_t column);
-void* csv_parser_finish_column_stats(void* parser, uint32_t column);
 uint64_t csv_parser_write_count(void* parser, const uint8_t* data, uint64_t len, bool final);
 uint64_t csv_parser_count_trusted_newlines(const uint8_t* data, uint64_t len);
 uint64_t csv_parser_write_count_where_equals(void* parser, const uint8_t* data, uint64_t len, bool final,
                                              uint32_t filter_column, const uint8_t* filter_value,
                                              uint64_t filter_value_len);
 void csv_batch_destroy(void* batch);
-void csv_dictionary_batch_destroy(void* batch);
-void csv_group_by_count_batch_destroy(void* batch);
-void csv_column_stats_batch_destroy(void* batch);
 void csv_split_offsets_batch_destroy(void* batch);
 uint64_t csv_batch_row_count(void* batch);
 uint64_t csv_batch_total_fields(void* batch);
-uint64_t csv_dictionary_batch_row_count(void* batch);
-uint64_t csv_dictionary_batch_dict_count(void* batch);
-uint64_t csv_group_by_count_batch_row_count(void* batch);
-uint64_t csv_group_by_count_batch_dict_count(void* batch);
-uint64_t csv_column_stats_batch_row_count(void* batch);
-uint64_t csv_column_stats_batch_dict_count(void* batch);
 uint64_t csv_split_offsets_batch_count(void* batch);
 }
 
 namespace {
 
 constexpr uint8_t delimiter = ';';
-constexpr uint32_t dictionary_column = 19;
-constexpr uint32_t group_by_column = 19;
 constexpr uint32_t filter_column = 19;
 constexpr uint8_t filter_value[] = {'S', 'P'};
 constexpr uint32_t selected_columns[] = {0, 4, 19};
@@ -176,68 +160,6 @@ void bench_split_offsets() {
   csv_split_offsets_batch_destroy(batch);
 }
 
-void bench_dictionary() {
-  void* parser = new_parser();
-  void* batch = csv_parser_write_dictionary_batch(parser, g_input.data(), g_input.size(), true, dictionary_column);
-  csv_parser_destroy(parser);
-  if (batch == nullptr) {
-    fail("csv_parser_write_dictionary_batch returned null");
-  }
-  consume(csv_dictionary_batch_row_count(batch));
-  consume(csv_dictionary_batch_dict_count(batch));
-  csv_dictionary_batch_destroy(batch);
-}
-
-void bench_group_by_count() {
-  void* parser = new_parser();
-  csv_parser_write_group_by_count(parser, g_input.data(), g_input.size(), group_by_column);
-  void* batch = csv_parser_finish_group_by_count(parser, group_by_column);
-  csv_parser_destroy(parser);
-  if (batch == nullptr) {
-    fail("csv_parser_finish_group_by_count returned null");
-  }
-  consume(csv_group_by_count_batch_row_count(batch));
-  consume(csv_group_by_count_batch_dict_count(batch));
-  csv_group_by_count_batch_destroy(batch);
-}
-
-void bench_dictionary_then_group_by() {
-  void* dictionary_parser = new_parser();
-  void* dictionary_batch =
-      csv_parser_write_dictionary_batch(dictionary_parser, g_input.data(), g_input.size(), true, dictionary_column);
-  csv_parser_destroy(dictionary_parser);
-  if (dictionary_batch == nullptr) {
-    fail("csv_parser_write_dictionary_batch returned null");
-  }
-  consume(csv_dictionary_batch_row_count(dictionary_batch));
-  consume(csv_dictionary_batch_dict_count(dictionary_batch));
-  csv_dictionary_batch_destroy(dictionary_batch);
-
-  void* group_parser = new_parser();
-  csv_parser_write_group_by_count(group_parser, g_input.data(), g_input.size(), group_by_column);
-  void* group_batch = csv_parser_finish_group_by_count(group_parser, group_by_column);
-  csv_parser_destroy(group_parser);
-  if (group_batch == nullptr) {
-    fail("csv_parser_finish_group_by_count returned null");
-  }
-  consume(csv_group_by_count_batch_row_count(group_batch));
-  consume(csv_group_by_count_batch_dict_count(group_batch));
-  csv_group_by_count_batch_destroy(group_batch);
-}
-
-void bench_column_stats() {
-  void* parser = new_parser();
-  csv_parser_write_column_stats(parser, g_input.data(), g_input.size(), dictionary_column);
-  void* batch = csv_parser_finish_column_stats(parser, dictionary_column);
-  csv_parser_destroy(parser);
-  if (batch == nullptr) {
-    fail("csv_parser_finish_column_stats returned null");
-  }
-  consume(csv_column_stats_batch_row_count(batch));
-  consume(csv_column_stats_batch_dict_count(batch));
-  csv_column_stats_batch_destroy(batch);
-}
-
 void bench_project_filter() {
   void* parser = new_parser();
   void* batch = csv_parser_write_projected_batch(parser, g_input.data(), g_input.size(), true, true, selected_columns,
@@ -279,10 +201,6 @@ int main() {
     // Measures the end-to-end quote-aware structural scan used to find safe file shard boundaries.
     runner.bench("native split offsets", bench_split_offsets);
   }
-  runner.bench("native dictionary column", bench_dictionary);
-  runner.bench("native groupby count", bench_group_by_count);
-  runner.bench("native dictionary then groupby", bench_dictionary_then_group_by);
-  runner.bench("native column stats", bench_column_stats);
   runner.bench("native projected filter", bench_project_filter);
   mitata::k_run options;
   options.colors = std::getenv("NO_COLOR") == nullptr;

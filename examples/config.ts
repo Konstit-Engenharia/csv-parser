@@ -19,8 +19,6 @@ export const COLUMNS = parseColumns(Bun.env['CSV_EXAMPLE_COLUMNS']) ?? [0, 1, 2]
 export const FILTER_COLUMN = Number(Bun.env['CSV_EXAMPLE_FILTER_COLUMN'] ?? COLUMNS[0] ?? 0);
 // Leaving the value absent disables filtering in examples that support it.
 export const FILTER_VALUE = Bun.env['CSV_EXAMPLE_FILTER_VALUE'];
-export const GROUP_COLUMN = Number(Bun.env['CSV_EXAMPLE_GROUP_COLUMN'] ?? COLUMNS[0] ?? 0);
-
 export function parseColumns(value: string | undefined): number[] | undefined {
   // Treat a missing or whitespace-only variable as "use the example default".
   if (value === undefined || value.trim() === '') {

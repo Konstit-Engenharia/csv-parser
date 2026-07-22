@@ -1,11 +1,5 @@
 import type { Pointer } from 'bun:ffi';
-import {
-  NativeCsvBatch,
-  NativeCsvColumnStatsBatch,
-  NativeCsvDictionaryBatch,
-  NativeCsvGroupByCountBatch,
-  takeMultiColumnStatsBatches,
-} from './batches.ts';
+import { NativeCsvBatch } from './batches.ts';
 import {
   native,
   u64ToSafeNumber,
@@ -13,9 +7,7 @@ import {
 import {
   encodingCode,
   normalizeChunk,
-  normalizeColumnIndex,
   normalizeColumns,
-  normalizeColumnStatsColumns,
   normalizeEqualsFilter,
   normalizeFixedColumnsCount,
   normalizeInFilter,
@@ -23,7 +15,6 @@ import {
   normalizeTrustedFixedColumns,
 } from './normalize.ts';
 import type {
-  CsvColumns,
   CsvEqualsFilter,
   CsvInFilter,
   CsvNativeProjectionOptions,
@@ -151,89 +142,6 @@ export class NativeCsvParser {
     return new NativeCsvBatch(batch);
   }
 
-  writeDictionaryBatch(chunk: NodeJS.TypedArray | DataView, column: number, final = false): NativeCsvDictionaryBatch {
-    this.#rejectStrictUnsupported('dictionary batches');
-    normalizeColumnIndex(column, 'dictionary column');
-    if (chunk.byteLength === 0 && final) {
-      return this.endDictionaryBatch(column);
-    }
-
-    const handle = this.#requireHandle();
-    const input = normalizeChunk(chunk);
-    const batch = native.symbols.csv_parser_write_dictionary_batch(
-      handle,
-      input,
-      BigInt(input.byteLength),
-      final,
-      column,
-    );
-    if (batch === null) {
-      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
-    }
-    return new NativeCsvDictionaryBatch(batch);
-  }
-
-  writeGroupByCount(chunk: NodeJS.TypedArray | DataView, column: number): number {
-    this.#rejectStrictUnsupported('groupBy count');
-    normalizeColumnIndex(column, 'groupBy count column');
-    if (chunk.byteLength === 0) {
-      return 0;
-    }
-
-    const handle = this.#requireHandle();
-    const input = normalizeChunk(chunk);
-    return u64ToSafeNumber(
-      native.symbols.csv_parser_write_group_by_count(
-        handle,
-        input,
-        BigInt(input.byteLength),
-        column,
-      ),
-      'CSV groupBy parsed row count',
-    );
-  }
-
-  writeColumnStats(chunk: NodeJS.TypedArray | DataView, column: number): number {
-    this.#rejectStrictUnsupported('column stats');
-    normalizeColumnIndex(column, 'column stats column');
-    if (chunk.byteLength === 0) {
-      return 0;
-    }
-
-    const handle = this.#requireHandle();
-    const input = normalizeChunk(chunk);
-    return u64ToSafeNumber(
-      native.symbols.csv_parser_write_column_stats(
-        handle,
-        input,
-        BigInt(input.byteLength),
-        column,
-      ),
-      'CSV column stats parsed row count',
-    );
-  }
-
-  writeMultiColumnStats(chunk: NodeJS.TypedArray | DataView, columns: CsvColumns): number {
-    this.#rejectStrictUnsupported('multi-column stats');
-    if (chunk.byteLength === 0 || columns.length === 0) {
-      return 0;
-    }
-
-    const handle = this.#requireHandle();
-    const input = normalizeChunk(chunk);
-    const normalizedColumns = normalizeColumnStatsColumns(columns);
-    return u64ToSafeNumber(
-      native.symbols.csv_parser_write_multi_column_stats(
-        handle,
-        input,
-        BigInt(input.byteLength),
-        normalizedColumns,
-        BigInt(normalizedColumns.length),
-      ),
-      'CSV multi-column stats parsed row count',
-    );
-  }
-
   end(): CsvRow[] {
     const batch = this.endBatch();
     try {
@@ -279,54 +187,6 @@ export class NativeCsvParser {
       throw new Error(`native CSV parser failed: ${this.#lastError()}`);
     }
     return new NativeCsvBatch(batch);
-  }
-
-  endDictionaryBatch(column: number): NativeCsvDictionaryBatch {
-    this.#rejectStrictUnsupported('dictionary batches');
-    normalizeColumnIndex(column, 'dictionary column');
-    const batch = native.symbols.csv_parser_finish_dictionary_batch(this.#requireHandle(), column);
-    if (batch === null) {
-      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
-    }
-    return new NativeCsvDictionaryBatch(batch);
-  }
-
-  endGroupByCount(column: number): NativeCsvGroupByCountBatch {
-    this.#rejectStrictUnsupported('groupBy count');
-    normalizeColumnIndex(column, 'groupBy count column');
-    const batch = native.symbols.csv_parser_finish_group_by_count(this.#requireHandle(), column);
-    if (batch === null) {
-      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
-    }
-    return new NativeCsvGroupByCountBatch(batch);
-  }
-
-  endColumnStats(column: number): NativeCsvColumnStatsBatch {
-    this.#rejectStrictUnsupported('column stats');
-    normalizeColumnIndex(column, 'column stats column');
-    const batch = native.symbols.csv_parser_finish_column_stats(this.#requireHandle(), column);
-    if (batch === null) {
-      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
-    }
-    return new NativeCsvColumnStatsBatch(batch);
-  }
-
-  endMultiColumnStats(columns: CsvColumns): NativeCsvColumnStatsBatch[] {
-    this.#rejectStrictUnsupported('multi-column stats');
-    if (columns.length === 0) {
-      return [];
-    }
-
-    const normalizedColumns = normalizeColumnStatsColumns(columns);
-    const batch = native.symbols.csv_parser_finish_multi_column_stats(
-      this.#requireHandle(),
-      normalizedColumns,
-      BigInt(normalizedColumns.length),
-    );
-    if (batch === null) {
-      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
-    }
-    return takeMultiColumnStatsBatches(batch);
   }
 
   writeCount(chunk: NodeJS.TypedArray | DataView, final = false): number {

@@ -73,21 +73,6 @@ export function normalizeColumns(columns: CsvColumns | undefined): Uint32Array {
   return normalized.length === 0 ? EMPTY_U32 : normalized;
 }
 
-export function normalizeColumnStatsColumns(columns: CsvColumns): Uint32Array {
-  const normalized = new Uint32Array(columns.length);
-  const seen = new Set<number>();
-  for (let index = 0; index < columns.length; ++index) {
-    const column = columns[index] ?? NaN;
-    normalizeColumnIndex(column, 'multi-column stats column');
-    if (seen.has(column)) {
-      throw new RangeError(`multi-column stats column repeated: ${column}`);
-    }
-    seen.add(column);
-    normalized[index] = column;
-  }
-  return normalized;
-}
-
 export function normalizeColumnIndex(column: number, label: string): number {
   if (!Number.isInteger(column) || column < 0 || column > MAX_COLUMN_INDEX) {
     throw new RangeError(`${label} out of range: ${column}`);

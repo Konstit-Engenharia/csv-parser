@@ -2,7 +2,6 @@ import {
   csv,
   type CsvWhereEqualsFilter,
   parallelCount,
-  parallelGroupByCount,
   parallelRows,
   workerPool,
 } from '../src/index.ts';
@@ -52,7 +51,6 @@ void csv.withColumnarBatches(path, { columns: [0, 2] as const }, (batch) => {
 void csv.rows(path, { where: { column: 1, equals: 'SP' } });
 void csv.rows(path, { where: optionalEquals });
 void parallelCount(path, { workerCount: 2, where: { column: 1, in: ['SP'] } });
-void parallelGroupByCount(path, 1, { workerCount: 2 });
 
 // @ts-expect-error dynamic strict state cannot safely combine with filters
 void csv.rows(path, { strict: dynamicStrict, where: { column: 1, equals: 'SP' } });
@@ -62,9 +60,6 @@ void parallelCount(path, {});
 
 // @ts-expect-error direct parallel count does not support strict mode
 void parallelCount(path, { strict: true, workerCount: 2 });
-
-// @ts-expect-error direct parallel aggregates require workerCount
-void parallelGroupByCount(path, 1, {});
 
 // @ts-expect-error strict count does not support filters
 void csv.count(path, { strict: true, where: { column: 1, equals: 'SP' } });
@@ -110,24 +105,3 @@ void workerPool(path, { workerCount: 2, where: { column: 1, in: ['SP'] } });
 
 // @ts-expect-error workerPool does not support strict mode
 void workerPool(path, { strict: true, workerCount: 2 });
-
-// @ts-expect-error dictionary does not support strict mode
-void csv.dictionary(path, 1, { strict: true });
-
-// @ts-expect-error groupByCount does not support strict mode
-void csv.groupByCount(path, 1, { strict: true });
-
-// @ts-expect-error groupByCount does not support filters
-void csv.groupByCount(path, 1, { where: { column: 1, equals: 'SP' } });
-
-// @ts-expect-error columnStats does not support strict mode
-void csv.columnStats(path, 1, { strict: true });
-
-// @ts-expect-error columnStats does not support filters
-void csv.columnStats(path, 1, { where: { column: 1, equals: 'SP' } });
-
-// @ts-expect-error multiColumnStats does not support strict mode
-void csv.multiColumnStats(path, [1, 2], { strict: true });
-
-// @ts-expect-error multiColumnStats does not support filters
-void csv.multiColumnStats(path, [1, 2], { where: { column: 1, equals: 'SP' } });
