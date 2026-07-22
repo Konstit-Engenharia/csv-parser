@@ -57,6 +57,19 @@ void write_count_chunk(void* parser, std::string_view chunk, uint64_t& rows) {
   rows += csv_parser_write_count(parser, reinterpret_cast<const uint8_t*>(chunk.data()), chunk.size(), false);
 }
 
+uint64_t count_rows_in_chunks(std::string_view input, size_t chunk_size) {
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+
+  uint64_t rows = 0;
+  for (size_t offset = 0; offset < input.size(); offset += chunk_size) {
+    write_count_chunk(parser, input.substr(offset, std::min(chunk_size, input.size() - offset)), rows);
+  }
+  rows += csv_parser_finish_count(parser);
+  csv_parser_destroy(parser);
+  return rows;
+}
+
 std::string decode_latin1_reference(const uint8_t* data, size_t len) {
   std::string decoded;
   decoded.reserve(len * 2);
@@ -163,6 +176,58 @@ TEST_CASE("native C ABI counts chunked quoted rows") {
   csv_parser_destroy(parser);
 
   REQUIRE(rows == 4);
+}
+
+TEST_CASE("native C ABI count preserves plain row state across SIMD and chunk boundaries") {
+  std::string input(15, 'a');
+  input += "\n\n";
+  input.append(14, 'b');
+  input += '\n';
+  input.append(31, 'c');
+  input += "\n\n";
+  input.append(32, 'd');
+  input += ",tail";
+
+  for (const size_t chunk_size : {input.size(), size_t{15}, size_t{16}, size_t{17}, size_t{31}, size_t{32}, size_t{33},
+                                  size_t{63}, size_t{64}, size_t{65}}) {
+    REQUIRE(count_rows_in_chunks(input, chunk_size) == 6);
+  }
+}
+
+TEST_CASE("native C ABI count falls back for quote and CR state carried across chunks") {
+  SECTION("pending closing quote") {
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+
+    uint64_t rows = 0;
+    write_count_chunk(parser, "\"quoted\nvalue\"", rows);
+    write_count_chunk(parser, "\nplain\n\nnext", rows);
+    rows += csv_parser_finish_count(parser);
+    csv_parser_destroy(parser);
+
+    REQUIRE(rows == 4);
+  }
+
+  SECTION("CRLF pair") {
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+
+    uint64_t rows = 0;
+    write_count_chunk(parser, "first\r", rows);
+    write_count_chunk(parser, "\nsecond\n\nthird", rows);
+    rows += csv_parser_finish_count(parser);
+    csv_parser_destroy(parser);
+
+    REQUIRE(rows == 4);
+  }
+
+  SECTION("escaped and unquoted quotes") {
+    const std::string input = "unquoted\"quote\n\"escaped \"\" quote\ninside\",tail\nlast";
+    for (const size_t chunk_size :
+         {size_t{1}, size_t{15}, size_t{16}, size_t{17}, size_t{31}, size_t{32}, size_t{33}}) {
+      REQUIRE(count_rows_in_chunks(input, chunk_size) == 3);
+    }
+  }
 }
 
 TEST_CASE("native C ABI finds csv-safe split offsets") {

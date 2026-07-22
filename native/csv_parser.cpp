@@ -88,7 +88,25 @@ struct csv_structural_state {
   uint64_t deferred_cr_row_end = 0;
 };
 
-template <bool defer_crlf, typename OnRowEnd>
+struct csv_row_counter {
+  uint64_t& emitted_rows;
+  uint32_t& current_column;
+
+  bool operator()(uint64_t) const {
+    ++emitted_rows;
+    current_column = 0;
+    return true;
+  }
+
+  void add_plain_lf_rows(uint64_t count) const {
+    emitted_rows += count;
+    if (count != 0) {
+      current_column = 0;
+    }
+  }
+};
+
+template <bool defer_crlf, bool count_plain_lf_blocks = false, typename OnRowEnd>
 HWY_ATTR bool scan_csv_row_ends(const uint8_t* data, size_t len, uint8_t delimiter, uint64_t base_offset,
                                 csv_structural_state& state, OnRowEnd&& on_row_end) {
   // BitsFromMask exposes one bit per lane in a uint64_t, so keep blocks at most 64 bytes wide.
@@ -103,7 +121,9 @@ HWY_ATTR bool scan_csv_row_ends(const uint8_t* data, size_t len, uint8_t delimit
     const auto bytes =
         block_size == lanes ? hn::LoadU(du8, data + block_start) : hn::LoadN(du8, data + block_start, block_size);
     const auto quote_mask = hn::Eq(bytes, quote_v);
-    const auto row_end_mask = hn::Or(hn::Eq(bytes, lf_v), hn::Eq(bytes, cr_v));
+    const auto lf_mask = hn::Eq(bytes, lf_v);
+    const auto cr_mask = hn::Eq(bytes, cr_v);
+    const auto row_end_mask = hn::Or(lf_mask, cr_mask);
     // Delimiters only affect whether a later quote opens a field. The byte immediately before that
     // quote is sufficient, which keeps common delimiter-heavy CSV data out of the scalar event loop.
     const auto special_mask = hn::Or(quote_mask, row_end_mask);
@@ -111,6 +131,19 @@ HWY_ATTR bool scan_csv_row_ends(const uint8_t* data, size_t len, uint8_t delimit
         block_size == 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << block_size) - 1;
     const uint64_t quote_bits = hn::BitsFromMask(du8, quote_mask) & valid_bits;
     const uint64_t special_bits = hn::BitsFromMask(du8, special_mask) & valid_bits;
+
+    if constexpr (count_plain_lf_blocks) {
+      if (!state.in_quotes && !state.pending_quote && !state.previous_was_cr && quote_bits == 0 &&
+          hn::AllFalse(du8, cr_mask)) {
+        on_row_end.add_plain_lf_rows(static_cast<uint64_t>(hn::CountTrue(du8, lf_mask)));
+        const uint8_t last = data[block_start + block_size - 1];
+        state.saw_row_data = last != '\n';
+        state.at_field_start = last == '\n' || last == delimiter;
+        state.previous_was_cr = false;
+        continue;
+      }
+    }
+
     size_t cursor = 0;
 
     while (cursor < block_size) {
@@ -857,12 +890,8 @@ private:
         .previous_was_cr = previous_was_cr_,
         .saw_row_data = saw_row_data_,
     };
-    const auto on_row_end = [this](uint64_t) {
-      ++emitted_rows_;
-      current_column_ = 0;
-      return true;
-    };
-    scan_csv_row_ends<false>(data, len, delimiter_, 0, state, on_row_end);
+    csv_row_counter on_row_end{emitted_rows_, current_column_};
+    scan_csv_row_ends<false, true>(data, len, delimiter_, 0, state, on_row_end);
     in_quotes_ = state.in_quotes;
     pending_quote_ = state.pending_quote;
     at_field_start_ = state.at_field_start;
