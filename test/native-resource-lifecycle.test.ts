@@ -9,13 +9,17 @@ import {
   parseCsvFileDictionary,
   parseCsvFileGroupByCount,
 } from '../src/index.ts';
+import {
+  csvFixturePath,
+  readCsvFixture,
+} from './fixtures.ts';
 
 describe('native resource lifecycle', () => {
   test('parser and row batches expose dispose state and use-after-close errors', () => {
     const parser = new NativeCsvParser();
     expect(parser.closed).toBe(false);
 
-    const batch = parser.writeBatch(Buffer.from('a,b\n1,2\n'), true);
+    const batch = parser.writeBatch(readCsvFixture('native/unquoted-comma-two-rows.csv'), true);
     expect(batch.closed).toBe(false);
     expect(batch.rows()).toEqual([['a', 'b'], ['1', '2']]);
 
@@ -27,7 +31,7 @@ describe('native resource lifecycle', () => {
 
     parser.dispose();
     expect(parser.closed).toBe(true);
-    expect(() => parser.write(Buffer.from('x\n'))).toThrow('native CSV parser is closed');
+    expect(() => parser.write(readCsvFixture('native/single-x.csv'))).toThrow('native CSV parser is closed');
     parser.close();
     expect(parser.closed).toBe(true);
   });
@@ -40,7 +44,7 @@ describe('native resource lifecycle', () => {
       using parser = new NativeCsvParser();
       parserRef = parser;
       {
-        using batch = parser.writeBatch(Buffer.from('a,b\n1,2\n'), true);
+        using batch = parser.writeBatch(readCsvFixture('native/unquoted-comma-two-rows.csv'), true);
         batchRef = batch;
         expect(batch.closed).toBe(false);
         expect(batch.rows()).toEqual([['a', 'b'], ['1', '2']]);
@@ -54,8 +58,7 @@ describe('native resource lifecycle', () => {
   });
 
   test('aggregate batches expose dispose state', async () => {
-    const path = `/tmp/csv-parser-lifecycle-${crypto.randomUUID()}.csv`;
-    await Bun.write(path, 'id,name,uf\n1,Ana,SP\n2,Bia,RJ\n');
+    const path = csvFixturePath('native/resource-lifecycle.csv');
 
     const dictionaryIterator = parseCsvFileDictionary(path, 2);
     const firstDictionary = await dictionaryIterator.next();

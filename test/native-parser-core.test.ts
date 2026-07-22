@@ -8,13 +8,15 @@ import {
   NativeCsvParser,
   parseCsvBuffer,
 } from '../src/index.ts';
+import { readCsvFixture } from './fixtures.ts';
 
 describe('NativeCsvParser core parsing', () => {
   test('parses utf8 csv with quotes across chunks', () => {
     const parser = new NativeCsvParser();
     try {
-      expect(parser.write(Buffer.from('name,city\n"ana'))).toEqual([['name', 'city']]);
-      expect(parser.write(Buffer.from(' ""a""",sao\njoao,"rio\nsul"'), true)).toEqual([
+      const input = readCsvFixture('native/utf8-quotes-across-chunks.csv');
+      expect(parser.write(input.subarray(0, 14))).toEqual([['name', 'city']]);
+      expect(parser.write(input.subarray(14), true)).toEqual([
         ['ana "a"', 'sao'],
         ['joao', 'rio\nsul'],
       ]);
@@ -24,33 +26,17 @@ describe('NativeCsvParser core parsing', () => {
   });
 
   test('decodes latin1 to utf8', () => {
-    const input = new Uint8Array([
-      0x6e,
-      0x6f,
-      0x6d,
-      0x65,
-      0x0a,
-      0x4a,
-      0x6f,
-      0xe3,
-      0x6f,
-      0x0a,
-      0x4d,
-      0xe1,
-      0x72,
-      0x63,
-      0x69,
-      0x61,
-    ]);
+    const input = readCsvFixture('native/latin1-name-column.csv');
     expect(parseCsvBuffer(input, { encoding: 'latin1' })).toEqual([['nome'], ['João'], ['Márcia']]);
   });
 
   test('counts rows without materializing fields', () => {
     const parser = new NativeCsvParser({ encoding: 'latin1' });
     try {
+      const input = readCsvFixture('native/comma-multiline-count.csv');
       let count = 0;
-      count += parser.writeCount(Buffer.from('a,b\n1,2\n'));
-      count += parser.writeCount(Buffer.from('"3\nx",4'), true);
+      count += parser.writeCount(input.subarray(0, 8));
+      count += parser.writeCount(input.subarray(8), true);
       expect(count).toBe(3);
     } finally {
       parser.close();
@@ -58,8 +44,8 @@ describe('NativeCsvParser core parsing', () => {
   });
 
   test('counts trusted newline-delimited rows without CSV quote parsing', () => {
-    expect(countTrustedNewlineRows(Buffer.from('a,b\n1,2\n3,4'))).toBe(3);
-    expect(countTrustedNewlineRows(Buffer.from('a,b\r\n1,2\r\n'))).toBe(2);
+    expect(countTrustedNewlineRows(readCsvFixture('native/trusted-lf-rows.csv'))).toBe(3);
+    expect(countTrustedNewlineRows(readCsvFixture('native/trusted-crlf-rows.csv'))).toBe(2);
     expect(countTrustedNewlineRows(Buffer.alloc(0))).toBe(0);
   });
 
@@ -80,7 +66,7 @@ describe('NativeCsvParser core parsing', () => {
   });
 
   test('counts quote-aware rows across every two-chunk split', () => {
-    const input = Buffer.from('"h";"v"\r\n"1";"a""b\nc"\r\nplain"quote;z\r"tail";"x"');
+    const input = readCsvFixture('native/quote-aware-row-count.csv');
     for (let split = 0; split <= input.length; ++split) {
       const parser = new NativeCsvParser({ delimiter: ';' });
       try {
@@ -106,13 +92,13 @@ describe('NativeCsvParser core parsing', () => {
   });
 
   test('parses empty physical lines as empty records', () => {
-    expect(parseCsvBuffer(Buffer.from('\n\n'))).toEqual([[''], ['']]);
-    expect(parseCsvBuffer(Buffer.from('a\n\n'))).toEqual([['a'], ['']]);
+    expect(parseCsvBuffer(readCsvFixture('native/empty-records.csv'))).toEqual([[''], ['']]);
+    expect(parseCsvBuffer(readCsvFixture('native/one-value-and-empty-record.csv'))).toEqual([['a'], ['']]);
 
     const parser = new NativeCsvParser();
     try {
       let count = 0;
-      count += parser.writeCount(Buffer.from('\n\n'));
+      count += parser.writeCount(readCsvFixture('native/empty-records.csv'));
       count += parser.endCount();
       expect(count).toBe(2);
     } finally {
@@ -123,7 +109,7 @@ describe('NativeCsvParser core parsing', () => {
   test('does not emit an extra row when stream ends after newline', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      expect(parser.write(Buffer.from('"a";"b"\n'))).toEqual([['a', 'b']]);
+      expect(parser.write(readCsvFixture('native/quoted-semicolon-one-row.csv'))).toEqual([['a', 'b']]);
       expect(parser.end()).toEqual([]);
     } finally {
       parser.close();

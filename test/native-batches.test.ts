@@ -9,12 +9,13 @@ import {
   NativeCsvRowView,
   parseCsvBuffer,
 } from '../src/index.ts';
+import { readCsvFixture } from './fixtures.ts';
 
 describe('NativeCsvParser batches and materialization', () => {
   test('exposes lazy field views and selected columns', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      const batch = parser.writeBatch(Buffer.from('"1";"Ana";"SP"\n"2";"Joao";"RJ"\n'), true);
+      const batch = parser.writeBatch(readCsvFixture('native/quoted-semicolon-people.csv'), true);
       try {
         expect(batch.rowCount).toBe(2);
         expect(batch.rowOffsets()).toBeInstanceOf(BigUint64Array);
@@ -54,15 +55,16 @@ describe('NativeCsvParser batches and materialization', () => {
       trusted: { fixedColumns: 3, noNewlinesInQuotes: true },
     });
     try {
+      const input = readCsvFixture('native/trusted-fixed-columns-mixed-newlines.csv');
       const rows: string[][] = [];
-      let batch = parser.writeBatch(Buffer.from('"1";"Ana; A";"S'));
+      let batch = parser.writeBatch(input.subarray(0, 15));
       try {
         expect(batch.rows()).toEqual([]);
       } finally {
         batch.close();
       }
 
-      batch = parser.writeBatch(Buffer.from('P"\r\n"2";"Joao ""J""";"RJ"\n'));
+      batch = parser.writeBatch(input.subarray(15));
       try {
         rows.push(...batch.rows());
       } finally {
@@ -91,15 +93,16 @@ describe('NativeCsvParser batches and materialization', () => {
       fixedColumns: 3,
     });
     try {
+      const input = readCsvFixture('native/fixed-columns-quoted-newline.csv');
       const rows: string[][] = [];
-      let batch = parser.writeBatch(Buffer.from('"1";"Ana\nA";"S'));
+      let batch = parser.writeBatch(input.subarray(0, 14));
       try {
         expect(batch.rows()).toEqual([]);
       } finally {
         batch.close();
       }
 
-      batch = parser.writeBatch(Buffer.from('P"\n"2";"Joao";"RJ"\n'));
+      batch = parser.writeBatch(input.subarray(14));
       try {
         rows.push(...batch.rows());
       } finally {
@@ -125,7 +128,7 @@ describe('NativeCsvParser batches and materialization', () => {
   test('fixed-column batches reject column count mismatch', () => {
     const parser = new NativeCsvParser({ delimiter: ';', fixedColumns: 3 });
     try {
-      expect(() => parser.writeBatch(Buffer.from('1;2\n'))).toThrow('fixed row column count mismatch');
+      expect(() => parser.writeBatch(readCsvFixture('native/fixed-column-mismatch.csv'))).toThrow('fixed row column count mismatch');
     } finally {
       parser.close();
     }
@@ -138,18 +141,7 @@ describe('NativeCsvParser batches and materialization', () => {
       trusted: { fixedColumns: 2, noNewlinesInQuotes: true },
     });
     try {
-      const batch = parser.writeBatch(
-        new Uint8Array([
-          0x31,
-          0x3b,
-          0x4a,
-          0x6f,
-          0xe3,
-          0x6f,
-          0x0a,
-        ]),
-        true,
-      );
+      const batch = parser.writeBatch(readCsvFixture('native/latin1-one-name.csv'), true);
       try {
         expect(batch.rows()).toEqual([['1', 'João']]);
       } finally {
@@ -166,7 +158,9 @@ describe('NativeCsvParser batches and materialization', () => {
       trusted: { fixedColumns: 3, noNewlinesInQuotes: true },
     });
     try {
-      expect(() => parser.writeBatch(Buffer.from('1;2\n'))).toThrow('trusted fixed row column count mismatch');
+      expect(() => parser.writeBatch(readCsvFixture('native/fixed-column-mismatch.csv'))).toThrow(
+        'trusted fixed row column count mismatch',
+      );
     } finally {
       parser.close();
     }
@@ -175,7 +169,7 @@ describe('NativeCsvParser batches and materialization', () => {
   test('iterates rows with one reusable row view', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      const batch = parser.writeBatch(Buffer.from('"1";"Ana";"SP"\n"2";"Joao";"RJ"\n'), true);
+      const batch = parser.writeBatch(readCsvFixture('native/quoted-semicolon-people.csv'), true);
       try {
         const seen: Array<{
           rowIndex: number;
@@ -238,7 +232,7 @@ describe('NativeCsvParser batches and materialization', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     const cache = new CsvStringCache({ columns: [2] });
     try {
-      const batch = parser.writeBatch(Buffer.from('"1";"Ana";"SP"\n"2";"Joao";"SP"\n"3";"Bia";"RJ"\n'), true);
+      const batch = parser.writeBatch(readCsvFixture('native/quoted-semicolon-people-with-repeated-state.csv'), true);
       try {
         expect(batch.rowsInto([], [0, 2], cache)).toEqual([
           ['1', 'SP'],
@@ -261,7 +255,7 @@ describe('NativeCsvParser batches and materialization', () => {
   });
 
   test('parseCsvBuffer materializes selected columns', () => {
-    expect(parseCsvBuffer(Buffer.from('"id";"name";"uf"\n"1";"Ana";"SP"\n'), {
+    expect(parseCsvBuffer(readCsvFixture('native/quoted-semicolon-one-person-with-header.csv'), {
       delimiter: ';',
       selectedColumns: [0, 2],
     })).toEqual([

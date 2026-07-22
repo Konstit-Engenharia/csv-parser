@@ -11,12 +11,13 @@ import {
   type CsvGroupByCountEntry,
   NativeCsvParser,
 } from '../src/index.ts';
+import { readCsvFixture } from './fixtures.ts';
 
 describe('NativeCsvParser native aggregates', () => {
   test('encodes one selected column as native dictionary ids', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      const batch = parser.writeDictionaryBatch(Buffer.from('"1";"SP"\n"2";"SP"\n"3";"RJ"\n'), 1, true);
+      const batch = parser.writeDictionaryBatch(readCsvFixture('native/quoted-semicolon-states.csv'), 1, true);
       try {
         expect([...batch.ids()]).toEqual([0, 0, 1]);
         expect(batch.dictionaryOffsets()).toBeInstanceOf(BigUint64Array);
@@ -33,8 +34,9 @@ describe('NativeCsvParser native aggregates', () => {
   test('counts one selected column as native groupBy dictionary', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      expect(parser.writeGroupByCount(Buffer.from('"1";"SP"\n"2";"'), 1)).toBe(1);
-      expect(parser.writeGroupByCount(Buffer.from('SP"\n"3";"RJ"\n"4"\n'), 1)).toBe(3);
+      const input = readCsvFixture('native/quoted-semicolon-states-with-empty-field.csv');
+      expect(parser.writeGroupByCount(input.subarray(0, 14), 1)).toBe(1);
+      expect(parser.writeGroupByCount(input.subarray(14), 1)).toBe(3);
       const batch = parser.endGroupByCount(1);
       try {
         expect(batch.rowCount).toBe(4);
@@ -57,8 +59,9 @@ describe('NativeCsvParser native aggregates', () => {
   test('collects selected column ids and counts in one native pass', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      expect(parser.writeColumnStats(Buffer.from('"1";"SP"\n"2";"'), 1)).toBe(1);
-      expect(parser.writeColumnStats(Buffer.from('SP"\n"3";"RJ"\n"4"\n'), 1)).toBe(3);
+      const input = readCsvFixture('native/quoted-semicolon-states-with-empty-field.csv');
+      expect(parser.writeColumnStats(input.subarray(0, 14), 1)).toBe(1);
+      expect(parser.writeColumnStats(input.subarray(14), 1)).toBe(3);
       const batch = parser.endColumnStats(1);
       try {
         expect(batch.rowCount).toBe(4);
@@ -94,8 +97,9 @@ describe('NativeCsvParser native aggregates', () => {
   test('collects multiple selected column stats in one native pass', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      expect(parser.writeMultiColumnStats(Buffer.from('"id";"uf";"kind"\n"1";"'), [0, 1, 2])).toBe(1);
-      expect(parser.writeMultiColumnStats(Buffer.from('SP";"A"\n"2";"SP";"B"\n"3";"RJ";"A"\n"4"\n'), [0, 1, 2])).toBe(4);
+      const input = readCsvFixture('native/quoted-semicolon-multi-column-stats.csv');
+      expect(parser.writeMultiColumnStats(input.subarray(0, 22), [0, 1, 2])).toBe(1);
+      expect(parser.writeMultiColumnStats(input.subarray(22), [0, 1, 2])).toBe(4);
       const batches = parser.endMultiColumnStats([0, 1, 2]);
       try {
         const idBatch = batches[0];
@@ -141,7 +145,7 @@ describe('NativeCsvParser native aggregates', () => {
   test('rejects repeated multi-column stats columns', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
-      expect(() => parser.writeMultiColumnStats(Buffer.from('"id";"uf"\n'), [1, 1])).toThrow(
+      expect(() => parser.writeMultiColumnStats(readCsvFixture('native/quoted-semicolon-header.csv'), [1, 1])).toThrow(
         'multi-column stats column repeated: 1',
       );
     } finally {
@@ -152,7 +156,7 @@ describe('NativeCsvParser native aggregates', () => {
   test('enforces the maximum aggregate column index', () => {
     const dictionaryParser = new NativeCsvParser();
     try {
-      const batch = dictionaryParser.writeDictionaryBatch(Buffer.from('a\n'), 2024, true);
+      const batch = dictionaryParser.writeDictionaryBatch(readCsvFixture('native/single-value.csv'), 2024, true);
       batch.close();
     } finally {
       dictionaryParser.close();
@@ -160,7 +164,7 @@ describe('NativeCsvParser native aggregates', () => {
 
     const groupByParser = new NativeCsvParser();
     try {
-      groupByParser.writeGroupByCount(Buffer.from('a\n'), 2024);
+      groupByParser.writeGroupByCount(readCsvFixture('native/single-value.csv'), 2024);
       groupByParser.endGroupByCount(2024).close();
     } finally {
       groupByParser.close();
@@ -168,7 +172,7 @@ describe('NativeCsvParser native aggregates', () => {
 
     const statsParser = new NativeCsvParser();
     try {
-      statsParser.writeColumnStats(Buffer.from('a\n'), 2024);
+      statsParser.writeColumnStats(readCsvFixture('native/single-value.csv'), 2024);
       statsParser.endColumnStats(2024).close();
     } finally {
       statsParser.close();
@@ -176,16 +180,16 @@ describe('NativeCsvParser native aggregates', () => {
 
     const invalidParser = new NativeCsvParser();
     try {
-      expect(() => invalidParser.writeDictionaryBatch(Buffer.from('a\n'), 2025)).toThrow(
+      expect(() => invalidParser.writeDictionaryBatch(readCsvFixture('native/single-value.csv'), 2025)).toThrow(
         'dictionary column out of range: 2025',
       );
-      expect(() => invalidParser.writeGroupByCount(Buffer.from('a\n'), 2025)).toThrow(
+      expect(() => invalidParser.writeGroupByCount(readCsvFixture('native/single-value.csv'), 2025)).toThrow(
         'groupBy count column out of range: 2025',
       );
-      expect(() => invalidParser.writeColumnStats(Buffer.from('a\n'), 2025)).toThrow(
+      expect(() => invalidParser.writeColumnStats(readCsvFixture('native/single-value.csv'), 2025)).toThrow(
         'column stats column out of range: 2025',
       );
-      expect(() => invalidParser.writeMultiColumnStats(Buffer.from('a\n'), [2025])).toThrow(
+      expect(() => invalidParser.writeMultiColumnStats(readCsvFixture('native/single-value.csv'), [2025])).toThrow(
         'multi-column stats column out of range: 2025',
       );
     } finally {

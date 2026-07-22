@@ -3,6 +3,7 @@ import {
   expect,
   test,
 } from 'bun:test';
+import { readCsvFixture } from '../fixtures.ts';
 import {
   parseChunkedRows,
   parseRows,
@@ -14,7 +15,7 @@ type ExpectedObjects = Array<Record<string, string>>;
 
 interface Rfc4180Case {
   name: string;
-  csv: string;
+  csv: Buffer;
   expected: ExpectedRows | ExpectedObjects;
   mode?: 'rows' | 'header';
 }
@@ -24,94 +25,94 @@ interface Rfc4180Case {
 const cases: Rfc4180Case[] = [
   {
     name: 'blank-records',
-    csv: '\n\n',
+    csv: readCsvFixture('rfc4180/blank-records.csv'),
     expected: [[''], ['']],
   },
   {
     name: 'empty-field',
-    csv: 'id,name,score\n7,,42',
+    csv: readCsvFixture('rfc4180/empty-field.csv'),
     expected: [['id', 'name', 'score'], ['7', '', '42']],
   },
   {
     name: 'empty-record-after-one-column-header',
-    csv: 'token\n\n',
+    csv: readCsvFixture('rfc4180/empty-record-after-one-column-header.csv'),
     expected: [['token'], ['']],
   },
   {
     name: 'header-no-rows',
-    csv: 'id,name,total',
+    csv: readCsvFixture('rfc4180/header-no-rows.csv'),
     expected: [],
     mode: 'header',
   },
   {
     name: 'header-simple',
-    csv: 'id,name,total\n7,Ada,12',
+    csv: readCsvFixture('rfc4180/header-simple.csv'),
     expected: [{ id: '7', name: 'Ada', total: '12' }],
     mode: 'header',
   },
   {
     name: 'leading-space',
-    csv: 'id,label,value\n1, leading,9',
+    csv: readCsvFixture('rfc4180/leading-space.csv'),
     expected: [['id', 'label', 'value'], ['1', ' leading', '9']],
   },
   {
     name: 'one-column',
-    csv: 'token\nalpha',
+    csv: readCsvFixture('rfc4180/one-column.csv'),
     expected: [['token'], ['alpha']],
   },
   {
     name: 'quotes-empty',
-    csv: 'id,label,value\n1,"",9',
+    csv: readCsvFixture('rfc4180/quotes-empty.csv'),
     expected: [['id', 'label', 'value'], ['1', '', '9']],
   },
   {
     name: 'quotes-with-comma',
-    csv: 'id,label,value\n1,"north, east",9',
+    csv: readCsvFixture('rfc4180/quotes-with-comma.csv'),
     expected: [['id', 'label', 'value'], ['1', 'north, east', '9']],
   },
   {
     name: 'quotes-with-escaped-quote',
-    csv: 'id,label,value\n1,"he said ""go""",9',
+    csv: readCsvFixture('rfc4180/quotes-with-escaped-quote.csv'),
     expected: [['id', 'label', 'value'], ['1', 'he said "go"', '9']],
   },
   {
     name: 'quotes-with-newline',
-    csv: 'id,label,value\n1,"line one\nline two",9',
+    csv: readCsvFixture('rfc4180/quotes-with-newline.csv'),
     expected: [['id', 'label', 'value'], ['1', 'line one\nline two', '9']],
   },
   {
     name: 'quotes-with-space',
-    csv: 'id,label,value\n1,"field with spaces",9',
+    csv: readCsvFixture('rfc4180/quotes-with-space.csv'),
     expected: [['id', 'label', 'value'], ['1', 'field with spaces', '9']],
   },
   {
     name: 'simple-crlf',
-    csv: 'id,name,total\r\n7,Ada,12',
+    csv: readCsvFixture('rfc4180/simple-crlf.csv'),
     expected: [['id', 'name', 'total'], ['7', 'Ada', '12']],
   },
   {
     name: 'simple-lf',
-    csv: 'id,name,total\n7,Ada,12',
+    csv: readCsvFixture('rfc4180/simple-lf.csv'),
     expected: [['id', 'name', 'total'], ['7', 'Ada', '12']],
   },
   {
     name: 'trailing-newline-one-field',
-    csv: 'token\nalpha\n',
+    csv: readCsvFixture('rfc4180/trailing-newline-one-field.csv'),
     expected: [['token'], ['alpha']],
   },
   {
     name: 'trailing-newline',
-    csv: 'id,name,total\n7,Ada,12\n',
+    csv: readCsvFixture('rfc4180/trailing-newline.csv'),
     expected: [['id', 'name', 'total'], ['7', 'Ada', '12']],
   },
   {
     name: 'trailing-space',
-    csv: 'id,label,value\n1,trailing ,9',
+    csv: readCsvFixture('rfc4180/trailing-space.csv'),
     expected: [['id', 'label', 'value'], ['1', 'trailing ', '9']],
   },
   {
     name: 'utf8',
-    csv: 'id,name,total\n7,café,12',
+    csv: readCsvFixture('rfc4180/utf8.csv'),
     expected: [['id', 'name', 'total'], ['7', 'café', '12']],
   },
 ];

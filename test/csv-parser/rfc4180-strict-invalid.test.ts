@@ -3,6 +3,7 @@ import {
   expect,
   test,
 } from 'bun:test';
+import { readCsvFixture } from '../fixtures.ts';
 import {
   parseChunkedRows,
   parseRows,
@@ -11,17 +12,17 @@ import {
 const quoteSyntaxCases = [
   {
     name: 'missing-closing-quote',
-    csv: 'id,name\n1,"Ada',
+    csv: readCsvFixture('rfc4180-invalid/missing-closing-quote.csv'),
     error: 'unterminated quoted field',
   },
   {
     name: 'unescaped-quote-inside-quoted-field',
-    csv: 'id,name\n1,"Ad"a',
+    csv: readCsvFixture('rfc4180-invalid/unescaped-quote-inside-quoted-field.csv'),
     error: 'unescaped quote in quoted field',
   },
   {
     name: 'unescaped-quote-in-unquoted-field',
-    csv: 'id,name\n1,Ad"a',
+    csv: readCsvFixture('rfc4180-invalid/unescaped-quote-in-unquoted-field.csv'),
     error: 'unescaped quote in unquoted field',
   },
 ] as const;
@@ -44,15 +45,17 @@ describe('strict RFC 4180 quote syntax validation', () => {
   }
 
   test('strict mode accepts closing quote at EOF', () => {
-    expect(parseRows('id,name\n1,"Ada"', { strict: true })).toEqual([
+    expect(parseRows(readCsvFixture('rfc4180-invalid/closing-quote-at-eof.csv'), { strict: true })).toEqual([
       ['id', 'name'],
       ['1', 'Ada'],
     ]);
   });
 
   test('strict fixedColumns keeps fixed-column checks', () => {
-    expect(() => parseRows('1,2\n', { fixedColumns: 3, strict: true })).toThrow('fixed row column count mismatch');
-    expect(() => parseRows('1,Ad"a,3\n', { fixedColumns: 3, strict: true })).toThrow(
+    expect(() => parseRows(readCsvFixture('rfc4180-invalid/fixed-columns-too-few.csv'), { fixedColumns: 3, strict: true })).toThrow(
+      'fixed row column count mismatch',
+    );
+    expect(() => parseRows(readCsvFixture('rfc4180-invalid/fixed-columns-unescaped-quote.csv'), { fixedColumns: 3, strict: true })).toThrow(
       'unescaped quote in unquoted field',
     );
   });
@@ -60,11 +63,15 @@ describe('strict RFC 4180 quote syntax validation', () => {
   test('strict trusted fixedColumns keeps trusted fixed-column path checks', () => {
     const trusted = { fixedColumns: 3, noNewlinesInQuotes: true } as const;
 
-    expect(parseRows('1,"Ada",SP\n', { trusted, strict: true })).toEqual([['1', 'Ada', 'SP']]);
-    expect(() => parseRows('1,2\n', { trusted, strict: true })).toThrow(
+    expect(parseRows(readCsvFixture('rfc4180-invalid/trusted-fixed-columns-valid.csv'), { trusted, strict: true })).toEqual([[
+      '1',
+      'Ada',
+      'SP',
+    ]]);
+    expect(() => parseRows(readCsvFixture('rfc4180-invalid/fixed-columns-too-few.csv'), { trusted, strict: true })).toThrow(
       'trusted fixed row column count mismatch',
     );
-    expect(() => parseRows('1,Ad"a,3\n', { trusted, strict: true })).toThrow(
+    expect(() => parseRows(readCsvFixture('rfc4180-invalid/fixed-columns-unescaped-quote.csv'), { trusted, strict: true })).toThrow(
       'unescaped quote in unquoted field',
     );
   });
@@ -72,11 +79,11 @@ describe('strict RFC 4180 quote syntax validation', () => {
   const columnCountCases = [
     {
       name: 'header-too-few-fields',
-      csv: 'id,name,total\n1,Ada\n',
+      csv: readCsvFixture('rfc4180-invalid/header-too-few-fields.csv'),
     },
     {
       name: 'header-too-many-fields',
-      csv: 'id,name\n1,Ada,extra\n',
+      csv: readCsvFixture('rfc4180-invalid/header-too-many-fields.csv'),
     },
   ] as const;
 
@@ -96,7 +103,7 @@ describe('strict RFC 4180 quote syntax validation', () => {
 
   test('strict RFC 4180 mode rejects header-missing-row with schema metadata', () => {
     expect(() =>
-      parseRows('id,name\n', {
+      parseRows(readCsvFixture('rfc4180-invalid/header-missing-data-row.csv'), {
         expectedHeaders: ['id', 'name'],
         minDataRows: 1,
         strict: true,
@@ -106,7 +113,7 @@ describe('strict RFC 4180 quote syntax validation', () => {
 
   test('strict RFC 4180 mode rejects header-name-mismatch with schema metadata', () => {
     expect(() =>
-      parseRows('id,full_name\n1,Ada\n', {
+      parseRows(readCsvFixture('rfc4180-invalid/header-name-mismatch.csv'), {
         expectedHeaders: ['id', 'name'],
         strict: true,
       })
@@ -115,7 +122,7 @@ describe('strict RFC 4180 quote syntax validation', () => {
 
   test('strict RFC 4180 mode rejects missing header with schema metadata', () => {
     expect(() =>
-      parseRows('', {
+      parseRows(readCsvFixture('empty.csv'), {
         expectedHeaders: ['id', 'name'],
         strict: true,
       })

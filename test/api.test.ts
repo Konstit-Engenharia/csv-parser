@@ -3,18 +3,20 @@ import {
   expect,
   test,
 } from 'bun:test';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
   csv,
   type CsvApiFileOptions,
   type CsvCountOptions,
   type CsvRowsOptions,
 } from '../src/index.ts';
+import {
+  csvFixturePath,
+  readCsvFixture,
+} from './fixtures.ts';
 
 describe('csv high-level API', () => {
   test('streams selected rows with equals filter', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n');
+    const path = csvFixturePath('api/quoted-people-sp-filter.csv');
     const batches: string[][][] = [];
 
     for await (
@@ -34,7 +36,7 @@ describe('csv high-level API', () => {
   });
 
   test('streams selected rows without materializing skipped columns', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n');
+    const path = csvFixturePath('api/quoted-people-two-rows.csv');
     const rows: string[][] = [];
 
     for await (
@@ -54,7 +56,7 @@ describe('csv high-level API', () => {
   });
 
   test('streams selected rows with string cache', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Bia";"SP"\n"3";"Caio";"RJ"\n');
+    const path = csvFixturePath('api/quoted-people-string-cache.csv');
     const rows: string[][] = [];
 
     for await (
@@ -76,7 +78,7 @@ describe('csv high-level API', () => {
   });
 
   test('reuses base options across operations', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Bia";"RJ"\n');
+    const path = csvFixturePath('api/quoted-people-base-options.csv');
     const base = { delimiter: ';' } as const;
     const baseRows: string[][] = [];
     const selectedRows: string[][] = [];
@@ -107,10 +109,10 @@ describe('csv high-level API', () => {
   });
 
   test('rejects invalid projections before parsing or starting workers', async () => {
-    const duplicateError = await rejectedError(csv.parse(Buffer.from('a,b,c\n'), { columns: [2, 2] }));
+    const duplicateError = await rejectedError(csv.parse(readCsvFixture('api/duplicate-projection.csv'), { columns: [2, 2] }));
     expect(duplicateError.message).toContain('selected column repeated: 2');
 
-    const path = await writeFixture('');
+    const path = csvFixturePath('empty.csv');
     let workerError: unknown;
     try {
       for await (const _rows of csv.rows(path, { columns: [2025], workerCount: 2 })) {
@@ -133,7 +135,7 @@ describe('csv high-level API', () => {
   });
 
   test('streams rows through workers with shard-safe splitting', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"S\nP"\n"4";"Caio";"SP"\n');
+    const path = csvFixturePath('api/quoted-people-multiline-state.csv');
     const rows: string[][] = [];
 
     for await (
@@ -156,7 +158,7 @@ describe('csv high-level API', () => {
   });
 
   test('streams filtered rows through workers with equals filter', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n');
+    const path = csvFixturePath('api/quoted-people-sp-filter.csv');
     const rows: string[][] = [];
 
     for await (
@@ -177,7 +179,7 @@ describe('csv high-level API', () => {
   });
 
   test('streams selected rows through workers with string cache', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Bia";"SP"\n"3";"Caio";"RJ"\n');
+    const path = csvFixturePath('api/quoted-people-string-cache.csv');
     const rows: string[][] = [];
 
     for await (
@@ -200,7 +202,7 @@ describe('csv high-level API', () => {
   });
 
   test('counts rows with filters and trusted fixed-column shortcut', async () => {
-    const path = await writeFixture('id;name;uf\n1;Ana;SP\n2;Joao;RJ\n3;Bia;SP\n');
+    const path = csvFixturePath('api/unquoted-people-sp-filter.csv');
 
     expect(await csv.count(path, { delimiter: ';', trustedFixedColumns: 3 })).toBe(4);
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, equals: 'SP' } })).toBe(2);
@@ -209,7 +211,7 @@ describe('csv high-level API', () => {
   });
 
   test('counts rows through workers with native shard splitting', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"S\nP"\n"4";"Caio";"SP"\n');
+    const path = csvFixturePath('api/quoted-people-multiline-state.csv');
 
     expect(await csv.count(path, { delimiter: ';', workerCount: 2 })).toBe(5);
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, equals: 'SP' } })).toBe(2);
@@ -218,7 +220,7 @@ describe('csv high-level API', () => {
   });
 
   test('aggregates groupBy count through workers with shard-safe splitting', async () => {
-    const path = await writeFixture('"id";"uf"\n"1";"SP"\n"2";"RJ"\n"3";"S\nP"\n"4";"SP"\n');
+    const path = csvFixturePath('api/quoted-states-multiline.csv');
     const batch = await csv.groupByCount(path, 1, { delimiter: ';', workerCount: 2 });
     try {
       expect(batch.rowCount).toBe(5);
@@ -236,7 +238,7 @@ describe('csv high-level API', () => {
   });
 
   test('aggregates column stats through workers preserving row order', async () => {
-    const path = await writeFixture('"id";"uf"\n"1";"SP"\n"2";"RJ"\n"3";"S\nP"\n"4";"SP"\n');
+    const path = csvFixturePath('api/quoted-states-multiline.csv');
     const batch = await csv.columnStats(path, 1, { delimiter: ';', workerCount: 2 });
     try {
       expect(batch.rowCount).toBe(5);
@@ -255,7 +257,7 @@ describe('csv high-level API', () => {
   });
 
   test('aggregates multi-column stats through workers', async () => {
-    const path = await writeFixture('"id";"uf";"kind"\n"1";"SP";"A"\n"2";"RJ";"B"\n"3";"SP";"A"\n');
+    const path = csvFixturePath('api/quoted-state-kind-stats.csv');
     const batches = await csv.multiColumnStats(path, [1, 2], { delimiter: ';', workerCount: 2 });
     try {
       expect(batches.map((batch) => batch.column)).toEqual([1, 2]);
@@ -277,7 +279,7 @@ describe('csv high-level API', () => {
   });
 
   test('reuses worker pool across repeated count and rows calls', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n');
+    const path = csvFixturePath('api/quoted-people-sp-filter.csv');
     using pool = csv.workerPool(path, {
       columns: [0, 1] as const,
       delimiter: ';',
@@ -307,7 +309,7 @@ describe('csv high-level API', () => {
   });
 
   test('reuses worker pool across aggregate calls', async () => {
-    const path = await writeFixture('"id";"uf";"kind"\n"1";"SP";"A"\n"2";"RJ";"B"\n"3";"SP";"A"\n');
+    const path = csvFixturePath('api/quoted-state-kind-stats.csv');
     using pool = csv.workerPool(path, { delimiter: ';', workerCount: 2 });
 
     const groupA = await pool.groupByCount(1);
@@ -351,7 +353,7 @@ describe('csv high-level API', () => {
   });
 
   test('runs safe row view callbacks through both aliases', async () => {
-    const path = await writeFixture('1;Ana;SP\n2;Joao;RJ\n');
+    const path = csvFixturePath('api/unquoted-people-no-header.csv');
     const seen: string[][] = [];
     const aliasSeen: string[][] = [];
     const physicalSeen: string[][] = [];
@@ -391,7 +393,7 @@ describe('csv high-level API', () => {
   });
 
   test('streams row views without materializing arrays', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n');
+    const path = csvFixturePath('api/quoted-people-two-rows.csv');
     const seen: string[] = [];
     const selectedColumnsSeen: Array<readonly number[] | undefined> = [];
 
@@ -413,7 +415,7 @@ describe('csv high-level API', () => {
   });
 
   test('streams columnar batches without per-field strings', async () => {
-    const path = await writeFixture('"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n');
+    const path = csvFixturePath('api/quoted-people-two-rows.csv');
     const seen: string[] = [];
     const ranged: string[] = [];
     const scanned: string[] = [];
@@ -477,7 +479,7 @@ describe('csv high-level API', () => {
   });
 
   test('keeps unsupported row filters explicit', async () => {
-    const path = await writeFixture('1;Ana;SP\n');
+    const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
     const invalidOptions = {
       delimiter: ';',
       where: { column: 2, in: ['SP'] },
@@ -497,7 +499,7 @@ describe('csv high-level API', () => {
   });
 
   test('keeps unsupported worker row modes explicit', async () => {
-    const path = await writeFixture('1;Ana;SP\n');
+    const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
     const invalidWorkerWhereOptions = {
       delimiter: ';',
       workerCount: 2,
@@ -533,7 +535,7 @@ describe('csv high-level API', () => {
   });
 
   test('keeps row view callback limits explicit', async () => {
-    const path = await writeFixture('1;Ana;SP\n');
+    const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
     const invalidOptions = { delimiter: ';', workerCount: 2 } as unknown as Parameters<typeof csv.forEachRowViews>[1];
 
     const workerError = await rejectedError(
@@ -552,7 +554,7 @@ describe('csv high-level API', () => {
   });
 
   test('keeps unsupported worker count modes explicit', async () => {
-    const path = await writeFixture('1;Ana;SP\n');
+    const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
     const invalidOptions = { delimiter: ';', strict: true, workerCount: 2 } as unknown as CsvCountOptions;
 
     let strictError: unknown;
@@ -566,7 +568,7 @@ describe('csv high-level API', () => {
   });
 
   test('keeps unsupported worker aggregate modes explicit', async () => {
-    const path = await writeFixture('1;Ana;SP\n');
+    const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
     const invalidOptions = { delimiter: ';', strict: true, workerCount: 2 } as unknown as Parameters<
       typeof csv.groupByCount
     >[2];
@@ -582,7 +584,7 @@ describe('csv high-level API', () => {
   });
 
   test('rejects use after worker pool close', async () => {
-    const path = await writeFixture('id;name\n1;Ana\n');
+    const path = csvFixturePath('api/unquoted-name.csv');
     const pool = csv.workerPool(path, { delimiter: ';', workerCount: 2 });
     pool.close();
 
@@ -593,7 +595,7 @@ describe('csv high-level API', () => {
   test('propagates strict mode to high-level row parsing', async () => {
     let error: unknown;
     try {
-      await csv.parse(Buffer.from('id,name\n1,"Ada'), { strict: true });
+      await csv.parse(readCsvFixture('api/strict-unterminated-quote.csv'), { strict: true });
     } catch (caught) {
       error = caught;
     }
@@ -602,7 +604,7 @@ describe('csv high-level API', () => {
   });
 
   test('validates strict schema metadata in high-level rows', async () => {
-    const path = await writeFixture('id;name;uf\n1;Ana;SP\n');
+    const path = csvFixturePath('api/strict-schema-valid.csv');
     const rows: string[][] = [];
 
     for await (
@@ -623,7 +625,7 @@ describe('csv high-level API', () => {
   });
 
   test('rejects strict schema metadata mismatch in high-level rows', async () => {
-    const path = await writeFixture('id;full_name;uf\n1;Ana;SP\n');
+    const path = csvFixturePath('api/strict-schema-header-mismatch.csv');
 
     let error: unknown;
     try {
@@ -645,13 +647,13 @@ describe('csv high-level API', () => {
   });
 
   test('counts strict rows without materializing strings', async () => {
-    const path = await writeFixture('id,name\n1,Ada\n');
+    const path = csvFixturePath('api/comma-name.csv');
 
     expect(await csv.count(path, { strict: true })).toBe(2);
   });
 
   test('keeps strict selected rows supported', async () => {
-    const path = await writeFixture('id,name,uf\n1,Ada,SP\n2,Bea,RJ\n');
+    const path = csvFixturePath('api/strict-selected-columns.csv');
     const rows: string[][] = [];
 
     for await (
@@ -672,7 +674,7 @@ describe('csv high-level API', () => {
   });
 
   test('keeps strict unsupported filtered and aggregate paths explicit', async () => {
-    const path = await writeFixture('id,name\n1,Ada\n');
+    const path = csvFixturePath('api/comma-name.csv');
 
     let countError: unknown;
     try {
@@ -697,12 +699,6 @@ describe('csv high-level API', () => {
     expect((projectedError as Error).message).toContain('strict CSV validation is not supported for projected batches');
   });
 });
-
-async function writeFixture(data: string): Promise<string> {
-  const path = join(tmpdir(), `csv-parser-api-${crypto.randomUUID()}.csv`);
-  await Bun.write(path, data);
-  return path;
-}
 
 async function rejectedError(promise: Promise<unknown>): Promise<Error> {
   try {

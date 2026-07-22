@@ -3,14 +3,16 @@ import {
   expect,
   test,
 } from 'bun:test';
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   countCsvFileWhereEquals,
   countCsvFileWhereIn,
   countCsvFileWhereStartsWith,
   NativeCsvParser,
 } from '../src/index.ts';
+import {
+  csvFixturePath,
+  readCsvFixture,
+} from './fixtures.ts';
 
 describe('NativeCsvParser native filters', () => {
   test('projects and filters inside native parser', () => {
@@ -22,14 +24,15 @@ describe('NativeCsvParser native filters', () => {
     };
 
     try {
-      let batch = parser.writeProjectedBatch(Buffer.from('"id";"name";"uf"\n"1";'), options);
+      const input = readCsvFixture('native/quoted-semicolon-people-with-header.csv');
+      let batch = parser.writeProjectedBatch(input.subarray(0, 21), options);
       try {
         rows.push(...batch.rows());
       } finally {
         batch.close();
       }
 
-      batch = parser.writeProjectedBatch(Buffer.from('"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n'), options);
+      batch = parser.writeProjectedBatch(input.subarray(21), options);
       try {
         rows.push(...batch.rows());
       } finally {
@@ -54,7 +57,7 @@ describe('NativeCsvParser native filters', () => {
 
   test('projects and filters rows split across tiny chunks', () => {
     const parser = new NativeCsvParser();
-    const input = Buffer.from('a,b,c\n1,2,3\n4,5,6\n');
+    const input = readCsvFixture('native/projected-rows.csv');
     const rows: string[][] = [];
     const options = {
       selectedColumns: [0, 2],
@@ -85,7 +88,7 @@ describe('NativeCsvParser native filters', () => {
   });
 
   test('streams ordered projections across tiny chunks', () => {
-    const input = Buffer.from('a,b,c\n"x\nx",y,z\n1,2,3');
+    const input = readCsvFixture('native/projected-multiline-rows.csv');
     const selectedColumns = [2, 0];
     const parser = new NativeCsvParser();
     const rows: string[][] = [];
@@ -115,19 +118,19 @@ describe('NativeCsvParser native filters', () => {
   test('enforces projected column uniqueness and configured limits', () => {
     const parser = new NativeCsvParser();
     try {
-      expect(() => parser.writeProjectedBatch(Buffer.from('a,b,c\n'), { selectedColumns: [2, 2] })).toThrow(
+      expect(() => parser.writeProjectedBatch(readCsvFixture('native/three-column-header.csv'), { selectedColumns: [2, 2] })).toThrow(
         'selected column repeated: 2',
       );
-      expect(() => parser.writeProjectedBatch(Buffer.from('a\n'), { selectedColumns: [2025] })).toThrow(
+      expect(() => parser.writeProjectedBatch(readCsvFixture('native/single-value.csv'), { selectedColumns: [2025] })).toThrow(
         'selected column out of range: 2025',
       );
       expect(() =>
-        parser.writeProjectedBatch(Buffer.from('a\n'), {
+        parser.writeProjectedBatch(readCsvFixture('native/single-value.csv'), {
           selectedColumns: Array.from({ length: 2025 }, (_, index) => index),
         })
       ).toThrow('selected column count out of range: 2025');
 
-      const maximumIndex = parser.writeProjectedBatch(Buffer.from('a\n'), { selectedColumns: [2024] }, true);
+      const maximumIndex = parser.writeProjectedBatch(readCsvFixture('native/single-value.csv'), { selectedColumns: [2024] }, true);
       try {
         expect(maximumIndex.rows()).toEqual([['']]);
       } finally {
@@ -140,7 +143,7 @@ describe('NativeCsvParser native filters', () => {
     const maximumProjectionParser = new NativeCsvParser();
     try {
       const selectedColumns = Array.from({ length: 2024 }, (_, index) => index);
-      const batch = maximumProjectionParser.writeProjectedBatch(Buffer.from('a\n'), { selectedColumns }, true);
+      const batch = maximumProjectionParser.writeProjectedBatch(readCsvFixture('native/single-value.csv'), { selectedColumns }, true);
       try {
         const rows = batch.rows();
         expect(rows[0]).toHaveLength(2024);
@@ -157,72 +160,53 @@ describe('NativeCsvParser native filters', () => {
   test('enforces the maximum filter column across native filter variants', () => {
     const parser = new NativeCsvParser();
     try {
-      expect(parser.writeCountWhereEquals(Buffer.from('a\n'), { column: 2024, value: 'a' }, true)).toBe(0);
+      expect(parser.writeCountWhereEquals(readCsvFixture('native/single-value.csv'), { column: 2024, value: 'a' }, true)).toBe(0);
     } finally {
       parser.close();
     }
 
     const invalidParser = new NativeCsvParser();
     try {
-      expect(() => invalidParser.writeCountWhereEquals(Buffer.from('a\n'), { column: 2025, value: 'a' })).toThrow(
+      expect(() => invalidParser.writeCountWhereEquals(readCsvFixture('native/single-value.csv'), { column: 2025, value: 'a' })).toThrow(
         'filter column out of range: 2025',
       );
-      expect(() => invalidParser.writeCountWhereIn(Buffer.from('a\n'), { column: 2025, values: ['a'] })).toThrow(
+      expect(() => invalidParser.writeCountWhereIn(readCsvFixture('native/single-value.csv'), { column: 2025, values: ['a'] })).toThrow(
         'filter column out of range: 2025',
       );
-      expect(() => invalidParser.writeCountWhereStartsWith(Buffer.from('a\n'), { column: 2025, prefix: 'a' })).toThrow(
-        'filter column out of range: 2025',
-      );
+      expect(() => invalidParser.writeCountWhereStartsWith(readCsvFixture('native/single-value.csv'), { column: 2025, prefix: 'a' }))
+        .toThrow(
+          'filter column out of range: 2025',
+        );
     } finally {
       invalidParser.close();
     }
   });
 
   test('countCsvFileWhereEquals filters natively by column bytes', async () => {
-    const path = join(import.meta.dir, 'tmp-filter.csv');
-    await Bun.write(path, '"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"SP"\n');
-    try {
-      expect(await countCsvFileWhereEquals(path, 2, 'SP', { delimiter: ';' })).toBe(2);
-    } finally {
-      rmSync(path, { force: true });
-    }
+    const path = csvFixturePath('native/quoted-semicolon-people-with-header.csv');
+    expect(await countCsvFileWhereEquals(path, 2, 'SP', { delimiter: ';' })).toBe(2);
   });
 
   test('countCsvFileWhereIn filters natively by a set of byte values', async () => {
-    const path = join(import.meta.dir, 'tmp-filter-in.csv');
-    await Bun.write(
-      path,
-      '"id";"name";"uf"\n"1";"Ana";"SP"\n"2";"Joao";"RJ"\n"3";"Bia";"MG"\n"4";"Lia";"SP"\n',
-    );
-    try {
-      expect(await countCsvFileWhereIn(path, 2, ['SP', 'RJ'], { delimiter: ';', chunkSize: 11 })).toBe(3);
-      expect(await countCsvFileWhereIn(path, 2, [Buffer.from('MG')], { delimiter: ';', chunkSize: 7 })).toBe(1);
-      expect(await countCsvFileWhereIn(path, 2, [], { delimiter: ';' })).toBe(0);
-    } finally {
-      rmSync(path, { force: true });
-    }
+    const path = csvFixturePath('native/quoted-semicolon-people-with-mg.csv');
+    expect(await countCsvFileWhereIn(path, 2, ['SP', 'RJ'], { delimiter: ';', chunkSize: 11 })).toBe(3);
+    expect(await countCsvFileWhereIn(path, 2, [Buffer.from('MG')], { delimiter: ';', chunkSize: 7 })).toBe(1);
+    expect(await countCsvFileWhereIn(path, 2, [], { delimiter: ';' })).toBe(0);
   });
 
   test('countCsvFileWhereStartsWith filters natively by prefix bytes', async () => {
-    const path = join(import.meta.dir, 'tmp-filter-prefix.csv');
-    await Bun.write(
-      path,
-      '"id";"name";"city"\n"1";"Ana";"Sao Paulo"\n"2";"Joao";"Rio"\n"3";"Bia";"Santos"\n',
-    );
-    try {
-      expect(await countCsvFileWhereStartsWith(path, 2, 'Sa', { delimiter: ';', chunkSize: 13 })).toBe(2);
-      expect(await countCsvFileWhereStartsWith(path, 2, Buffer.from('Rio'), { delimiter: ';', chunkSize: 9 })).toBe(1);
-    } finally {
-      rmSync(path, { force: true });
-    }
+    const path = csvFixturePath('native/quoted-semicolon-cities.csv');
+    expect(await countCsvFileWhereStartsWith(path, 2, 'Sa', { delimiter: ';', chunkSize: 13 })).toBe(2);
+    expect(await countCsvFileWhereStartsWith(path, 2, Buffer.from('Rio'), { delimiter: ';', chunkSize: 9 })).toBe(1);
   });
 
   test('NativeCsvParser streams in and startsWith native filters across chunks', () => {
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
+      const input = readCsvFixture('native/quoted-semicolon-state-filter.csv');
       let count = 0;
-      count += parser.writeCountWhereIn(Buffer.from('"id";"uf"\n"1";"S'), { column: 1, values: ['SP', 'RJ'] });
-      count += parser.writeCountWhereIn(Buffer.from('P"\n"2";"RJ"\n"3";"MG"\n'), { column: 1, values: ['SP', 'RJ'] });
+      count += parser.writeCountWhereIn(input.subarray(0, 16), { column: 1, values: ['SP', 'RJ'] });
+      count += parser.writeCountWhereIn(input.subarray(16), { column: 1, values: ['SP', 'RJ'] });
       count += parser.endCountWhereIn({ column: 1, values: ['SP', 'RJ'] });
       expect(count).toBe(2);
     } finally {
@@ -231,12 +215,13 @@ describe('NativeCsvParser native filters', () => {
 
     const startsWithParser = new NativeCsvParser({ delimiter: ';' });
     try {
+      const input = readCsvFixture('native/quoted-semicolon-city-prefix.csv');
       let count = 0;
-      count += startsWithParser.writeCountWhereStartsWith(Buffer.from('"id";"city"\n"1";"Sa'), {
+      count += startsWithParser.writeCountWhereStartsWith(input.subarray(0, 19), {
         column: 1,
         prefix: 'Sa',
       });
-      count += startsWithParser.writeCountWhereStartsWith(Buffer.from('ntos"\n"2";"Rio"\n'), {
+      count += startsWithParser.writeCountWhereStartsWith(input.subarray(19), {
         column: 1,
         prefix: 'Sa',
       });
@@ -252,9 +237,10 @@ describe('NativeCsvParser native filters', () => {
     const values = [...missing, 'SP', ''];
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
+      const input = readCsvFixture('native/unquoted-semicolon-states.csv');
       let count = 0;
-      count += parser.writeCountWhereIn(Buffer.from('1;S'), { column: 1, values });
-      count += parser.writeCountWhereIn(Buffer.from('P\n2;RJ\n3;\n'), { column: 1, values });
+      count += parser.writeCountWhereIn(input.subarray(0, 3), { column: 1, values });
+      count += parser.writeCountWhereIn(input.subarray(3), { column: 1, values });
       count += parser.endCountWhereIn({ column: 1, values });
       expect(count).toBe(2);
     } finally {
@@ -264,7 +250,7 @@ describe('NativeCsvParser native filters', () => {
     const latin1Values = [...missing.slice(0, 7), 'João'];
     const latin1Parser = new NativeCsvParser({ delimiter: ';', encoding: 'latin1' });
     try {
-      const input = Buffer.from('1;João\n2;Márcia\n', 'latin1');
+      const input = readCsvFixture('native/latin1-names.csv');
       let count = 0;
       count += latin1Parser.writeCountWhereIn(input.subarray(0, 5), {
         column: 1,

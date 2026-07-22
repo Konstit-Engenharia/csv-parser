@@ -1,0 +1,2 @@
+corpus/*.csv -text whitespace=-trailing-space
+corpus/**/*.csv -text whitespace=-trailing-space

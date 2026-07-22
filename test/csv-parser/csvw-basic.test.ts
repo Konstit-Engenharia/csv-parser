@@ -3,6 +3,7 @@ import {
   expect,
   test,
 } from 'bun:test';
+import { readCsvFixture } from '../fixtures.ts';
 import {
   parseChunkedRows,
   parseRows,
@@ -12,7 +13,7 @@ import {
 
 interface CsvwCase {
   name: string;
-  csv: string;
+  csv: Buffer;
   expected: string[][] | Array<Record<string, string>>;
   mode?: 'rows' | 'header' | 'generated-columns';
 }
@@ -23,8 +24,7 @@ interface CsvwCase {
 const cases: CsvwCase[] = [
   {
     name: 'test001 basic header rows',
-    csv:
-      'Surname,FamilyName\nHomer,Simpson\nMarge,Simpson\nBart,Simpson\nLisa,Simpson\nMaggie,Simpson\nNed,Flanders\nKrusty,the Clown\nWaylon,Smithers\n',
+    csv: readCsvFixture('csvw/test001-basic-header-rows.csv'),
     mode: 'header',
     expected: [
       { Surname: 'Homer', FamilyName: 'Simpson' },
@@ -39,7 +39,7 @@ const cases: CsvwCase[] = [
   },
   {
     name: 'test002 quoted fields',
-    csv: 'Surname,FamilyName\nHomer,"Simpson"\nMarge,"Simpson"\nKrusty,"the Clown"\n',
+    csv: readCsvFixture('csvw/test002-quoted-fields.csv'),
     mode: 'header',
     expected: [
       { Surname: 'Homer', FamilyName: 'Simpson' },
@@ -49,7 +49,7 @@ const cases: CsvwCase[] = [
   },
   {
     name: 'test003 whitespace preservation',
-    csv: 'Surname,FamilyName\n Homer , Simpson \n Marge , Simpson \n Krusty , the Clown \n',
+    csv: readCsvFixture('csvw/test003-whitespace-preservation.csv'),
     mode: 'header',
     expected: [
       { Surname: ' Homer ', FamilyName: ' Simpson ' },
@@ -59,8 +59,7 @@ const cases: CsvwCase[] = [
   },
   {
     name: 'test008 quoted comma path',
-    csv:
-      'Book1,Book2,Path\n1,7680,"http://dbpedia.org/ontology/language,http://dbpedia.org/resource/English_language,http://dbpedia.org/ontology/language"\n',
+    csv: readCsvFixture('csvw/test008-quoted-comma-path.csv'),
     mode: 'header',
     expected: [{
       Book1: '1',
@@ -70,8 +69,7 @@ const cases: CsvwCase[] = [
   },
   {
     name: 'test009 crlf rows',
-    csv:
-      'GID,On Street,Species,Trim Cycle,Inventory Date\r\n1,ADDISON AV,Celtis australis,Large Tree Routine Prune,10/18/2010\r\n2,EMERSON ST,Liquidambar styraciflua,Large Tree Routine Prune,6/2/2010\r\n',
+    csv: readCsvFixture('csvw/test009-crlf-rows.csv'),
     mode: 'header',
     expected: [
       {
@@ -92,7 +90,7 @@ const cases: CsvwCase[] = [
   },
   {
     name: 'test010 no trailing newline',
-    csv: 'country,name\nAD,Andorra\nAF,Afghanistan\nAI,Anguilla\nAL,Albania',
+    csv: readCsvFixture('csvw/test010-no-trailing-newline.csv'),
     mode: 'header',
     expected: [
       { country: 'AD', name: 'Andorra' },
@@ -103,8 +101,7 @@ const cases: CsvwCase[] = [
   },
   {
     name: 'test019 headerless generated columns',
-    csv:
-      '1,ADDISON AV,Celtis australis,Large Tree Routine Prune,10/18/2010\n2,EMERSON ST,Liquidambar styraciflua,Large Tree Routine Prune,6/2/2010\n',
+    csv: readCsvFixture('csvw/test019-headerless-generated-columns.csv'),
     mode: 'generated-columns',
     expected: [
       {

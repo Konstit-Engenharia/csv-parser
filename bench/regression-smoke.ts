@@ -1,11 +1,6 @@
-import {
-  mkdtemp,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
+import { fileURLToPath } from 'node:url';
 import {
   countCsvFile,
   countCsvFileWhereEquals,
@@ -25,15 +20,6 @@ const guardMultiplier = Number(process.env['CSV_BENCH_GUARD_MULTIPLIER'] ?? '1')
 const ROWS = baseline.rows;
 const EXPECTED_ROWS = ROWS + 1;
 const HOT_ROWS = ROWS / 10;
-
-function makeCsv(rows: number): Buffer {
-  const lines = ['id,nome,cidade,status,valor'];
-  for (let i = 0; i < rows; ++i) {
-    const status = i % 10 === 0 ? 'hot' : 'cold';
-    lines.push(`${i},Joao ${i},"Sao Paulo, SP",${status},${i % 997}`);
-  }
-  return Buffer.from(`${lines.join('\n')}\n`);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
   if (actual !== expected) {
@@ -93,51 +79,41 @@ async function collectProjectedHotRows(path: string): Promise<number> {
   return count;
 }
 
-const csv = makeCsv(ROWS);
-const tempDir = await mkdtemp(join(tmpdir(), 'csv-parser-smoke-'));
-const csvPath = join(tempDir, 'smoke.csv');
+const csvPath = fileURLToPath(new URL(`../corpus/bench/regression-smoke-${ROWS}-rows.csv`, import.meta.url));
+const csv = readFileSync(csvPath);
 
-try {
-  await writeFile(csvPath, csv);
+await measureMedian('materialize buffer', () => {
+  const rows = parseCsvBuffer(csv);
+  assertEqual(rows.length, EXPECTED_ROWS, 'materialized row count');
+  assertEqual(rows[0]?.[0], 'id', 'header first column');
+  assertEqual(rows[1]?.[2], 'Sao Paulo, SP', 'quoted field');
+  assertEqual(rows[ROWS]?.[4], String((ROWS - 1) % 997), 'last value');
+});
 
-  await measureMedian('materialize buffer', () => {
-    const rows = parseCsvBuffer(csv);
-    assertEqual(rows.length, EXPECTED_ROWS, 'materialized row count');
-    assertEqual(rows[0]?.[0], 'id', 'header first column');
-    assertEqual(rows[1]?.[2], 'Sao Paulo, SP', 'quoted field');
-    assertEqual(rows[ROWS]?.[4], String((ROWS - 1) % 997), 'last value');
-  });
+await measureMedian('strict materialize buffer', () => {
+  const rows = parseCsvBuffer(csv, { strict: true });
+  assertEqual(rows.length, EXPECTED_ROWS, 'strict materialized row count');
+  assertEqual(rows[ROWS]?.[3], (ROWS - 1) % 10 === 0 ? 'hot' : 'cold', 'strict last status');
+});
 
-  await measureMedian('strict materialize buffer', () => {
-    const rows = parseCsvBuffer(csv, { strict: true });
-    assertEqual(rows.length, EXPECTED_ROWS, 'strict materialized row count');
-    assertEqual(rows[ROWS]?.[3], (ROWS - 1) % 10 === 0 ? 'hot' : 'cold', 'strict last status');
-  });
+await measureMedian('count file', async () => {
+  const count = await countCsvFile(csvPath, { chunkSize: 4_096 });
+  assertEqual(count, EXPECTED_ROWS, 'countCsvFile row count');
+});
 
-  await measureMedian('count file', async () => {
-    const count = await countCsvFile(csvPath, { chunkSize: 4_096 });
-    assertEqual(count, EXPECTED_ROWS, 'countCsvFile row count');
-  });
+await measureMedian('count where equals', async () => {
+  const count = await countCsvFileWhereEquals(csvPath, 3, 'hot', { chunkSize: 4_096 });
+  assertEqual(count, HOT_ROWS, 'countCsvFileWhereEquals hot row count');
+});
 
-  await measureMedian('count where equals', async () => {
-    const count = await countCsvFileWhereEquals(csvPath, 3, 'hot', { chunkSize: 4_096 });
-    assertEqual(count, HOT_ROWS, 'countCsvFileWhereEquals hot row count');
-  });
+await measureMedian('stream materialize file', async () => {
+  const count = await collectRows(csvPath);
+  assertEqual(count, EXPECTED_ROWS, 'parseCsvFile row count');
+});
 
-  await measureMedian('stream materialize file', async () => {
-    const count = await collectRows(csvPath);
-    assertEqual(count, EXPECTED_ROWS, 'parseCsvFile row count');
-  });
+await measureMedian('projected filter file', async () => {
+  const count = await collectProjectedHotRows(csvPath);
+  assertEqual(count, HOT_ROWS, 'parseCsvFileProjected hot row count');
+});
 
-  await measureMedian('projected filter file', async () => {
-    const count = await collectProjectedHotRows(csvPath);
-    assertEqual(count, HOT_ROWS, 'parseCsvFileProjected hot row count');
-  });
-
-  console.log(`smoke ok: ${ROWS} synthetic data rows`);
-} finally {
-  await rm(tempDir, {
-    force: true,
-    recursive: true,
-  });
-}
+console.log(`smoke ok: ${ROWS} synthetic data rows`);

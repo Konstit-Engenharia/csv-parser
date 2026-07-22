@@ -7,10 +7,11 @@ import {
   NativeCsvParser,
   parseCsvBuffer,
 } from '../../src/index.ts';
+import { readCsvFixture } from '../fixtures.ts';
 
 describe('csv-parser compatibility', () => {
   test('matches semicolon multiline rows', () => {
-    const input = Buffer.from('"1";"HARMON LIDICE\n";"MG"\n"2";"OK";"SP"\n');
+    const input = readCsvFixture('native/semicolon-multiline-compatibility.csv');
     const parser = new NativeCsvParser({ delimiter: ';' });
     try {
       let count = 0;
