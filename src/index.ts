@@ -98,3 +98,7 @@ export {
 } from './options.ts';
 export { NativeCsvParser } from './parser.ts';
 export { CsvStringCache } from './string-cache.ts';
+
+if (!process.versions.bun) {
+  throw new Error('This package requires Bun');
+}
