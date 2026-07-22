@@ -1,4 +1,7 @@
-import { measure } from 'mitata';
+import {
+  bench,
+  summary,
+} from 'mitata';
 import {
   createReadStream,
   statSync,
@@ -18,38 +21,19 @@ const cases = [
   ['native trusted fixed batch parser', () => countRows('trusted')],
 ] as const;
 
-console.log(JSON.stringify({
+console.log({
   file: FILE,
   bytes,
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   fixedColumns: FIXED_COLUMNS,
-}));
+});
 
-for (const [name, fn,] of cases) {
-  let rows = 0;
-  const stats = await measure(async () => {
-    rows = await fn();
-    if (rows === 0) {
-      throw new Error(`${name}: zero rows`);
-    }
-  }, {
-    min_samples: 1,
-    max_samples: 1,
-    min_cpu_time: 0,
-    warmup_samples: 0,
-  });
-
-  const seconds = stats.avg / 1e9;
-  const mibPerSecond = bytes / 1024 / 1024 / seconds;
-
-  console.log(JSON.stringify({
-    name,
-    rows,
-    seconds,
-    mibPerSecond,
-  }));
-}
+summary(async () => {
+  for (const [name, fn,] of cases) {
+    bench(name, async () => await fn());
+  }
+});
 
 async function countRows(mode: false | 'fixed' | 'trusted'): Promise<number> {
   const parser = new NativeCsvParser({
