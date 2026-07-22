@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <regex>
 #include <string>
 #include <vector>
@@ -14,6 +15,7 @@ extern "C" {
 void* csv_parser_create(int encoding, uint8_t delimiter);
 void csv_parser_destroy(void* parser);
 void* csv_parser_write_batch(void* parser, const uint8_t* data, uint64_t len, bool final);
+void* csv_parser_write_strict_batch(void* parser, const uint8_t* data, uint64_t len, bool final);
 void* csv_parser_write_projected_batch(void* parser, const uint8_t* data, uint64_t len, bool final, bool has_projection,
                                        const uint32_t* selected_columns, uint64_t selected_columns_len, bool has_filter,
                                        uint32_t filter_column, const uint8_t* filter_value, uint64_t filter_value_len);
@@ -39,6 +41,7 @@ constexpr uint32_t selected_columns[] = {0, 4, 19};
 constexpr uint64_t default_bytes = 256ull * 1024ull * 1024ull;
 
 std::vector<uint8_t> g_input;
+uint64_t g_strict_input_size = 0;
 std::string g_split_input_path;
 volatile uint64_t g_sink = 0;
 
@@ -151,6 +154,30 @@ void bench_latin1_batch() {
   csv_batch_destroy(batch);
 }
 
+void bench_strict_binary_batch() {
+  void* parser = new_parser();
+  void* batch = csv_parser_write_strict_batch(parser, g_input.data(), g_strict_input_size, true);
+  csv_parser_destroy(parser);
+  if (batch == nullptr) {
+    fail("strict csv_parser_write_batch returned null");
+  }
+  consume(csv_batch_row_count(batch));
+  consume(csv_batch_total_fields(batch));
+  csv_batch_destroy(batch);
+}
+
+void bench_strict_latin1_batch() {
+  void* parser = new_parser(1);
+  void* batch = csv_parser_write_strict_batch(parser, g_input.data(), g_strict_input_size, true);
+  csv_parser_destroy(parser);
+  if (batch == nullptr) {
+    fail("strict latin1 csv_parser_write_batch returned null");
+  }
+  consume(csv_batch_row_count(batch));
+  consume(csv_batch_total_fields(batch));
+  csv_batch_destroy(batch);
+}
+
 void bench_split_offsets() {
   void* batch = csv_parser_find_split_offsets(g_split_input_path.c_str(), 16, delimiter);
   if (batch == nullptr) {
@@ -185,6 +212,11 @@ int main() {
   if (g_input.empty()) {
     fail("input is empty");
   }
+  const auto last_newline = std::find(g_input.rbegin(), g_input.rend(), static_cast<uint8_t>('\n'));
+  if (last_newline == g_input.rend()) {
+    fail("strict benchmarks require at least one complete newline-terminated row");
+  }
+  g_strict_input_size = static_cast<uint64_t>(g_input.size() - std::distance(g_input.rbegin(), last_newline));
 
   std::cerr << "native bench input: " << path << " bytes=" << g_input.size() << std::endl;
 
@@ -196,6 +228,10 @@ int main() {
   runner.bench("native binary batch", bench_binary_batch);
   // Compares portable Latin-1 SIMD decoding with the UTF-8 materialization baseline on the same bytes.
   runner.bench("native latin1 batch", bench_latin1_batch);
+  // Measures strict quote and column validation on a complete-row UTF-8 prefix.
+  runner.bench("native strict binary batch", bench_strict_binary_batch);
+  // Measures strict validation with Latin-1 decoding on the same complete-row prefix.
+  runner.bench("native strict latin1 batch", bench_strict_latin1_batch);
   if (const char* split_input = std::getenv("CSV_NATIVE_BENCH_SPLIT_FILE"); split_input != nullptr) {
     g_split_input_path = split_input;
     // Measures the end-to-end quote-aware structural scan used to find safe file shard boundaries.
