@@ -59,10 +59,10 @@ build(instrumentBuildDir, ['csv_native_bench']);
 
 const instrumentBench = join(instrumentBuildDir, nativeExecutableName('csv_native_bench'));
 const rawProfilePattern = join(profileDir, 'csv-native-%p-%m.profraw');
-// Repeat the important Latin-1 path so it contributes two thirds of the training sessions.
+// Keep Latin-1 as the majority (8 of 15 sessions) while giving UTF-8 batch parsing representative weight.
 const trainingMix = [
   ...Array<string>(8).fill('^native latin1 batch$'),
-  '^native binary batch$',
+  ...Array<string>(4).fill('^native binary batch$'),
   '^native count$',
   '^native filter count$',
   '^native projected filter$',
