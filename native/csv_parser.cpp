@@ -518,10 +518,16 @@ public:
   csv_parser(csv_encoding encoding, uint8_t delimiter) : encoding_(encoding), delimiter_(delimiter) {}
 
   csv_batch* write_batch(const uint8_t* data, size_t len, bool final) {
+    if (encoding_ == csv_encoding::latin1) {
+      return write_latin1_batch_impl(data, len, final, false);
+    }
     return write_batch_impl(data, len, final, false);
   }
 
   csv_batch* write_strict_batch(const uint8_t* data, size_t len, bool final) {
+    if (encoding_ == csv_encoding::latin1) {
+      return write_latin1_batch_impl(data, len, final, true);
+    }
     return write_batch_impl(data, len, final, true);
   }
 
@@ -680,6 +686,30 @@ public:
   void set_error(const char* value) { error_ = value; }
 
 private:
+  csv_batch* write_latin1_batch_impl(const uint8_t* data, size_t len, bool final, bool strict) {
+    auto batch = std::make_unique<csv_batch>();
+    batch->reserve(len, csv_encoding::latin1);
+    mode_ = output_mode::batch;
+    batch_ = batch.get();
+    allow_direct_projection_ = final && !saw_row_data_;
+    configure(nullptr, 0, row_filter{});
+    strict_quote_syntax_ = strict;
+    parse_failed_ = false;
+    emitted_rows_ = 0;
+    parse_latin1_batch(data, len, strict);
+    if (final) {
+      finish_latin1_batch_stream(strict);
+    } else {
+      spill_unfinished_batch_row();
+    }
+    strict_quote_syntax_ = false;
+    batch_ = nullptr;
+    if (parse_failed_) {
+      return nullptr;
+    }
+    return batch.release();
+  }
+
   csv_batch* write_batch_impl(const uint8_t* data, size_t len, bool final, bool strict) {
     auto batch = std::make_unique<csv_batch>();
     batch->reserve(len, encoding_);
@@ -774,6 +804,109 @@ private:
       in_filter_set_.insert(value);
     }
     use_in_filter_set_ = true;
+  }
+
+  void parse_latin1_batch(const uint8_t* data, size_t len, bool strict) {
+    if (data == nullptr || len == 0) {
+      return;
+    }
+
+    size_t i = 0;
+    while (i < len) {
+      if (in_quotes_) {
+        if (pending_quote_) {
+          if (data[i] == '"') {
+            append_latin1_batch_byte('"');
+            pending_quote_ = false;
+            saw_row_data_ = true;
+            at_field_start_ = false;
+            ++i;
+            continue;
+          }
+          if (strict && !is_quoted_field_terminator(data[i], delimiter_)) {
+            fail_parse("strict CSV quote syntax error: unescaped quote in "
+                       "quoted field");
+            return;
+          }
+          pending_quote_ = false;
+          in_quotes_ = false;
+          continue;
+        }
+
+        const size_t quote = find_byte_simd(data + i, len - i, '"');
+        const size_t span = quote == npos ? len - i : quote;
+        append_latin1_batch_span(data + i, span);
+        i += span;
+
+        if (i < len && data[i] == '"') {
+          pending_quote_ = true;
+          ++i;
+        }
+        continue;
+      }
+
+      const uint8_t byte = data[i];
+      if (previous_was_cr_ && byte == '\n') {
+        previous_was_cr_ = false;
+        ++i;
+        continue;
+      }
+      previous_was_cr_ = false;
+
+      if (byte == delimiter_) {
+        finish_latin1_batch_field();
+        saw_row_data_ = true;
+        ++i;
+        continue;
+      }
+
+      if (byte == '\n' || byte == '\r') {
+        finish_latin1_batch_row(strict);
+        previous_was_cr_ = byte == '\r';
+        ++i;
+        continue;
+      }
+
+      if (byte == '"' && at_field_start_) {
+        const size_t close_quote = find_complete_quoted_field_close(data + i, len - i);
+        if (close_quote != npos) {
+          append_latin1_batch_quoted_field(data + i, close_quote);
+          const size_t terminator_index = i + close_quote + 1;
+          const uint8_t terminator = data[terminator_index];
+          if (terminator == delimiter_) {
+            finish_latin1_batch_field();
+            saw_row_data_ = true;
+            i = terminator_index + 1;
+            continue;
+          }
+          if (terminator == '\n' || terminator == '\r') {
+            finish_latin1_batch_row(strict);
+            previous_was_cr_ = terminator == '\r';
+            i = terminator_index + 1;
+            continue;
+          }
+          i = terminator_index;
+          continue;
+        }
+
+        in_quotes_ = true;
+        at_field_start_ = false;
+        saw_row_data_ = true;
+        ++i;
+        continue;
+      }
+
+      if (strict && byte == '"') {
+        fail_parse("strict CSV quote syntax error: unescaped quote in unquoted field");
+        return;
+      }
+
+      const size_t found = strict ? find_strict_plain_special_simd(data + i, len - i, delimiter_)
+                                  : find_plain_special_simd(data + i, len - i, delimiter_);
+      const size_t span = found == npos ? len - i : found;
+      append_latin1_batch_span(data + i, span);
+      i += span;
+    }
   }
 
   void parse(const uint8_t* data, size_t len) {
@@ -974,6 +1107,42 @@ private:
     return npos;
   }
 
+  void append_latin1_batch_span(const uint8_t* data, size_t len) {
+    if (len == 0) {
+      return;
+    }
+    saw_row_data_ = true;
+    at_field_start_ = false;
+    append_latin1(field_, data, len);
+  }
+
+  void append_latin1_batch_byte(uint8_t byte) {
+    saw_row_data_ = true;
+    at_field_start_ = false;
+    field_.push_back(static_cast<char>(byte));
+  }
+
+  void append_latin1_batch_quoted_field(const uint8_t* data, size_t close_quote) {
+    saw_row_data_ = true;
+    at_field_start_ = false;
+
+    if (!complete_quoted_field_has_escape_) {
+      append_latin1(field_, data + 1, close_quote - 1);
+      return;
+    }
+
+    size_t segment_start = 1;
+    for (size_t i = 1; i < close_quote; ++i) {
+      if (data[i] == '"' && i + 1 < close_quote && data[i + 1] == '"') {
+        append_latin1(field_, data + segment_start, i - segment_start);
+        field_.push_back('"');
+        ++i;
+        segment_start = i + 1;
+      }
+    }
+    append_latin1(field_, data + segment_start, close_quote - segment_start);
+  }
+
   void append_decoded_byte(uint8_t byte) { append_decoded_span(&byte, 1); }
 
   void append_plain_span(const uint8_t* data, size_t len, size_t remaining) {
@@ -1078,6 +1247,73 @@ private:
       }
     }
     append_decoded_span(data + segment_start, close_quote - segment_start);
+  }
+
+  void finish_latin1_batch_field() {
+    if (deferred_batch_row_) {
+      row_fields_.push_back(field_);
+    } else {
+      batch_->data.append(field_);
+      batch_->field_offsets.push_back(batch_->data.size());
+    }
+    field_.clear();
+    field_in_arena_ = false;
+    at_field_start_ = true;
+    ++current_column_;
+  }
+
+  void finish_latin1_batch_offsets(bool strict) {
+    if (strict) {
+      const uint64_t row_start = batch_->row_offsets.back();
+      const size_t row_end = batch_->field_offsets.size() - 1;
+      const uint32_t field_count = checked_u32(row_end - row_start);
+      if (!strict_expected_columns_seen_) {
+        strict_expected_columns_ = field_count;
+        strict_expected_columns_seen_ = true;
+      } else if (field_count != strict_expected_columns_) {
+        set_error("strict CSV row column count mismatch");
+        parse_failed_ = true;
+        return;
+      }
+    }
+
+    batch_->row_offsets.push_back(batch_->field_offsets.size() - 1);
+  }
+
+  void finish_latin1_batch_row(bool strict) {
+    if (!saw_row_data_) {
+      at_field_start_ = true;
+    }
+
+    finish_latin1_batch_field();
+    if (deferred_batch_row_) {
+      for (const auto& field : row_fields_) {
+        batch_->data.append(field);
+        batch_->field_offsets.push_back(batch_->data.size());
+      }
+    }
+    finish_latin1_batch_offsets(strict);
+    ++emitted_rows_;
+    reset_row_state();
+    saw_row_data_ = false;
+    at_field_start_ = true;
+  }
+
+  void finish_latin1_batch_stream(bool strict) {
+    if (pending_quote_) {
+      pending_quote_ = false;
+      in_quotes_ = false;
+    }
+    if (in_quotes_) {
+      if (strict) {
+        fail_parse("strict CSV quote syntax error: unterminated quoted field");
+        return;
+      }
+      in_quotes_ = false;
+    }
+    if (saw_row_data_) {
+      finish_latin1_batch_row(strict);
+    }
   }
 
   void finish_field() {
