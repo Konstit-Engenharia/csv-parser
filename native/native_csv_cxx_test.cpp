@@ -105,6 +105,32 @@ void destroy_batch_if_present(void* batch) {
   }
 }
 
+void* write_batch_mode(void* parser, bool strict, const uint8_t* data, size_t len, bool final) {
+  return strict ? csv_parser_write_strict_batch(parser, data, len, final)
+                : csv_parser_write_batch(parser, data, len, final);
+}
+
+void require_two_field_batch(void* batch, std::string_view first, std::string_view second) {
+  REQUIRE(batch != nullptr);
+  REQUIRE(csv_batch_row_count(batch) == 1);
+  REQUIRE(csv_batch_total_fields(batch) == 2);
+
+  std::string expected(first);
+  expected.append(second);
+  REQUIRE(csv_batch_data_len(batch) == expected.size());
+  REQUIRE(std::string(reinterpret_cast<const char*>(csv_batch_data_ptr(batch)), expected.size()) == expected);
+
+  const uint64_t* row_offsets = csv_batch_row_offsets_ptr(batch);
+  const uint64_t* field_offsets = csv_batch_field_offsets_ptr(batch);
+  REQUIRE(row_offsets != nullptr);
+  REQUIRE(field_offsets != nullptr);
+  REQUIRE(row_offsets[0] == 0);
+  REQUIRE(row_offsets[1] == 2);
+  REQUIRE(field_offsets[0] == 0);
+  REQUIRE(field_offsets[1] == first.size());
+  REQUIRE(field_offsets[2] == expected.size());
+}
+
 void fuzz_batch_mode(std::string_view input, bool strict) {
   void* parser = csv_parser_create(0, ',');
   REQUIRE(parser != nullptr);
@@ -454,6 +480,89 @@ TEST_CASE("native C ABI exposes 64-bit batch offsets") {
   REQUIRE(field_offsets[1] == 1);
   REQUIRE(field_offsets[2] == 2);
   csv_batch_destroy(batch);
+}
+
+TEST_CASE("native C ABI Latin-1 batch kernel preserves chunked rows and UTF-8 parity") {
+  const std::string first_chunk = "\"a\"";
+  std::string second_chunk = "\"b\";x";
+  second_chunk.push_back(static_cast<char>(0xE3));
+  second_chunk.push_back('\r');
+  const std::string final_chunk = "\n\"done\"\"now\";last";
+
+  for (const int encoding : {0, 1}) {
+    for (const bool strict : {false, true}) {
+      void* parser = csv_parser_create(encoding, ';');
+      REQUIRE(parser != nullptr);
+
+      void* first = write_batch_mode(parser, strict, reinterpret_cast<const uint8_t*>(first_chunk.data()),
+                                     first_chunk.size(), false);
+      REQUIRE(first != nullptr);
+      REQUIRE(csv_batch_row_count(first) == 0);
+      REQUIRE(csv_batch_total_fields(first) == 0);
+      REQUIRE(csv_batch_data_len(first) == 0);
+      csv_batch_destroy(first);
+
+      void* second = write_batch_mode(parser, strict, reinterpret_cast<const uint8_t*>(second_chunk.data()),
+                                      second_chunk.size(), false);
+      const std::string encoded_value = encoding == 0 ? std::string({'x', static_cast<char>(0xE3)}) : "x\xC3\xA3";
+      require_two_field_batch(second, "a\"b", encoded_value);
+      csv_batch_destroy(second);
+
+      void* final = write_batch_mode(parser, strict, reinterpret_cast<const uint8_t*>(final_chunk.data()),
+                                     final_chunk.size(), true);
+      require_two_field_batch(final, "done\"now", "last");
+      csv_batch_destroy(final);
+      csv_parser_destroy(parser);
+    }
+  }
+}
+
+TEST_CASE("native C ABI Latin-1 strict batch kernel rejects malformed quotes") {
+  const std::string unescaped = "bad\"quote,ok\n";
+  const std::string unterminated = "a,\"open";
+
+  void* parser = csv_parser_create(1, ',');
+  REQUIRE(parser != nullptr);
+  void* invalid =
+      csv_parser_write_strict_batch(parser, reinterpret_cast<const uint8_t*>(unescaped.data()), unescaped.size(), true);
+  REQUIRE(invalid == nullptr);
+  REQUIRE(std::string(csv_parser_last_error(parser)) ==
+          "strict CSV quote syntax error: unescaped quote in unquoted field");
+  csv_parser_destroy(parser);
+
+  parser = csv_parser_create(1, ',');
+  REQUIRE(parser != nullptr);
+  invalid = csv_parser_write_strict_batch(parser, reinterpret_cast<const uint8_t*>(unterminated.data()),
+                                          unterminated.size(), true);
+  REQUIRE(invalid == nullptr);
+  REQUIRE(std::string(csv_parser_last_error(parser)) == "strict CSV quote syntax error: unterminated quoted field");
+  csv_parser_destroy(parser);
+
+  parser = csv_parser_create(1, ',');
+  REQUIRE(parser != nullptr);
+  void* permissive =
+      csv_parser_write_batch(parser, reinterpret_cast<const uint8_t*>(unescaped.data()), unescaped.size(), true);
+  require_two_field_batch(permissive, "bad\"quote", "ok");
+  csv_batch_destroy(permissive);
+  csv_parser_destroy(parser);
+}
+
+TEST_CASE("native C ABI Latin-1 strict batch kernel preserves column validation across writes") {
+  const std::string first_row = "a,b\n";
+  const std::string mismatched_row = "c\n";
+
+  void* parser = csv_parser_create(1, ',');
+  REQUIRE(parser != nullptr);
+  void* first = csv_parser_write_strict_batch(parser, reinterpret_cast<const uint8_t*>(first_row.data()),
+                                              first_row.size(), false);
+  require_two_field_batch(first, "a", "b");
+  csv_batch_destroy(first);
+
+  void* mismatch = csv_parser_write_strict_batch(parser, reinterpret_cast<const uint8_t*>(mismatched_row.data()),
+                                                 mismatched_row.size(), true);
+  REQUIRE(mismatch == nullptr);
+  REQUIRE(std::string(csv_parser_last_error(parser)) == "strict CSV row column count mismatch");
+  csv_parser_destroy(parser);
 }
 
 TEST_CASE("native C ABI validates projection limits before allocation") {
