@@ -6,9 +6,9 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 extern "C" {
@@ -69,7 +69,7 @@ std::string string_env(const char* name, const char* fallback) {
   return value == nullptr || value[0] == '\0' ? std::string(fallback) : std::string(value);
 }
 
-std::vector<uint8_t> read_input(const std::string& path, uint64_t byte_limit) {
+std::vector<uint8_t> read_input(const std::string& path, uint64_t byte_limit, bool& complete_file_read) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     fail("could not open " + path);
@@ -84,6 +84,7 @@ std::vector<uint8_t> read_input(const std::string& path, uint64_t byte_limit) {
 
   const auto available = static_cast<uint64_t>(size);
   const auto wanted = byte_limit == 0 ? available : std::min(byte_limit, available);
+  complete_file_read = wanted == available;
   std::vector<uint8_t> data(static_cast<size_t>(wanted));
   if (!data.empty()) {
     file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
@@ -93,6 +94,81 @@ std::vector<uint8_t> read_input(const std::string& path, uint64_t byte_limit) {
   }
   return data;
 }
+
+constexpr size_t complete_record_prefix(std::string_view input, uint8_t field_delimiter,
+                                        bool complete_file_read = false) {
+  bool in_quotes = false;
+  bool pending_quote = false;
+  bool at_field_start = true;
+  bool previous_was_cr = false;
+  size_t complete_prefix = 0;
+  size_t index = 0;
+
+  while (index < input.size()) {
+    const auto byte = static_cast<uint8_t>(input[index]);
+    if (in_quotes) {
+      if (pending_quote) {
+        if (byte == '"') {
+          pending_quote = false;
+          at_field_start = false;
+          ++index;
+          continue;
+        }
+        pending_quote = false;
+        in_quotes = false;
+        continue;
+      }
+
+      if (byte == '"') {
+        pending_quote = true;
+      }
+      ++index;
+      continue;
+    }
+
+    if (previous_was_cr) {
+      previous_was_cr = false;
+      if (byte == '\n') {
+        complete_prefix = index + 1;
+        at_field_start = true;
+        ++index;
+        continue;
+      }
+    }
+
+    if (byte == field_delimiter) {
+      at_field_start = true;
+    } else if (byte == '\n') {
+      complete_prefix = index + 1;
+      at_field_start = true;
+    } else if (byte == '\r') {
+      complete_prefix = index + 1;
+      at_field_start = true;
+      previous_was_cr = true;
+    } else if (byte == '"' && at_field_start) {
+      in_quotes = true;
+      at_field_start = false;
+    } else {
+      at_field_start = false;
+    }
+    ++index;
+  }
+
+  if (complete_file_read && (!in_quotes || pending_quote)) {
+    return input.size();
+  }
+  return complete_prefix;
+}
+
+static_assert(complete_record_prefix("a;b\npartial", delimiter) == 4);
+static_assert(complete_record_prefix("a;b\rpartial", delimiter) == 4);
+static_assert(complete_record_prefix("a;b\r\npartial", delimiter) == 5);
+static_assert(complete_record_prefix("\"a\nb\";c\rpartial", delimiter) == 8);
+static_assert(complete_record_prefix("\"a\"\"\nb\";c\npartial", delimiter) == 10);
+static_assert(complete_record_prefix("\"a\nb", delimiter) == 0);
+static_assert(complete_record_prefix("a;b", delimiter, true) == 3);
+static_assert(complete_record_prefix("\"a\"", delimiter, true) == 3);
+static_assert(complete_record_prefix("\"a", delimiter, true) == 0);
 
 void* new_parser(int encoding = 0) {
   void* parser = csv_parser_create(encoding, delimiter);
@@ -208,15 +284,22 @@ int main() {
   const auto byte_limit = parse_u64_env("CSV_NATIVE_BENCH_BYTES", default_bytes);
   const auto filter = string_env("CSV_NATIVE_BENCH_FILTER", ".*");
   const auto format = string_env("CSV_NATIVE_BENCH_FORMAT", "mitata");
-  g_input = read_input(path, byte_limit);
+  const std::regex benchmark_filter(filter);
+  bool complete_file_read = false;
+  g_input = read_input(path, byte_limit, complete_file_read);
   if (g_input.empty()) {
     fail("input is empty");
   }
-  const auto last_newline = std::find(g_input.rbegin(), g_input.rend(), static_cast<uint8_t>('\n'));
-  if (last_newline == g_input.rend()) {
-    fail("strict benchmarks require at least one complete newline-terminated row");
+
+  const bool strict_benchmark_requested = std::regex_match("native strict binary batch", benchmark_filter) ||
+                                          std::regex_match("native strict latin1 batch", benchmark_filter);
+  if (strict_benchmark_requested) {
+    g_strict_input_size = complete_record_prefix(
+        std::string_view(reinterpret_cast<const char*>(g_input.data()), g_input.size()), delimiter, complete_file_read);
+    if (g_strict_input_size == 0) {
+      fail("strict benchmarks require at least one structurally complete record");
+    }
   }
-  g_strict_input_size = static_cast<uint64_t>(g_input.size() - std::distance(g_input.rbegin(), last_newline));
 
   std::cerr << "native bench input: " << path << " bytes=" << g_input.size() << std::endl;
 
@@ -241,7 +324,7 @@ int main() {
   mitata::k_run options;
   options.colors = std::getenv("NO_COLOR") == nullptr;
   options.format = format;
-  options.filter = std::regex(filter);
+  options.filter = benchmark_filter;
   runner.run(options);
 
   if (g_sink == 0) {
