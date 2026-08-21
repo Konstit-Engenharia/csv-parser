@@ -92,7 +92,12 @@ const rows = await csv.count('data.csv', { delimiter: ';' });
 const selected = csv.rows('data.csv', {
   delimiter: ';',
   columns: [0, 2],
-  where: { column: 2, equals: 'SP' },
+  where: {
+    all: [
+      { column: 2, in: ['SP', 'RJ'] },
+      { column: 1, startsWith: 'A' },
+    ],
+  },
 });
 
 const compressed = csv.rows('data.csv.gz', {
@@ -111,13 +116,14 @@ Supported helpers:
 - `csv.rows(path, options)` streams materialized row arrays.
 - `csv.batches(path, options)` streams `NativeCsvBatch` objects.
 - `csv.withBatches(path, options, callback)` owns batch close handling around a callback.
-- `csv.count(path, options)` counts rows, optionally with `equals`, `in`, or `startsWith`.
+- `csv.count(path, options)` counts rows, optionally with native filters.
 - `csv.withRowViews(path, options, callback)` streams reusable row views with managed lifetimes.
 - `csv.withColumnarBatches(path, options, callback)` streams reusable columnar batch views.
 - `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
 - `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
-`rows()` only supports `where.equals`. Use `count()` for `where.in` and `where.startsWith`.
+All row and count APIs support `equals`, `in`, and `startsWith`. Use `where: { all: [...] }` to require multiple
+predicates. Every predicate in `all` must match the same row. At least one predicate is required.
 
 Serial file operations accept `compression: 'auto' | 'gzip' | 'deflate' | 'deflate-raw' | 'brotli' | 'zstd'`.
 Decompression streams into the parser and does not buffer the complete file. `auto` reads at most four prefix bytes and

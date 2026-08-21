@@ -60,6 +60,16 @@ void csv.withColumnarBatches(path, { columns: [0, 2] as const }, (batch) => {
 
 void csv.rows(path, { where: { column: 1, equals: 'SP' } });
 void csv.rows(path, { where: optionalEquals });
+void csv.rows(path, { where: { column: 1, in: ['SP'] } });
+void csv.rows(path, { where: { column: 1, startsWith: 'S' } });
+void csv.rows(path, {
+  where: {
+    all: [
+      { column: 1, startsWith: 'A' },
+      { column: 2, in: ['SP', 'RJ'] },
+    ],
+  },
+});
 void csv.rows(path, { compression: 'gzip' });
 void csv.rows(path, { compression: 'auto' });
 void csv.rows(path, { compression: { entry: 'data.csv', format: 'zip' } });
@@ -69,6 +79,16 @@ void csv.batches(path, { delimiter: 'auto' });
 void csv.count(path, { compression: 'zstd' });
 void csv.count(path, { delimiter: 'auto' });
 void parallelCount(path, { workerCount: 2, where: { column: 1, in: ['SP'] } });
+void parallelRows(path, {
+  workerCount: 2,
+  where: { all: [{ column: 1, startsWith: 'A' }, { column: 2, equals: 'SP' }] },
+});
+using filteredPool = workerPool(path, {
+  workerCount: 2,
+  where: { all: [{ column: 1, startsWith: 'A' }, { column: 2, equals: 'SP' }] },
+});
+void filteredPool.count();
+void filteredPool.rows();
 
 // @ts-expect-error parse() receives decompressed bytes, not a compressed file
 void csv.parse(Buffer.from(''), { compression: 'gzip' });
@@ -112,22 +132,14 @@ void csv.rows(path, { strict: true, where: { column: 1, equals: 'SP' } });
 // @ts-expect-error columns and selectedColumns are mutually exclusive
 void csv.rows(path, { columns: [0] as const, selectedColumns: [1] as const });
 
-// @ts-expect-error rows() does not support where.in
-void csv.rows(path, { where: { column: 1, in: ['SP'] } });
-
-// @ts-expect-error rows() does not support where.startsWith
-void csv.rows(path, { where: { column: 1, startsWith: 'S' } });
-
 // @ts-expect-error row views do not support workers
 void csv.withRowViews(path, { workerCount: 2 }, () => {});
 
-// @ts-expect-error row views do not support where.in
 void csv.withRowViews(path, { where: { column: 1, in: ['SP'] } }, () => {});
 
 // @ts-expect-error batches do not support workers
 void csv.batches(path, { workerCount: 2 });
 
-// @ts-expect-error batches do not support where.in
 void csv.batches(path, { where: { column: 1, in: ['SP'] } });
 
 // @ts-expect-error columnar batches do not support strict selected columns
@@ -142,7 +154,6 @@ void csv.count(path, { strict: true, where: { column: 1, in: ['SP'] } });
 // @ts-expect-error workerPool requires explicit worker options
 void workerPool(path);
 
-// @ts-expect-error workerPool rows support only where.equals
 void workerPool(path, { workerCount: 2, where: { column: 1, in: ['SP'] } });
 
 // @ts-expect-error workerPool does not support strict mode

@@ -110,6 +110,26 @@ const CSV_SYMBOLS = {
     returns: 'ptr',
   },
   // C signature:
+  // void* csv_parser_write_projected_batch_where_all(
+  //     void* parser, const uint8_t* data, uint64_t len, bool final, bool has_projection,
+  //     const uint32_t* selected_columns, uint64_t selected_columns_len,
+  //     const uint32_t* filter_descriptors, uint64_t filter_count, const uint8_t* values_data,
+  //     uint64_t values_data_len, const uint32_t* value_offsets, uint64_t total_value_count);
+  csv_parser_write_projected_batch_where_all: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'bool', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    returns: 'ptr',
+  },
+  // C signature:
+  // void* csv_parser_finish_projected_batch_where_all(
+  //     void* parser, bool has_projection, const uint32_t* selected_columns,
+  //     uint64_t selected_columns_len, const uint32_t* filter_descriptors, uint64_t filter_count,
+  //     const uint8_t* values_data, uint64_t values_data_len, const uint32_t* value_offsets,
+  //     uint64_t total_value_count);
+  csv_parser_finish_projected_batch_where_all: {
+    args: ['ptr', 'bool', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    returns: 'ptr',
+  },
+  // C signature:
   // void csv_batch_destroy(void* batch);
   csv_batch_destroy: {
     args: ['ptr'],
@@ -197,6 +217,24 @@ const CSV_SYMBOLS = {
   // uint64_t csv_parser_finish_count(void* parser);
   csv_parser_finish_count: {
     args: ['ptr'],
+    returns: 'u64',
+  },
+  // C signature:
+  // uint64_t csv_parser_write_count_where_all(
+  //     void* parser, const uint8_t* data, uint64_t len, bool final,
+  //     const uint32_t* filter_descriptors, uint64_t filter_count, const uint8_t* values_data,
+  //     uint64_t values_data_len, const uint32_t* value_offsets, uint64_t total_value_count);
+  csv_parser_write_count_where_all: {
+    args: ['ptr', 'buffer', 'u64', 'bool', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    returns: 'u64',
+  },
+  // C signature:
+  // uint64_t csv_parser_finish_count_where_all(
+  //     void* parser, const uint32_t* filter_descriptors, uint64_t filter_count,
+  //     const uint8_t* values_data, uint64_t values_data_len, const uint32_t* value_offsets,
+  //     uint64_t total_value_count);
+  csv_parser_finish_count_where_all: {
+    args: ['ptr', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
     returns: 'u64',
   },
   // C signature:

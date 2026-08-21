@@ -52,10 +52,16 @@ export type CsvShardingOptions = Omit<CsvFileOptions, 'compression'> & {
   compression?: never;
 };
 
-export type CsvWhereFilter =
+export type CsvWherePredicate =
   | CsvWhereEqualsFilter
   | CsvWhereInFilter
   | CsvWhereStartsWithFilter;
+
+export interface CsvWhereAllFilter {
+  all: readonly CsvWherePredicate[];
+}
+
+export type CsvWhereFilter = CsvWherePredicate | CsvWhereAllFilter;
 
 export interface CsvEqualsFilter {
   column: number;
@@ -71,6 +77,8 @@ export interface CsvStartsWithFilter {
   column: number;
   prefix: CsvFieldValue;
 }
+
+export type CsvNativeFilter = CsvEqualsFilter | CsvInFilter | CsvStartsWithFilter;
 
 export interface CsvWhereEqualsFilter {
   column: number;
@@ -90,6 +98,7 @@ export interface CsvWhereStartsWithFilter {
 export interface CsvNativeProjectionOptions {
   selectedColumns?: CsvColumns;
   equalsFilter?: CsvEqualsFilter;
+  filters?: readonly CsvNativeFilter[];
 }
 
 export interface CsvApiFileOptions extends CsvFileOptions {
@@ -121,7 +130,7 @@ type CsvOptionsWithoutWhereWorkerCount<TColumns extends CsvColumns | undefined> 
 export type CsvSingleThreadRowsOptions<TColumns extends CsvColumns | undefined = undefined> =
   | (CsvDistributiveOmit<CsvOptionsWithoutWhereWorkerCount<TColumns>, 'strict'> & {
     strict?: false | undefined;
-    where?: CsvWhereEqualsFilter | undefined;
+    where?: CsvWhereFilter | undefined;
     workerCount?: 1 | undefined;
   })
   | (CsvDistributiveOmit<CsvOptionsWithoutWhereWorkerCount<TColumns>, 'strict'> & {
@@ -138,7 +147,7 @@ export type CsvParallelRowsOptions<TColumns extends CsvColumns | undefined = und
   & CsvColumnSelection<TColumns>
   & {
     compression?: never;
-    where?: CsvWhereEqualsFilter | undefined;
+    where?: CsvWhereFilter | undefined;
     workerCount: number;
     strict?: false | undefined;
   };

@@ -18,10 +18,7 @@ interface WorkerStartsWithFilterMessage {
   prefix: Uint8Array;
 }
 
-type WorkerCountFilterMessage =
-  | { equals: WorkerEqualsFilterMessage; }
-  | { in: WorkerInFilterMessage; }
-  | { startsWith: WorkerStartsWithFilterMessage; };
+type WorkerFilterMessage = WorkerEqualsFilterMessage | WorkerInFilterMessage | WorkerStartsWithFilterMessage;
 
 interface WorkerCountMessage {
   chunkSize?: number;
@@ -33,7 +30,7 @@ interface WorkerCountMessage {
     end: number;
   };
   shardIndex: number;
-  where?: WorkerCountFilterMessage;
+  filters?: WorkerFilterMessage[];
 }
 
 addEventListener('message', async (event: MessageEvent<WorkerCountMessage>) => {
@@ -68,37 +65,25 @@ async function countShard(message: WorkerCountMessage): Promise<number> {
         start: message.shard.start,
       })
     ) {
-      rows += writeCount(parser, chunk as Buffer, message.where);
+      rows += writeCount(parser, chunk as Buffer, message.filters);
     }
-    rows += finishCount(parser, message.where);
+    rows += finishCount(parser, message.filters);
     return rows;
   } finally {
     parser.close();
   }
 }
 
-function writeCount(parser: NativeCsvParser, chunk: Buffer, where: WorkerCountFilterMessage | undefined): number {
-  if (where === undefined) {
+function writeCount(parser: NativeCsvParser, chunk: Buffer, filters: WorkerFilterMessage[] | undefined): number {
+  if (filters === undefined) {
     return parser.writeCount(chunk);
   }
-  if ('equals' in where) {
-    return parser.writeCountWhereEquals(chunk, where.equals);
-  }
-  if ('in' in where) {
-    return parser.writeCountWhereIn(chunk, where.in);
-  }
-  return parser.writeCountWhereStartsWith(chunk, where.startsWith);
+  return parser.writeCountWhereAll(chunk, filters);
 }
 
-function finishCount(parser: NativeCsvParser, where: WorkerCountFilterMessage | undefined): number {
-  if (where === undefined) {
+function finishCount(parser: NativeCsvParser, filters: WorkerFilterMessage[] | undefined): number {
+  if (filters === undefined) {
     return parser.endCount();
   }
-  if ('equals' in where) {
-    return parser.endCountWhereEquals(where.equals);
-  }
-  if ('in' in where) {
-    return parser.endCountWhereIn(where.in);
-  }
-  return parser.endCountWhereStartsWith(where.startsWith);
+  return parser.endCountWhereAll(filters);
 }

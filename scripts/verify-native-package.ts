@@ -7,6 +7,13 @@ import {
   repoRoot,
 } from './native-target.ts';
 
+const requiredNativeSymbols = [
+  'csv_parser_write_projected_batch_where_all',
+  'csv_parser_finish_projected_batch_where_all',
+  'csv_parser_write_count_where_all',
+  'csv_parser_finish_count_where_all',
+] as const;
+
 const configuredTargets = process.env['CSV_NATIVE_PACKAGE_TARGETS'];
 const targets = configuredTargets === undefined
   ? [...packagedNativeTargets]
@@ -48,9 +55,34 @@ async function verifyBinaryFormat(path: string, target: string): Promise<void> {
   if (target === 'darwin-arm64' && view.getUint32(4, true) !== 0x0100000c) {
     throw new Error(`${target} library does not contain ARM64 machine code`);
   }
+  verifyRequiredSymbols(bytes, target);
   if (target.startsWith('darwin-')) {
     verifyMacOsDeploymentTarget(view, target);
   }
+}
+
+function verifyRequiredSymbols(bytes: Uint8Array, target: string): void {
+  const encoder = new TextEncoder();
+  for (const symbol of requiredNativeSymbols) {
+    const encoded = encoder.encode(symbol);
+    if (!containsBytes(bytes, encoded)) {
+      throw new Error(`${target} library does not export required symbol: ${symbol}`);
+    }
+  }
+}
+
+function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
+  const finalStart = haystack.length - needle.length;
+  for (let start = 0; start <= finalStart; ++start) {
+    let index = 0;
+    while (index < needle.length && haystack[start + index] === needle[index]) {
+      ++index;
+    }
+    if (index === needle.length) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function verifyMacOsDeploymentTarget(view: DataView, target: string): void {

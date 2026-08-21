@@ -11,11 +11,13 @@ import {
   normalizeEqualsFilter,
   normalizeFixedColumnsCount,
   normalizeInFilter,
+  normalizeNativeFilters,
   normalizeStartsWithFilter,
 } from './normalize.ts';
 import type {
   CsvEqualsFilter,
   CsvInFilter,
+  CsvNativeFilter,
   CsvNativeProjectionOptions,
   CsvParserOptions,
   CsvRow,
@@ -102,6 +104,7 @@ export class NativeCsvParser {
     final = false,
   ): NativeCsvBatch {
     this.#rejectStrictUnsupported('projected batches');
+    this.#rejectProjectionFilterConflict(options);
     if (chunk.byteLength === 0 && final) {
       return this.endProjectedBatch(options);
     }
@@ -110,19 +113,36 @@ export class NativeCsvParser {
     const input = normalizeChunk(chunk);
     const columns = normalizeColumns(options.selectedColumns);
     const filter = normalizeEqualsFilter(options.equalsFilter);
-    const batch = native.symbols.csv_parser_write_projected_batch(
-      handle,
-      input,
-      BigInt(input.byteLength),
-      final,
-      options.selectedColumns !== undefined,
-      columns,
-      BigInt(options.selectedColumns?.length ?? 0),
-      filter.enabled,
-      filter.column,
-      filter.value,
-      BigInt(filter.valueLength),
-    );
+    const filters = normalizeNativeFilters(options.filters);
+    const batch = options.filters === undefined
+      ? native.symbols.csv_parser_write_projected_batch(
+        handle,
+        input,
+        BigInt(input.byteLength),
+        final,
+        options.selectedColumns !== undefined,
+        columns,
+        BigInt(options.selectedColumns?.length ?? 0),
+        filter.enabled,
+        filter.column,
+        filter.value,
+        BigInt(filter.valueLength),
+      )
+      : native.symbols.csv_parser_write_projected_batch_where_all(
+        handle,
+        input,
+        BigInt(input.byteLength),
+        final,
+        options.selectedColumns !== undefined,
+        columns,
+        BigInt(options.selectedColumns?.length ?? 0),
+        filters.descriptors,
+        BigInt(filters.filterCount),
+        filters.valuesData,
+        BigInt(filters.valuesDataLength),
+        filters.valueOffsets,
+        BigInt(filters.valueCount),
+      );
     if (batch === null) {
       throw new Error(`native CSV parser failed: ${this.#lastError()}`);
     }
@@ -154,18 +174,33 @@ export class NativeCsvParser {
 
   endProjectedBatch(options: CsvNativeProjectionOptions = {}): NativeCsvBatch {
     this.#rejectStrictUnsupported('projected batches');
+    this.#rejectProjectionFilterConflict(options);
     const columns = normalizeColumns(options.selectedColumns);
     const filter = normalizeEqualsFilter(options.equalsFilter);
-    const batch = native.symbols.csv_parser_finish_projected_batch(
-      this.#requireHandle(),
-      options.selectedColumns !== undefined,
-      columns,
-      BigInt(options.selectedColumns?.length ?? 0),
-      filter.enabled,
-      filter.column,
-      filter.value,
-      BigInt(filter.valueLength),
-    );
+    const filters = normalizeNativeFilters(options.filters);
+    const batch = options.filters === undefined
+      ? native.symbols.csv_parser_finish_projected_batch(
+        this.#requireHandle(),
+        options.selectedColumns !== undefined,
+        columns,
+        BigInt(options.selectedColumns?.length ?? 0),
+        filter.enabled,
+        filter.column,
+        filter.value,
+        BigInt(filter.valueLength),
+      )
+      : native.symbols.csv_parser_finish_projected_batch_where_all(
+        this.#requireHandle(),
+        options.selectedColumns !== undefined,
+        columns,
+        BigInt(options.selectedColumns?.length ?? 0),
+        filters.descriptors,
+        BigInt(filters.filterCount),
+        filters.valuesData,
+        BigInt(filters.valuesDataLength),
+        filters.valueOffsets,
+        BigInt(filters.valueCount),
+      );
     if (batch === null) {
       throw new Error(`native CSV parser failed: ${this.#lastError()}`);
     }
@@ -306,6 +341,53 @@ export class NativeCsvParser {
     );
   }
 
+  writeCountWhereAll(
+    chunk: NodeJS.TypedArray | DataView,
+    filters: readonly CsvNativeFilter[],
+    final = false,
+  ): number {
+    this.#rejectStrictUnsupported('count filters');
+    if (chunk.byteLength === 0 && final) {
+      return this.endCountWhereAll(filters);
+    }
+
+    const normalized = normalizeNativeFilters(filters);
+    const handle = this.#requireHandle();
+    const input = normalizeChunk(chunk);
+    return u64ToSafeNumber(
+      native.symbols.csv_parser_write_count_where_all(
+        handle,
+        input,
+        BigInt(input.byteLength),
+        final,
+        normalized.descriptors,
+        BigInt(normalized.filterCount),
+        normalized.valuesData,
+        BigInt(normalized.valuesDataLength),
+        normalized.valueOffsets,
+        BigInt(normalized.valueCount),
+      ),
+      'CSV filtered row count',
+    );
+  }
+
+  endCountWhereAll(filters: readonly CsvNativeFilter[]): number {
+    this.#rejectStrictUnsupported('count filters');
+    const normalized = normalizeNativeFilters(filters);
+    return u64ToSafeNumber(
+      native.symbols.csv_parser_finish_count_where_all(
+        this.#requireHandle(),
+        normalized.descriptors,
+        BigInt(normalized.filterCount),
+        normalized.valuesData,
+        BigInt(normalized.valuesDataLength),
+        normalized.valueOffsets,
+        BigInt(normalized.valueCount),
+      ),
+      'CSV filtered row count',
+    );
+  }
+
   reset(): void {
     native.symbols.csv_parser_reset(this.#requireHandle());
   }
@@ -346,6 +428,12 @@ export class NativeCsvParser {
   #rejectStrictUnsupported(operation: string): void {
     if (this.#strict) {
       throw new Error(`strict CSV validation is not supported for ${operation}`);
+    }
+  }
+
+  #rejectProjectionFilterConflict(options: CsvNativeProjectionOptions): void {
+    if (options.equalsFilter !== undefined && options.filters !== undefined) {
+      throw new Error('use equalsFilter or filters, not both');
     }
   }
 }

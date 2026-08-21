@@ -10,6 +10,18 @@ interface WorkerEqualsFilter {
   value: Uint8Array;
 }
 
+interface WorkerInFilter {
+  column: number;
+  values: Uint8Array[];
+}
+
+interface WorkerStartsWithFilter {
+  column: number;
+  prefix: Uint8Array;
+}
+
+type WorkerFilter = WorkerEqualsFilter | WorkerInFilter | WorkerStartsWithFilter;
+
 interface WorkerRowsMessage {
   chunkSize: number;
   delimiter?: string;
@@ -21,7 +33,7 @@ interface WorkerRowsMessage {
   };
   shardIndex: number;
   path: string;
-  whereEquals?: WorkerEqualsFilter;
+  filters?: WorkerFilter[];
 }
 
 interface WorkerRowsBatchMessage {
@@ -125,12 +137,9 @@ function materializeRows(
 }
 
 function writeRowsBatch(parser: NativeCsvParser, chunk: Buffer, message: WorkerRowsMessage) {
-  if (message.whereEquals !== undefined) {
+  if (message.filters !== undefined) {
     return parser.writeProjectedBatch(chunk, {
-      equalsFilter: {
-        column: message.whereEquals.column,
-        value: message.whereEquals.value,
-      },
+      filters: message.filters,
       selectedColumns: message.selectedColumns,
     });
   }
@@ -143,12 +152,9 @@ function writeRowsBatch(parser: NativeCsvParser, chunk: Buffer, message: WorkerR
 }
 
 function finishRowsBatch(parser: NativeCsvParser, message: WorkerRowsMessage) {
-  if (message.whereEquals !== undefined) {
+  if (message.filters !== undefined) {
     return parser.endProjectedBatch({
-      equalsFilter: {
-        column: message.whereEquals.column,
-        value: message.whereEquals.value,
-      },
+      filters: message.filters,
       selectedColumns: message.selectedColumns,
     });
   }
@@ -161,5 +167,5 @@ function finishRowsBatch(parser: NativeCsvParser, message: WorkerRowsMessage) {
 }
 
 function usesProjectedMaterialization(message: WorkerRowsMessage): boolean {
-  return message.whereEquals !== undefined || message.selectedColumns !== undefined;
+  return message.filters !== undefined || message.selectedColumns !== undefined;
 }

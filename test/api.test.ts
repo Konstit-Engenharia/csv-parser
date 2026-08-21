@@ -8,6 +8,7 @@ import {
   type CsvApiFileOptions,
   type CsvCountOptions,
   type CsvRowsOptions,
+  parseCsvFileProjected,
 } from '../src/index.ts';
 import {
   csvFixturePath,
@@ -33,6 +34,89 @@ describe('csv high-level API', () => {
       ['1', 'Ana'],
       ['3', 'Bia'],
     ]);
+  });
+
+  test('streams rows with mixed AND filters', async () => {
+    const path = csvFixturePath('api/quoted-people-sp-filter.csv');
+    const rows: string[][] = [];
+
+    for await (
+      const batch of csv.rows(path, {
+        columns: [0, 1] as const,
+        delimiter: ';',
+        where: {
+          all: [
+            { column: 2, in: ['SP', 'RJ'] },
+            { column: 1, startsWith: 'B' },
+            { column: 0, equals: '3' },
+          ],
+        },
+      })
+    ) {
+      rows.push(...batch);
+    }
+
+    expect(rows).toEqual([['3', 'Bia']]);
+  });
+
+  test('applies mixed AND filters across serial batch surfaces', async () => {
+    const path = csvFixturePath('api/quoted-people-sp-filter.csv');
+    const where = {
+      all: [
+        { column: 2, equals: 'SP' },
+        { column: 1, startsWith: 'B' },
+      ],
+    } as const;
+
+    expect(
+      await csv.parse(readCsvFixture('api/quoted-people-sp-filter.csv'), {
+        columns: [0, 1] as const,
+        delimiter: ';',
+        where,
+      }),
+    ).toEqual([['3', 'Bia']]);
+
+    const batchRows: string[][] = [];
+    for await (const batch of csv.batches(path, { columns: [0, 1], delimiter: ';', where })) {
+      try {
+        batchRows.push(...batch.rows());
+      } finally {
+        batch.close();
+      }
+    }
+    expect(batchRows).toEqual([['3', 'Bia']]);
+
+    const rowViewRows: string[][] = [];
+    await csv.withRowViews(path, { columns: [0, 1] as const, delimiter: ';', where }, (row) => {
+      rowViewRows.push([row.get(0) ?? '', row.get(1) ?? '']);
+    });
+    expect(rowViewRows).toEqual([['3', 'Bia']]);
+
+    const columnarRows: string[][] = [];
+    await csv.withColumnarBatches(path, { columns: [0, 1] as const, delimiter: ';', where }, (batch) => {
+      for (let rowIndex = 0; rowIndex < batch.rowCount; ++rowIndex) {
+        columnarRows.push([
+          batch.fieldBuffer(rowIndex, 0)?.toString() ?? '',
+          batch.fieldBuffer(rowIndex, 1)?.toString() ?? '',
+        ]);
+      }
+    });
+    expect(columnarRows).toEqual([['3', 'Bia']]);
+
+    const projectedRows: string[][] = [];
+    for await (
+      const rows of parseCsvFileProjected(path, {
+        delimiter: ';',
+        filters: [
+          { column: 2, value: 'SP' },
+          { column: 1, prefix: 'B' },
+        ],
+        selectedColumns: [0, 1],
+      })
+    ) {
+      projectedRows.push(...rows);
+    }
+    expect(projectedRows).toEqual([['3', 'Bia']]);
   });
 
   test('streams selected rows without materializing skipped columns', async () => {
@@ -153,6 +237,52 @@ describe('csv high-level API', () => {
     ]);
   });
 
+  test('streams rows through workers with mixed AND filters', async () => {
+    const path = csvFixturePath('api/quoted-people-sp-filter.csv');
+    const rows: string[][] = [];
+
+    for await (
+      const batch of csv.rows(path, {
+        columns: [0, 1] as const,
+        delimiter: ';',
+        workerCount: 2,
+        where: {
+          all: [
+            { column: 2, in: ['SP', 'RJ'] },
+            { column: 1, startsWith: 'B' },
+            { column: 0, equals: '3' },
+          ],
+        },
+      })
+    ) {
+      rows.push(...batch);
+    }
+
+    expect(rows).toEqual([['3', 'Bia']]);
+  });
+
+  test('reuses a filtered worker pool for count and rows', async () => {
+    const path = csvFixturePath('api/quoted-people-sp-filter.csv');
+    using pool = csv.workerPool(path, {
+      columns: [0, 1] as const,
+      delimiter: ';',
+      workerCount: 2,
+      where: {
+        all: [
+          { column: 2, in: ['SP', 'RJ'] },
+          { column: 1, startsWith: 'B' },
+        ],
+      },
+    });
+
+    expect(await pool.count()).toBe(1);
+    const rows: string[][] = [];
+    for await (const batch of pool.rows()) {
+      rows.push(...batch);
+    }
+    expect(rows).toEqual([['3', 'Bia']]);
+  });
+
   test('counts rows with filters', async () => {
     const path = csvFixturePath('api/unquoted-people-sp-filter.csv');
 
@@ -160,6 +290,35 @@ describe('csv high-level API', () => {
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, equals: 'SP' } })).toBe(2);
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
     expect(await csv.count(path, { delimiter: ';', where: { column: 1, startsWith: 'A' } })).toBe(1);
+    expect(
+      await csv.count(path, {
+        delimiter: ';',
+        where: {
+          all: [
+            { column: 2, in: ['SP', 'RJ'] },
+            { column: 1, startsWith: 'B' },
+            { column: 0, equals: '3' },
+          ],
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await csv.count(path, {
+        delimiter: ';',
+        where: {
+          all: [
+            { column: 1, in: ['Ana', 'Bia'] },
+            { column: 1, startsWith: 'B' },
+          ],
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await csv.count(path, {
+        delimiter: ';',
+        where: { all: [{ column: 2, equals: 'SP' }, { column: 20, startsWith: '' }] },
+      }),
+    ).toBe(0);
   });
 
   test('counts rows through workers with native shard splitting', async () => {
@@ -169,6 +328,19 @@ describe('csv high-level API', () => {
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, equals: 'SP' } })).toBe(2);
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 1, startsWith: 'A' } })).toBe(1);
+    expect(
+      await csv.count(path, {
+        delimiter: ';',
+        workerCount: 2,
+        where: {
+          all: [
+            { column: 2, in: ['SP', 'RJ'] },
+            { column: 1, startsWith: 'C' },
+            { column: 0, equals: '4' },
+          ],
+        },
+      }),
+    ).toBe(1);
   });
 
   test('reuses worker pool across repeated count and rows calls', async () => {
@@ -327,33 +499,56 @@ describe('csv high-level API', () => {
       );
   });
 
-  test('keeps unsupported row filters explicit', async () => {
+  test('rejects empty AND filter groups', async () => {
     const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
-    const invalidOptions = {
-      delimiter: ';',
-      where: { column: 2, in: ['SP'] },
-    } as unknown as CsvRowsOptions;
+    const countError = await rejectedError(csv.count(path, { delimiter: ';', where: { all: [] } }));
+    expect(countError.message).toContain('where.all must contain at least one filter');
 
-    let error: unknown;
+    let rowsError: unknown;
     try {
-      for await (const _rows of csv.rows(path, invalidOptions)) {
+      for await (const _rows of csv.rows(path, { delimiter: ';', where: { all: [] } })) {
         throw new Error('unreachable');
       }
     } catch (caught) {
-      error = caught;
+      rowsError = caught;
     }
+    expect(rowsError).toBeInstanceOf(Error);
+    expect((rowsError as Error).message).toContain('where.all must contain at least one filter');
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain('rows() supports only where.equals');
+    const workerError = await rejectedError(csv.count(path, { delimiter: ';', workerCount: 2, where: { all: [] } }));
+    expect(workerError.message).toContain('where.all must contain at least one filter');
   });
 
-  test('keeps unsupported worker row modes explicit', async () => {
+  test('validates filters before empty worker sharding', async () => {
+    const path = csvFixturePath('empty.csv');
+    const emptyIn = { column: 0, in: [] } as const;
+
+    expect((await rejectedError(csv.count(path, { workerCount: 2, where: emptyIn }))).message).toContain(
+      'filter values must not be empty',
+    );
+    expect((await rejectedError(consumeRows(csv.rows(path, { workerCount: 2, where: emptyIn })))).message).toContain(
+      'filter values must not be empty',
+    );
+    using emptyInPool = csv.workerPool(path, { workerCount: 2, where: emptyIn });
+    expect((await rejectedError(emptyInPool.count())).message).toContain('filter values must not be empty');
+    expect((await rejectedError(consumeRows(emptyInPool.rows()))).message).toContain('filter values must not be empty');
+
+    const tooMany = {
+      all: Array.from({ length: 2025 }, () => ({ column: 0, equals: 'x' })),
+    } as const;
+    expect((await rejectedError(csv.count(path, { workerCount: 2, where: tooMany }))).message).toContain(
+      'filter count out of range: 2025',
+    );
+    expect((await rejectedError(consumeRows(csv.rows(path, { workerCount: 2, where: tooMany })))).message).toContain(
+      'filter count out of range: 2025',
+    );
+    using tooManyPool = csv.workerPool(path, { workerCount: 2, where: tooMany });
+    expect((await rejectedError(tooManyPool.count())).message).toContain('filter count out of range: 2025');
+    expect((await rejectedError(consumeRows(tooManyPool.rows()))).message).toContain('filter count out of range: 2025');
+  });
+
+  test('keeps unsupported strict worker rows explicit', async () => {
     const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
-    const invalidWorkerWhereOptions = {
-      delimiter: ';',
-      workerCount: 2,
-      where: { column: 2, in: ['SP'] },
-    } as unknown as CsvRowsOptions;
     const invalidStrictOptions = {
       delimiter: ';',
       strict: true,
@@ -370,17 +565,6 @@ describe('csv high-level API', () => {
     }
     expect(strictError).toBeInstanceOf(Error);
     expect((strictError as Error).message).toContain('parallel rows do not support strict CSV validation');
-
-    let whereInError: unknown;
-    try {
-      for await (const _rows of csv.rows(path, invalidWorkerWhereOptions)) {
-        throw new Error('unreachable');
-      }
-    } catch (caught) {
-      whereInError = caught;
-    }
-    expect(whereInError).toBeInstanceOf(Error);
-    expect((whereInError as Error).message).toContain('parallel rows support only where.equals');
   });
 
   test('keeps row view callback limits explicit', async () => {
@@ -540,4 +724,10 @@ async function rejectedError(promise: Promise<unknown>): Promise<Error> {
     return error instanceof Error ? error : new Error(String(error));
   }
   throw new Error('expected promise to reject');
+}
+
+async function consumeRows(rows: AsyncIterable<unknown>): Promise<void> {
+  for await (const _rows of rows) {
+    // Consume the generator so errors thrown before the first row are observed.
+  }
 }

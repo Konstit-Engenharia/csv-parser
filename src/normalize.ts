@@ -8,11 +8,19 @@ import type {
   CsvEqualsFilter,
   CsvFieldValue,
   CsvInFilter,
+  CsvNativeFilter,
   CsvStartsWithFilter,
 } from './types.ts';
 
 export const MAX_COLUMN_INDEX = 2024;
 export const MAX_PROJECTION_LENGTH = 2024;
+export const MAX_FILTER_COUNT = MAX_PROJECTION_LENGTH;
+
+const UINT32_MAX = 0xffff_ffff;
+const NATIVE_FILTER_DESCRIPTOR_LENGTH = 4;
+const NATIVE_FILTER_EQUALS = 1;
+const NATIVE_FILTER_IN = 2;
+const NATIVE_FILTER_STARTS_WITH = 3;
 
 export function encodingCode(encoding: CsvEncoding = 'utf8'): number {
   const normalized = encoding.toLowerCase();
@@ -155,5 +163,98 @@ export function normalizeStartsWithFilter(filter: CsvStartsWithFilter): {
     column,
     value: value.byteLength === 0 ? EMPTY_BUFFER : value,
     valueLength: value.byteLength,
+  };
+}
+
+export function normalizeNativeFilters(filters: readonly CsvNativeFilter[] | undefined): {
+  descriptors: Uint32Array;
+  filterCount: number;
+  valuesData: Uint8Array;
+  valuesDataLength: number;
+  valueOffsets: Uint32Array;
+  valueCount: number;
+} {
+  if (filters === undefined || filters.length === 0) {
+    return {
+      descriptors: EMPTY_U32,
+      filterCount: 0,
+      valuesData: EMPTY_BUFFER,
+      valuesDataLength: 0,
+      valueOffsets: EMPTY_U32,
+      valueCount: 0,
+    };
+  }
+  if (filters.length > MAX_FILTER_COUNT) {
+    throw new RangeError(`filter count out of range: ${filters.length}`);
+  }
+
+  const descriptors = new Uint32Array(filters.length * NATIVE_FILTER_DESCRIPTOR_LENGTH);
+  const values: Uint8Array[] = [];
+  let valuesDataLength = 0;
+  let valueCount = 0;
+
+  for (let filterIndex = 0; filterIndex < filters.length; ++filterIndex) {
+    const filter = filters[filterIndex];
+    if (filter === undefined) {
+      throw new TypeError(`filter missing at index ${filterIndex}`);
+    }
+
+    const column = normalizeFilterColumn(filter.column);
+    let kind: number;
+    let filterValues: readonly CsvFieldValue[];
+    if ('value' in filter) {
+      kind = NATIVE_FILTER_EQUALS;
+      filterValues = [filter.value];
+    } else if ('values' in filter) {
+      kind = NATIVE_FILTER_IN;
+      filterValues = filter.values;
+      if (filterValues.length === 0) {
+        throw new RangeError('filter values must not be empty');
+      }
+    } else {
+      kind = NATIVE_FILTER_STARTS_WITH;
+      filterValues = [filter.prefix];
+    }
+
+    if (filterValues.length > UINT32_MAX - valueCount) {
+      throw new RangeError('filter value count exceeds native offset range');
+    }
+
+    const descriptorIndex = filterIndex * NATIVE_FILTER_DESCRIPTOR_LENGTH;
+    descriptors[descriptorIndex] = kind;
+    descriptors[descriptorIndex + 1] = column;
+    descriptors[descriptorIndex + 2] = valueCount;
+    descriptors[descriptorIndex + 3] = filterValues.length;
+
+    valueCount += filterValues.length;
+    for (const filterValue of filterValues) {
+      const value = normalizeFilterValue(filterValue);
+      if (value.byteLength > UINT32_MAX - valuesDataLength) {
+        throw new RangeError('filter values exceed native offset range');
+      }
+      values.push(value);
+      valuesDataLength += value.byteLength;
+    }
+  }
+
+  const valuesData = valuesDataLength === 0 ? EMPTY_BUFFER : new Uint8Array(valuesDataLength);
+  const valueOffsets = new Uint32Array(valueCount + 1);
+  let valueIndex = 0;
+  let offset = 0;
+  for (const value of values) {
+    valueOffsets[valueIndex] = offset;
+    valuesData.set(value, offset);
+    offset += value.byteLength;
+    ++valueIndex;
+  }
+  valueOffsets[valueCount] = offset;
+
+  return {
+    descriptors,
+    filterCount: filters.length,
+    valuesData,
+    valuesDataLength,
+    valueOffsets,
+    valueCount,
   };
 }

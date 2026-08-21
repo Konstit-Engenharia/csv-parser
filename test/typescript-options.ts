@@ -59,9 +59,21 @@ const startsWithCountOptions = {
   where: { column: 1, startsWith: 'A' },
 } satisfies CsvCountOptions;
 
+const multipleFilterRowsOptions = {
+  columns,
+  delimiter: ';',
+  where: {
+    all: [
+      { column: 1, startsWith: 'A' },
+      { column: 2, in: ['SP', 'RJ'] },
+    ],
+  },
+} satisfies CsvRowsOptions<typeof columns>;
+
 void csv.rows(path, strictRowsOptions);
 void csv.count(path, strictCountOptions);
 void csv.count(path, startsWithCountOptions);
+void csv.rows(path, multipleFilterRowsOptions);
 
 // @ts-expect-error parser options do not support string caching
 void csv.rows(path, { stringCache: { columns: [0] } });

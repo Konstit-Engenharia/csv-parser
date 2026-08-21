@@ -6,6 +6,7 @@ import {
 import {
   countCsvFileWhereIn,
   countCsvFileWhereStartsWith,
+  csv,
   NativeCsvParser,
   parseCsvFileProjected,
 } from '../src/index.ts';
@@ -19,10 +20,14 @@ const FILTER_VALUES = (Bun.env['CSV_BENCH_FILTER_VALUES'] ?? 'SP,RJ')
   .split(',')
   .filter((value) => value.length > 0);
 const FILTER_PREFIX = Bun.env['CSV_BENCH_FILTER_PREFIX'] ?? 'S';
+const SECOND_FILTER_COLUMN = Number(Bun.env['CSV_BENCH_SECOND_FILTER_COLUMN'] ?? 1);
+const SECOND_FILTER_PREFIX = Bun.env['CSV_BENCH_SECOND_FILTER_PREFIX'] ?? 'A';
 const SELECTED_COLUMNS = [FILTER_COLUMN];
+const MULTIPLE_FILTER_COLUMNS = [FILTER_COLUMN, SECOND_FILTER_COLUMN];
 const bytes = statSync(FILE).size;
 
 const filterSet = new Set(FILTER_VALUES);
+const measuredRows = new Map<string, number>();
 
 const cases = [
   ['js materialized selected column filter in', () => countJsMaterializedSelectedIn()],
@@ -39,6 +44,18 @@ const cases = [
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
     })],
+  ['js projected multiple filters', () => countJsProjectedMultipleFilters()],
+  ['native multiple filters', () =>
+    csv.count(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      where: {
+        all: [
+          { column: FILTER_COLUMN, in: FILTER_VALUES },
+          { column: SECOND_FILTER_COLUMN, startsWith: SECOND_FILTER_PREFIX },
+        ],
+      },
+    })],
 ] as const;
 
 console.log({
@@ -49,6 +66,8 @@ console.log({
   filterColumn: FILTER_COLUMN,
   filterValues: FILTER_VALUES,
   filterPrefix: FILTER_PREFIX,
+  secondFilterColumn: SECOND_FILTER_COLUMN,
+  secondFilterPrefix: SECOND_FILTER_PREFIX,
 });
 
 for (const [name, fn,] of cases) {
@@ -75,6 +94,13 @@ for (const [name, fn,] of cases) {
     seconds,
     mibPerSecond,
   });
+  measuredRows.set(name, rows);
+}
+
+const jsMultipleRows = measuredRows.get('js projected multiple filters');
+const nativeMultipleRows = measuredRows.get('native multiple filters');
+if (jsMultipleRows !== undefined && nativeMultipleRows !== undefined && jsMultipleRows !== nativeMultipleRows) {
+  throw new Error(`multiple filter benchmark result mismatch: JavaScript=${jsMultipleRows}, native=${nativeMultipleRows}`);
 }
 
 async function countJsMaterializedSelectedIn(): Promise<number> {
@@ -104,6 +130,30 @@ async function countJsProjectedIn(): Promise<number> {
 
 async function countJsProjectedStartsWith(): Promise<number> {
   return countJsProjected((value) => value.startsWith(FILTER_PREFIX));
+}
+
+async function countJsProjectedMultipleFilters(): Promise<number> {
+  let rows = 0;
+  for await (
+    const batch of parseCsvFileProjected(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      selectedColumns: MULTIPLE_FILTER_COLUMNS,
+    })
+  ) {
+    try {
+      for (const row of batch) {
+        if (filterSet.has(row[0] ?? '') && (row[1] ?? '').startsWith(SECOND_FILTER_PREFIX)) {
+          ++rows;
+        }
+      }
+    } finally {
+      for (const row of batch) {
+        row.length = 0;
+      }
+    }
+  }
+  return rows;
 }
 
 async function countJsProjected(predicate: (value: string) => boolean): Promise<number> {

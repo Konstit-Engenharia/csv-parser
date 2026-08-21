@@ -5,6 +5,7 @@ import {
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import {
+  MAX_FILTER_COUNT,
   normalizeColumns,
   normalizeFilterColumn,
 } from './normalize.ts';
@@ -16,12 +17,25 @@ import type {
   CsvParallelRowsOptions,
   CsvProjectedRow,
   CsvWhereFilter,
+  CsvWherePredicate,
 } from './types.ts';
 
 interface WorkerEqualsFilterMessage {
   column: number;
   value: Uint8Array;
 }
+
+interface WorkerInFilterMessage {
+  column: number;
+  values: Uint8Array[];
+}
+
+interface WorkerStartsWithFilterMessage {
+  column: number;
+  prefix: Uint8Array;
+}
+
+type WorkerFilterMessage = WorkerEqualsFilterMessage | WorkerInFilterMessage | WorkerStartsWithFilterMessage;
 
 interface WorkerRowsMessage {
   chunkSize: number;
@@ -34,7 +48,7 @@ interface WorkerRowsMessage {
     end: number;
   };
   shardIndex: number;
-  whereEquals?: WorkerEqualsFilterMessage;
+  filters?: WorkerFilterMessage[];
 }
 
 interface WorkerRowsBatchMessage {
@@ -73,6 +87,7 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
   rejectWorkerRowsUnsupported(options);
 
   const selected = selectedColumns(options);
+  const filters = normalizeWhere(options.where);
   const shards = findCsvSafeShards(path, workerCount, options.delimiter ?? ',');
   if (shards.length === 0) {
     return;
@@ -143,7 +158,7 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
           selectedColumns: selected,
           shard,
           shardIndex,
-          whereEquals: whereEqualsFilter(options.where),
+          filters,
         } satisfies WorkerRowsMessage,
       );
     });
@@ -191,25 +206,41 @@ function rejectWorkerRowsUnsupported(options: CsvApiFileOptions): void {
   if (options.strict === true) {
     throw new Error('parallel rows do not support strict CSV validation');
   }
-  ensureRowsWhereSupported(options.where);
 }
 
-function ensureRowsWhereSupported(where: CsvWhereFilter | undefined): void {
-  if (where === undefined || 'equals' in where) {
-    return;
-  }
-  throw new Error(
-    'parallel rows support only where.equals; use count() for where.in or where.startsWith, or pre-filter inside the worker consumer',
-  );
-}
-
-function whereEqualsFilter(where: CsvWhereFilter | undefined): WorkerEqualsFilterMessage | undefined {
-  if (where === undefined || !('equals' in where)) {
+function normalizeWhere(where: CsvWhereFilter | undefined): WorkerFilterMessage[] | undefined {
+  if (where === undefined) {
     return undefined;
   }
+  const predicates = 'all' in where ? where.all : [where];
+  if (predicates.length === 0) {
+    throw new Error('where.all must contain at least one filter');
+  }
+  if (predicates.length > MAX_FILTER_COUNT) {
+    throw new RangeError(`filter count out of range: ${predicates.length}`);
+  }
+  return predicates.map(normalizePredicate);
+}
+
+function normalizePredicate(predicate: CsvWherePredicate): WorkerFilterMessage {
+  if ('equals' in predicate) {
+    return {
+      column: normalizeFilterColumn(predicate.column),
+      value: normalizeFieldValue(predicate.equals),
+    };
+  }
+  if ('in' in predicate) {
+    if (predicate.in.length === 0) {
+      throw new RangeError('filter values must not be empty');
+    }
+    return {
+      column: normalizeFilterColumn(predicate.column),
+      values: predicate.in.map((value) => normalizeFieldValue(value)),
+    };
+  }
   return {
-    column: normalizeFilterColumn(where.column),
-    value: normalizeFieldValue(where.equals),
+    column: normalizeFilterColumn(predicate.column),
+    prefix: normalizeFieldValue(predicate.startsWith),
   };
 }
 

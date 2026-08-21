@@ -22,9 +22,22 @@ void* csv_parser_finish_fixed_batch(void* parser, uint32_t fixed_columns);
 void* csv_parser_write_projected_batch(void* parser, const uint8_t* data, uint64_t len, bool final, bool has_projection,
                                        const uint32_t* selected_columns, uint64_t selected_columns_len, bool has_filter,
                                        uint32_t filter_column, const uint8_t* filter_value, uint64_t filter_value_len);
+void* csv_parser_write_projected_batch_where_all(void* parser, const uint8_t* data, uint64_t len, bool final,
+                                                 bool has_projection, const uint32_t* selected_columns,
+                                                 uint64_t selected_columns_len, const uint32_t* filter_descriptors,
+                                                 uint64_t filter_count, const uint8_t* values_data,
+                                                 uint64_t values_data_len, const uint32_t* value_offsets,
+                                                 uint64_t total_value_count);
 void* csv_parser_find_split_offsets(const char* path, uint64_t shard_count, uint8_t delimiter);
 uint64_t csv_parser_write_count(void* parser, const uint8_t* data, uint64_t len, bool final);
 uint64_t csv_parser_finish_count(void* parser);
+uint64_t csv_parser_write_count_where_all(void* parser, const uint8_t* data, uint64_t len, bool final,
+                                          const uint32_t* filter_descriptors, uint64_t filter_count,
+                                          const uint8_t* values_data, uint64_t values_data_len,
+                                          const uint32_t* value_offsets, uint64_t total_value_count);
+uint64_t csv_parser_finish_count_where_all(void* parser, const uint32_t* filter_descriptors, uint64_t filter_count,
+                                           const uint8_t* values_data, uint64_t values_data_len,
+                                           const uint32_t* value_offsets, uint64_t total_value_count);
 uint64_t csv_parser_write_count_where_equals(void* parser, const uint8_t* data, uint64_t len, bool final,
                                              uint32_t filter_column, const uint8_t* filter_value,
                                              uint64_t filter_value_len);
@@ -631,6 +644,145 @@ TEST_CASE("native C ABI validates filter column indexes") {
     void* parser = csv_parser_create(0, ',');
     REQUIRE(parser != nullptr);
     REQUIRE(csv_parser_write_count_where_equals(parser, nullptr, 0, true, 2025, nullptr, 0) == 0);
+    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
+    csv_parser_destroy(parser);
+  }
+}
+
+TEST_CASE("native C ABI evaluates AND filters across columns and chunks") {
+  const std::string input = "alpha,SP,1\nalpine,RJ,2\nalbatross,SP,3\nalpha,SP\n";
+  const std::string values = "alSP13";
+  const uint32_t value_offsets[] = {0, 2, 4, 5, 6};
+  const uint32_t filters[] = {
+      3, 0, 0, 1, // starts with "al"
+      1, 1, 1, 1, // equals "SP"
+      2, 2, 2, 2, // in {"1", "3"}
+  };
+
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  uint64_t rows = 0;
+  for (size_t index = 0; index < input.size(); ++index) {
+    rows += csv_parser_write_count_where_all(parser, reinterpret_cast<const uint8_t*>(input.data() + index), 1, false,
+                                             filters, 3, reinterpret_cast<const uint8_t*>(values.data()), values.size(),
+                                             value_offsets, 4);
+  }
+  rows += csv_parser_finish_count_where_all(parser, filters, 3, reinterpret_cast<const uint8_t*>(values.data()),
+                                            values.size(), value_offsets, 4);
+  REQUIRE(rows == 2);
+  csv_parser_destroy(parser);
+
+  const uint32_t selected_columns[] = {0, 2};
+  parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  void* batch = csv_parser_write_projected_batch_where_all(
+      parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true, true, selected_columns,
+      std::size(selected_columns), filters, 3, reinterpret_cast<const uint8_t*>(values.data()), values.size(),
+      value_offsets, 4);
+  REQUIRE(batch != nullptr);
+  REQUIRE(csv_batch_row_count(batch) == 2);
+  REQUIRE(csv_batch_total_fields(batch) == 4);
+  REQUIRE(std::string(reinterpret_cast<const char*>(csv_batch_data_ptr(batch)), csv_batch_data_len(batch)) ==
+          "alpha1albatross3");
+  csv_batch_destroy(batch);
+  csv_parser_destroy(parser);
+}
+
+TEST_CASE("native C ABI evaluates multiple filters on one column") {
+  const std::string input = "alpha,1\nalpine,2\nalpha,3\n";
+  const std::string values = "alalpha";
+  const uint32_t value_offsets[] = {0, 2, 7};
+  const uint32_t filters[] = {
+      3, 0, 0, 1, 1, 0, 1, 1,
+  };
+
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  REQUIRE(csv_parser_write_count_where_all(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true,
+                                           filters, 2, reinterpret_cast<const uint8_t*>(values.data()), values.size(),
+                                           value_offsets, 2) == 2);
+  csv_parser_destroy(parser);
+}
+
+TEST_CASE("native C ABI caches each large IN filter") {
+  const std::string input = "alpha,SP\nalpha,RJ\nbeta,SP\n";
+  const std::string_view needles[] = {
+      "alpha", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "SP", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
+  };
+  std::string values;
+  std::vector<uint32_t> value_offsets{0};
+  for (const auto needle : needles) {
+    values.append(needle);
+    value_offsets.push_back(static_cast<uint32_t>(values.size()));
+  }
+  const uint32_t filters[] = {
+      2, 0, 0, 8, 2, 1, 8, 8,
+  };
+
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  uint64_t rows = 0;
+  for (size_t offset = 0; offset < input.size(); offset += 3) {
+    const size_t chunk_size = std::min<size_t>(3, input.size() - offset);
+    rows += csv_parser_write_count_where_all(
+        parser, reinterpret_cast<const uint8_t*>(input.data() + offset), chunk_size, false, filters, 2,
+        reinterpret_cast<const uint8_t*>(values.data()), values.size(), value_offsets.data(), std::size(needles));
+  }
+  rows += csv_parser_finish_count_where_all(parser, filters, 2, reinterpret_cast<const uint8_t*>(values.data()),
+                                            values.size(), value_offsets.data(), std::size(needles));
+  REQUIRE(rows == 1);
+  csv_parser_destroy(parser);
+}
+
+TEST_CASE("native C ABI accepts an empty IN filter") {
+  const std::string input = "a\nb\n";
+  const uint32_t value_offsets[] = {0};
+  const uint32_t filters[] = {2, 0, 0, 0};
+
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  REQUIRE(csv_parser_write_count_where_all(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true,
+                                           filters, 1, nullptr, 0, value_offsets, 0) == 0);
+  REQUIRE(std::string_view(csv_parser_last_error(parser)).empty());
+  csv_parser_destroy(parser);
+}
+
+TEST_CASE("native C ABI validates AND filter descriptors") {
+  const uint8_t value[] = {'a'};
+  const uint32_t offsets[] = {0, 1};
+
+  SECTION("kind") {
+    const uint32_t filters[] = {0, 0, 0, 1};
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, filters, 1, value, 1, offsets, 1) == 0);
+    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("kind") != std::string_view::npos);
+    csv_parser_destroy(parser);
+  }
+
+  SECTION("descriptor range") {
+    const uint32_t filters[] = {2, 0, 1, 1};
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, filters, 1, value, 1, offsets, 1) == 0);
+    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("range") != std::string_view::npos);
+    csv_parser_destroy(parser);
+  }
+
+  SECTION("offset coverage") {
+    const uint32_t filters[] = {1, 0, 0, 1};
+    const uint32_t short_offsets[] = {0, 0};
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, filters, 1, value, 1, short_offsets, 1) == 0);
+    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("cover") != std::string_view::npos);
+    csv_parser_destroy(parser);
+  }
+
+  SECTION("filter count") {
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, nullptr, 2025, value, 1, offsets, 1) == 0);
     REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
     csv_parser_destroy(parser);
   }

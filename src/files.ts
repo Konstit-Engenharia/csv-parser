@@ -137,6 +137,7 @@ export async function* parseCsvFileProjected(
   const projectionOptions: CsvNativeProjectionOptions = {
     selectedColumns: options.selectedColumns,
     equalsFilter: options.equalsFilter,
+    filters: options.filters,
   };
   for await (const chunk of input.chunks()) {
     const batch = parser.writeProjectedBatch(chunk, projectionOptions);
