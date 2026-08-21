@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 export type { Pointer } from 'bun:ffi';
 export { toArrayBuffer } from 'bun:ffi';
 
+export type NativePointer = Pointer | bigint;
+
 export const EMPTY_BUFFER = new Uint8Array(1);
 export const EMPTY_U32 = new Uint32Array(1);
 export const DEFAULT_CHUNK_SIZE = 1024 * 1024;
@@ -304,7 +306,7 @@ function loadNative(): Library<typeof CSV_SYMBOLS> {
   return dlopen(resolve(libraryPath), CSV_SYMBOLS);
 }
 
-export function requirePtr(ptr: Pointer | null): Pointer {
+export function requirePtr(ptr: NativePointer | null): NativePointer {
   if (ptr === null) {
     throw new Error('native CSV pointer is null');
   }

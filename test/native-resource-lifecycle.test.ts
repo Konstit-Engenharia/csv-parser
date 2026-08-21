@@ -4,9 +4,15 @@ import {
   test,
 } from 'bun:test';
 import { NativeCsvParser } from '../src/index.ts';
+import { requirePtr } from '../src/native.ts';
 import { readCsvFixture } from './fixtures.ts';
 
 describe('native resource lifecycle', () => {
+  test('preserves bigint pointers and rejects null pointers', () => {
+    expect(requirePtr(123n)).toBe(123n);
+    expect(() => requirePtr(null)).toThrow('native CSV pointer is null');
+  });
+
   test('parser and row batches expose dispose state and use-after-close errors', () => {
     const parser = new NativeCsvParser();
     expect(parser.closed).toBe(false);

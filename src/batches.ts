@@ -1,7 +1,7 @@
-import type { Pointer } from 'bun:ffi';
 import {
   EMPTY_BUFFER,
   native,
+  type NativePointer,
   requirePtr,
   toArrayBuffer,
   u64ToSafeNumber,
@@ -131,13 +131,13 @@ export class NativeCsvRowView {
 }
 
 export class NativeCsvBatch {
-  #handle: Pointer | null;
+  #handle: NativePointer | null;
   #data: Buffer | undefined;
   #dataView: Uint8Array | undefined;
   #rowOffsets: BigUint64Array | undefined;
   #fieldOffsets: BigUint64Array | undefined;
 
-  constructor(handle: Pointer) {
+  constructor(handle: NativePointer) {
     this.#handle = handle;
   }
 
@@ -440,7 +440,7 @@ export class NativeCsvBatch {
     this.close();
   }
 
-  #requireHandle(): Pointer {
+  #requireHandle(): NativePointer {
     if (this.#handle === null) {
       throw new Error('native CSV batch is closed');
     }

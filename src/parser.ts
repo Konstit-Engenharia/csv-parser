@@ -1,7 +1,7 @@
-import type { Pointer } from 'bun:ffi';
 import { NativeCsvBatch } from './batches.ts';
 import {
   native,
+  type NativePointer,
   u64ToSafeNumber,
 } from './native.ts';
 import {
@@ -22,12 +22,12 @@ import type {
   CsvStartsWithFilter,
 } from './types.ts';
 
-const nativeCsvParserFinalizer = new FinalizationRegistry<Pointer>((handle) => {
+const nativeCsvParserFinalizer = new FinalizationRegistry<NativePointer>((handle) => {
   native.symbols.csv_parser_destroy(handle);
 });
 
 export class NativeCsvParser {
-  #handle: Pointer | null;
+  #handle: NativePointer | null;
   readonly #strict: boolean;
   readonly #fixedColumns: number | undefined;
 
@@ -329,7 +329,7 @@ export class NativeCsvParser {
     this.close();
   }
 
-  #requireHandle(): Pointer {
+  #requireHandle(): NativePointer {
     if (this.#handle === null) {
       throw new Error('native CSV parser is closed');
     }
@@ -340,8 +340,7 @@ export class NativeCsvParser {
     if (this.#handle === null) {
       return 'parser is closed';
     }
-    const value = native.symbols.csv_parser_last_error(this.#handle);
-    return value.toString();
+    return native.symbols.csv_parser_last_error(this.#handle) ?? 'native parser error unavailable';
   }
 
   #rejectStrictUnsupported(operation: string): void {
