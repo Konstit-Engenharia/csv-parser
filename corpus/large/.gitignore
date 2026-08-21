@@ -1,2 +1,4 @@
-formatted_addresses_tagged.random.tsv.gz
-formatted_addresses_tagged.random.tsv
+*.csv
+*.tsv
+*.csv.gz
+*.tsv.gz
