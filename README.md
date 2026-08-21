@@ -63,7 +63,7 @@ Publication must use this verified artifact; `prepack` rejects packages missing 
 ```ts
 import { csv } from '@konstit/csv-parser';
 
-const path = 'example.csv';
+const path = 'corpus/large/example.csv';
 
 for await (
   const rows of csv.rows(path, {
@@ -78,7 +78,7 @@ for await (
 }
 ```
 
-In this repo, `example.csv` is semicolon-delimited. Pass `delimiter: ';'` for examples and benchmarks that read it.
+In this repo, `corpus/large/example.csv` is semicolon-delimited. Pass `delimiter: ';'` for examples and benchmarks that read it.
 
 ## High-Level API
 
@@ -327,7 +327,7 @@ Before every push, the hook builds the host's native libraries and the Linux x64
 formatting, runs the linters and type checker, and runs both the Bun and native test suites. Building Linux x64 requires
 Docker to be installed and running. Run the same checks manually with `bun run prepush`.
 
-Full-file benchmarks against `example.csv` are long CPU-bound runs. Run them separately when comparing numbers.
+Full-file benchmarks against `corpus/large/example.csv` are long CPU-bound runs. Run them separately when comparing numbers.
 
 Small correctness/performance smoke:
 

@@ -9,7 +9,7 @@ import { NativeCsvParser } from '../src/index.ts';
  * should prefer `csv.rows()`, which manages file reads, parser finalization,
  * and native batch cleanup automatically.
  */
-const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
+const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'corpus/large/example.csv';
 // The stream chunk size controls I/O granularity. Neither parser assumes that a
 // chunk ends at a CSV record boundary.
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);

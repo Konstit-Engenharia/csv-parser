@@ -8,7 +8,7 @@ import {
   workerPool,
 } from '../src/index.ts';
 
-const path = 'example.csv';
+const path = 'corpus/large/example.csv';
 declare const dynamicStrict: boolean;
 declare const optionalEquals: CsvWhereEqualsFilter | undefined;
 const autoCompression: CsvCompression = 'auto';

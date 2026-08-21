@@ -8,7 +8,7 @@ import {
   defineRowsOptions,
 } from '../src/index.ts';
 
-const path = 'example.csv';
+const path = 'corpus/large/example.csv';
 const columns = [0, 2] as const;
 const commonDelimiter: CsvDelimiter = ';';
 const arbitraryDelimiter: CsvDelimiter = '@';

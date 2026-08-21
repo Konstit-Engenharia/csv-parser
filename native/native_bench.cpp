@@ -280,7 +280,7 @@ void bench_project_filter() {
 } // namespace
 
 int main() {
-  const auto path = string_env("CSV_NATIVE_BENCH_FILE", "example.csv");
+  const auto path = string_env("CSV_NATIVE_BENCH_FILE", "corpus/large/example.csv");
   const auto byte_limit = parse_u64_env("CSV_NATIVE_BENCH_BYTES", default_bytes);
   const auto filter = string_env("CSV_NATIVE_BENCH_FILTER", ".*");
   const auto format = string_env("CSV_NATIVE_BENCH_FORMAT", "mitata");

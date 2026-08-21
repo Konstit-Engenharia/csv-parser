@@ -5,7 +5,7 @@ import { csv } from '../src/index.ts';
  * CSV record. Dividing a file at arbitrary byte positions would be incorrect
  * when fields contain embedded newlines.
  */
-const FILE = Bun.env['CSV_EXAMPLE_FILE'] ?? Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
+const FILE = Bun.env['CSV_EXAMPLE_FILE'] ?? Bun.env['CSV_BENCH_FILE'] ?? 'corpus/large/example.csv';
 const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 const SHARDS = Number(Bun.env['CSV_SHARD_COUNT'] ?? 4);
 

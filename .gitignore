@@ -57,7 +57,7 @@ build/Release
 build/
 /compile_commands.json
 /profiles/
-example.csv
+corpus/large/example.csv
 
 # Dependency directories
 node_modules/

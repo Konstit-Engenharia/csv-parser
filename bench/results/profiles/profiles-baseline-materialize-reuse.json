@@ -1,6 +1,6 @@
 {
   "mode": "materialize-reuse",
-  "file": "example.csv",
+  "file": "corpus/large/example.csv",
   "bytes": 6780467695,
   "chunkSize": 8388608,
   "delimiter": ";",

@@ -4,7 +4,7 @@ import { matchesBenchmarkName } from '../benchmark-filter.ts';
 
 export type ExampleBenchCase = readonly [name: string, fn: () => Promise<number> | number];
 
-export const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
+export const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'corpus/large/example.csv';
 export const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
 export const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 export const SELECTED_COLUMNS = parseColumns(Bun.env['CSV_BENCH_COLUMNS'] ?? '0,4,19');

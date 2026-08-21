@@ -6,7 +6,7 @@
  * These values cross an environment boundary; the public API performs final
  * validation when an operation starts.
  */
-export const FILE = Bun.env['CSV_EXAMPLE_FILE'] ?? Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
+export const FILE = Bun.env['CSV_EXAMPLE_FILE'] ?? Bun.env['CSV_BENCH_FILE'] ?? 'corpus/large/example.csv';
 export const DELIMITER = Bun.env['CSV_EXAMPLE_DELIMITER'] ?? Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 // LIMIT affects printing only. It does not cap parsing work for APIs that lack
 // cooperative early termination, such as a synchronous per-batch callback.

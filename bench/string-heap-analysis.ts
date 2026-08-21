@@ -7,7 +7,7 @@ import { NativeCsvParser } from '../src/index.ts';
 
 type Mode = 'selected' | 'full' | 'views';
 
-const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'example.csv';
+const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'corpus/large/example.csv';
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
 const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
 const MODE = (Bun.env['CSV_STRING_HEAP_MODE'] ?? Bun.argv[2] ?? 'selected') as Mode;
