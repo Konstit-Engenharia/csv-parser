@@ -313,7 +313,7 @@ Example environment variables:
 ## Validation
 
 ```sh
-bun test
+bun run test
 bun run lint
 ```
 
