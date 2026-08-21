@@ -245,6 +245,37 @@ const CSV_SYMBOLS = {
     returns: 'u64',
   },
   // C signature:
+  // void* csv_zip_reader_create(const char* path, const uint8_t* entry_name, uint64_t entry_name_len,
+  //                             uint64_t maximum_output_size, uint32_t maximum_compression_ratio);
+  csv_zip_reader_create: {
+    args: ['cstring', 'buffer', 'u64', 'u64', 'u32'],
+    returns: 'ptr',
+  },
+  // C signature:
+  // void csv_zip_reader_destroy(void* reader);
+  csv_zip_reader_destroy: {
+    args: ['ptr'],
+    returns: 'void',
+  },
+  // C signature:
+  // uint64_t csv_zip_reader_read(void* reader, uint8_t* output, uint64_t output_capacity);
+  csv_zip_reader_read: {
+    args: ['ptr', 'buffer', 'u64'],
+    returns: 'u64',
+  },
+  // C signature:
+  // int csv_zip_reader_status(void* reader);
+  csv_zip_reader_status: {
+    args: ['ptr'],
+    returns: 'int',
+  },
+  // C signature:
+  // const char* csv_zip_reader_last_error(void* reader);
+  csv_zip_reader_last_error: {
+    args: ['ptr'],
+    returns: 'cstring',
+  },
+  // C signature:
   // const char* csv_parser_last_error(void* parser);
   csv_parser_last_error: {
     args: ['ptr'],

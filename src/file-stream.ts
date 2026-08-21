@@ -2,9 +2,12 @@ import { createReadStream } from 'node:fs';
 import { extname } from 'node:path';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import type {
+  CsvCompression,
   CsvDelimiter,
   CsvFileOptions,
+  CsvZipCompression,
 } from './types.ts';
+import { readZipEntryChunks } from './zip-reader.ts';
 
 const DELIMITER_PROBE_SIZE = 64 * 1024;
 const MAX_DELIMITER_PROBE_ROWS = 128;
@@ -87,7 +90,7 @@ export async function prepareCsvFileInput(
     }
 
     const probe = copyProbePrefix(bufferedChunks, bufferedByteLength);
-    const delimiter = detectDelimiter(path, probe, sourceEnded);
+    const delimiter = detectDelimiter(delimiterHintPath(path, options.compression), probe, sourceEnded);
     let opened = false;
     return {
       delimiter,
@@ -116,10 +119,21 @@ export function readCsvFileChunks(
   if (options.compression === undefined) {
     return createReadStream(path, { highWaterMark: chunkSize });
   }
+  if (isZipCompression(options.compression)) {
+    return readZipEntryChunks(path, options.compression, chunkSize);
+  }
   if (options.compression === 'auto') {
     return readAutoDetectedCsvFileChunks(path, chunkSize);
   }
   return decompressedCsvFileChunks(path, options.compression, chunkSize);
+}
+
+function isZipCompression(compression: CsvCompression): compression is CsvZipCompression {
+  return typeof compression === 'object' && compression.format === 'zip';
+}
+
+function delimiterHintPath(path: string, compression: CsvCompression | undefined): string {
+  return compression !== undefined && isZipCompression(compression) ? compression.entry : path;
 }
 
 export function rejectCompressedSharding(

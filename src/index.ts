@@ -42,6 +42,7 @@ export type {
   CsvWhereInFilter,
   CsvWhereStartsWithFilter,
   CsvWorkerPoolOptions,
+  CsvZipCompression,
   NativeCsvRowCallback,
 } from './types.ts';
 

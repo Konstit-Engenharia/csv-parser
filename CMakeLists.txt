@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(konstit_csv_parser LANGUAGES CXX)
+project(konstit_csv_parser LANGUAGES C CXX)
 
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
   message(FATAL_ERROR "konstit_csv_parser supports Clang and AppleClang only")
@@ -53,6 +53,19 @@ set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(ZLIB_COMPAT OFF CACHE BOOL "" FORCE)
+set(ZLIB_ALIASES OFF CACHE BOOL "" FORCE)
+set(WITH_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(WITH_BENCHMARK_APPS OFF CACHE BOOL "" FORCE)
+set(WITH_FUZZERS OFF CACHE BOOL "" FORCE)
+set(WITH_GTEST OFF CACHE BOOL "" FORCE)
+set(WITH_GZFILEOP OFF CACHE BOOL "" FORCE)
+set(WITH_NATIVE_INSTRUCTIONS ON CACHE BOOL "" FORCE)
+if(CSV_NATIVE_ARCH STREQUAL "x86_64")
+  set(NATIVE_ARCH_OVERRIDE "-mavx2" CACHE STRING "" FORCE)
+else()
+  set(NATIVE_ARCH_OVERRIDE "-march=armv8-a+crc+simd" CACHE STRING "" FORCE)
+endif()
 
 FetchContent_Declare(
   highway
@@ -70,10 +83,26 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
   SYSTEM
 )
+FetchContent_Declare(
+  zlib_ng
+  GIT_REPOSITORY https://github.com/zlib-ng/zlib-ng.git
+  GIT_TAG 12731092979c6d07f42da27da673a9f6c7b13586 # 2.3.3
+  GIT_SHALLOW FALSE
+  EXCLUDE_FROM_ALL
+  SYSTEM
+)
 FetchContent_MakeAvailable(highway unordered_dense)
+set(CSV_NATIVE_BUILD_TESTING "${BUILD_TESTING}")
+set(BUILD_TESTING OFF)
+FetchContent_MakeAvailable(zlib_ng)
+set(BUILD_TESTING "${CSV_NATIVE_BUILD_TESTING}")
+set_target_properties(zlib-ng PROPERTIES
+  C_VISIBILITY_PRESET hidden
+)
 
 add_library(csv_native SHARED
   native/csv_parser.cpp
+  native/zip_reader.cpp
 )
 
 target_compile_features(csv_native PRIVATE cxx_std_20)
@@ -108,7 +137,7 @@ endfunction()
 csv_native_target_options(csv_native)
 target_compile_options(csv_native PRIVATE -fno-exceptions -fno-rtti)
 target_link_options(csv_native PRIVATE -fno-exceptions -fno-rtti)
-target_link_libraries(csv_native PRIVATE hwy unordered_dense::unordered_dense)
+target_link_libraries(csv_native PRIVATE hwy unordered_dense::unordered_dense zlib-ng::zlibstatic)
 
 set_target_properties(csv_native PROPERTIES
   CXX_VISIBILITY_PRESET hidden

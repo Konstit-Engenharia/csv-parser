@@ -13,6 +13,8 @@ declare const dynamicStrict: boolean;
 declare const optionalEquals: CsvWhereEqualsFilter | undefined;
 const autoCompression: CsvCompression = 'auto';
 void autoCompression;
+const zipCompression: CsvCompression = { entry: 'data.csv', format: 'zip' };
+void zipCompression;
 const autoDelimiter: CsvDelimiter = 'auto';
 void autoDelimiter;
 
@@ -60,6 +62,7 @@ void csv.rows(path, { where: { column: 1, equals: 'SP' } });
 void csv.rows(path, { where: optionalEquals });
 void csv.rows(path, { compression: 'gzip' });
 void csv.rows(path, { compression: 'auto' });
+void csv.rows(path, { compression: { entry: 'data.csv', format: 'zip' } });
 void csv.rows(path, { delimiter: 'auto' });
 void csv.batches(path, { compression: 'brotli' });
 void csv.batches(path, { delimiter: 'auto' });
@@ -72,6 +75,9 @@ void csv.parse(Buffer.from(''), { compression: 'gzip' });
 
 // @ts-expect-error compressed rows do not support worker sharding
 void csv.rows(path, { compression: 'gzip', workerCount: 2 });
+
+// @ts-expect-error ZIP rows do not support worker sharding
+void csv.rows(path, { compression: { entry: 'data.csv', format: 'zip' }, workerCount: 2 });
 
 // @ts-expect-error direct parallel rows do not support compressed input
 void parallelRows(path, { compression: 'gzip', workerCount: 2 });

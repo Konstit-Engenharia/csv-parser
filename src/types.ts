@@ -1,7 +1,13 @@
 import type { NativeCsvRowView } from './batches.ts';
 
 export type CsvEncoding = 'utf8' | 'latin1' | 'iso88591' | 'iso-8859-1';
-export type CsvCompression = Bun.CompressionFormat | 'auto';
+export interface CsvZipCompression {
+  format: 'zip';
+  entry: string;
+  maxCompressionRatio?: number;
+  maxDecompressedBytes?: number;
+}
+export type CsvCompression = Bun.CompressionFormat | 'auto' | CsvZipCompression;
 export type CsvDelimiter =
   | 'auto'
   | ','

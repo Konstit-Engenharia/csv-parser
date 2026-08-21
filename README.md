@@ -99,6 +99,10 @@ const compressed = csv.rows('data.csv.gz', {
   compression: 'auto',
   delimiter: 'auto',
 });
+
+const zipped = csv.rows('export.zip', {
+  compression: { format: 'zip', entry: 'data/export.csv' },
+});
 ```
 
 Supported helpers:
@@ -120,6 +124,12 @@ Decompression streams into the parser and does not buffer the complete file. `au
 combines signatures with `.gz`, `.gzip`, `.zst`, `.zstd`, `.br`, `.zz`, `.zlib`, `.deflate`, or `.deflate-raw`.
 Signature and extension mismatches fail. A `.deflate` file without a zlib wrapper requires explicit `deflate-raw`.
 Compressed input does not support worker pools, parallel operations, or CSV byte-offset sharding.
+
+ZIP input uses `compression: { format: 'zip', entry: 'path/in/archive.csv' }`. The selected stored or DEFLATE entry
+is decoded in bounded native chunks with zlib-ng AVX2 or NEON acceleration. Entry names must match exactly. Encrypted
+entries and compression methods other than stored and DEFLATE fail. The defaults limit output to 64 GiB and the
+declared compression ratio to 1000. Use `maxDecompressedBytes` and `maxCompressionRatio` to set lower application
+limits or to permit a larger trusted entry.
 
 Serial file operations also accept `delimiter: 'auto'`. Detection probes at most 64 KiB of decompressed data and
 ignores separators inside quoted fields. It checks comma, tab, semicolon, pipe, colon, caret, and tilde. The `.csv`,

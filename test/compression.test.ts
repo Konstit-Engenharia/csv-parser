@@ -56,6 +56,40 @@ beforeAll(async () => {
   await Bun.write(join(temporaryDirectory, 'ambiguous.deflate'), compress(source, 'deflate-raw'));
   await Bun.write(join(temporaryDirectory, 'plain.csv.gz'), source);
   await Bun.write(join(temporaryDirectory, 'plain.tsv'), source);
+  await Bun.write(
+    join(temporaryDirectory, 'input.zip'),
+    createZip([
+      { data: Buffer.from('ignored'), method: 0, name: 'README.txt' },
+      { data: source, dataDescriptor: true, method: 8, name: 'nested/input.tsv' },
+    ]),
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'stored.zip'),
+    createZip([{ data: source, method: 0, name: 'input.tsv' }]),
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'corrupt.zip'),
+    createZip([{ crc32: (crc32(source) ^ 1) >>> 0, data: source, method: 8, name: 'input.tsv' }]),
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'duplicate.zip'),
+    createZip([
+      { data: source, method: 8, name: 'input.tsv' },
+      { data: source, method: 8, name: 'input.tsv' },
+    ]),
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'encrypted.zip'),
+    createZip([{ data: source, flags: 1, method: 8, name: 'input.tsv' }]),
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'unsupported.zip'),
+    createZip([{ data: source, method: 99, name: 'input.tsv' }]),
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'high-ratio.zip'),
+    createZip([{ data: Buffer.from('a;b\n'.repeat(4_096)), method: 8, name: 'input.tsv' }]),
+  );
 });
 
 afterAll(async () => {
@@ -191,6 +225,82 @@ describe('compressed CSV file streams', () => {
     expect(error.message.length).toBeGreaterThan(0);
   });
 
+  test('streams a selected deflated ZIP entry through serial APIs', async () => {
+    const compression = { entry: 'nested/input.tsv', format: 'zip' } as const;
+    const rows: string[][] = [];
+    for await (
+      const batch of csv.rows(join(temporaryDirectory, 'input.zip'), {
+        chunkSize: 5,
+        compression,
+        delimiter: 'auto',
+      })
+    ) {
+      rows.push(...batch);
+    }
+
+    expect(rows).toEqual(expectedRows);
+    expect(
+      await csv.count(join(temporaryDirectory, 'input.zip'), {
+        chunkSize: 7,
+        compression,
+        delimiter: ';',
+      }),
+    ).toBe(4);
+  });
+
+  test('streams a stored ZIP entry', async () => {
+    expect(
+      await csv.count(join(temporaryDirectory, 'stored.zip'), {
+        chunkSize: 3,
+        compression: { entry: 'input.tsv', format: 'zip' },
+        delimiter: ';',
+      }),
+    ).toBe(4);
+  });
+
+  test('rejects invalid ZIP archives and configured limits', async () => {
+    const options = (entry = 'input.tsv') => ({
+      compression: { entry, format: 'zip' } as const,
+      delimiter: ';' as const,
+    });
+
+    expect(
+      (await rejectedError(csv.count(join(temporaryDirectory, 'input.zip'), options('missing.tsv')))).message,
+    ).toContain('requested ZIP entry was not found');
+    expect(
+      (await rejectedError(csv.count(join(temporaryDirectory, 'corrupt.zip'), options()))).message,
+    ).toContain('CRC32 check failed');
+    expect(
+      (await rejectedError(csv.count(join(temporaryDirectory, 'duplicate.zip'), options()))).message,
+    ).toContain('duplicate entries');
+    expect(
+      (await rejectedError(csv.count(join(temporaryDirectory, 'encrypted.zip'), options()))).message,
+    ).toContain('encrypted ZIP entries are not supported');
+    expect(
+      (await rejectedError(csv.count(join(temporaryDirectory, 'unsupported.zip'), options()))).message,
+    ).toContain('compression method is not supported');
+    expect(
+      (
+        await rejectedError(
+          csv.count(join(temporaryDirectory, 'stored.zip'), {
+            compression: { entry: 'input.tsv', format: 'zip', maxDecompressedBytes: source.byteLength - 1 },
+            delimiter: ';',
+          }),
+        )
+      ).message,
+    ).toContain('maximum decompressed byte count');
+    expect(
+      (
+        await rejectedError(
+          csv.count(join(temporaryDirectory, 'high-ratio.zip'), {
+            compression: { entry: 'input.tsv', format: 'zip', maxCompressionRatio: 2 },
+            delimiter: ';',
+          }),
+        )
+      ).message,
+    ).toContain('maximum compression ratio');
+  });
+
   test('rejects compression for the in-memory parse API at runtime', async () => {
     const options = { compression: 'gzip' } as unknown as Parameters<typeof csv.parse>[1];
     expect((await rejectedError(csv.parse(source, options))).message).toContain('parse() does not support compression');
@@ -248,6 +358,84 @@ function compress(input: Uint8Array<ArrayBuffer>, format: Bun.CompressionFormat)
     case 'zstd':
       return Bun.zstdCompressSync(input);
   }
+}
+
+interface TestZipEntry {
+  crc32?: number;
+  data: Uint8Array;
+  dataDescriptor?: boolean;
+  flags?: number;
+  method: 0 | 8 | 99;
+  name: string;
+}
+
+function createZip(entries: readonly TestZipEntry[]): Uint8Array {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let localOffset = 0;
+
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name);
+    const data = Buffer.from(entry.data);
+    const compressed = entry.method === 8 ? deflateRawSync(data) : data;
+    const checksum = entry.crc32 ?? crc32(data);
+    const flags = (entry.flags ?? 0) | (entry.dataDescriptor === true ? 1 << 3 : 0);
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(flags, 6);
+    localHeader.writeUInt16LE(entry.method, 8);
+    if (entry.dataDescriptor !== true) {
+      localHeader.writeUInt32LE(checksum, 14);
+      localHeader.writeUInt32LE(compressed.byteLength, 18);
+      localHeader.writeUInt32LE(data.byteLength, 22);
+    }
+    localHeader.writeUInt16LE(name.byteLength, 26);
+
+    const dataDescriptor = entry.dataDescriptor === true ? Buffer.alloc(16) : Buffer.alloc(0);
+    if (entry.dataDescriptor === true) {
+      dataDescriptor.writeUInt32LE(0x08074b50, 0);
+      dataDescriptor.writeUInt32LE(checksum, 4);
+      dataDescriptor.writeUInt32LE(compressed.byteLength, 8);
+      dataDescriptor.writeUInt32LE(data.byteLength, 12);
+    }
+    localParts.push(localHeader, name, compressed, dataDescriptor);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(flags, 8);
+    centralHeader.writeUInt16LE(entry.method, 10);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(compressed.byteLength, 20);
+    centralHeader.writeUInt32LE(data.byteLength, 24);
+    centralHeader.writeUInt16LE(name.byteLength, 28);
+    centralHeader.writeUInt32LE(localOffset, 42);
+    centralParts.push(centralHeader, name);
+
+    localOffset += localHeader.byteLength + name.byteLength + compressed.byteLength + dataDescriptor.byteLength;
+  }
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const endRecord = Buffer.alloc(22);
+  endRecord.writeUInt32LE(0x06054b50, 0);
+  endRecord.writeUInt16LE(entries.length, 8);
+  endRecord.writeUInt16LE(entries.length, 10);
+  endRecord.writeUInt32LE(centralDirectory.byteLength, 12);
+  endRecord.writeUInt32LE(localOffset, 16);
+  return Buffer.concat([...localParts, centralDirectory, endRecord]);
+}
+
+function crc32(data: Uint8Array): number {
+  let crc = 0xffff_ffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; ++bit) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb8_8320 : 0);
+    }
+  }
+  return (crc ^ 0xffff_ffff) >>> 0;
 }
 
 async function rejectedError(promise: Promise<unknown>): Promise<Error> {
