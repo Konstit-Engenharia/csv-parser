@@ -1,6 +1,7 @@
 import type { NativeCsvRowView } from './batches.ts';
 
 export type CsvEncoding = 'utf8' | 'latin1' | 'iso88591' | 'iso-8859-1';
+export type CsvCompression = Bun.CompressionFormat | 'auto';
 export type CsvDelimiter =
   | ','
   | ';'
@@ -37,7 +38,12 @@ export interface CsvParserOptions {
 
 export interface CsvFileOptions extends CsvParserOptions {
   chunkSize?: number;
+  compression?: CsvCompression;
 }
+
+export type CsvShardingOptions = Omit<CsvFileOptions, 'compression'> & {
+  compression?: never;
+};
 
 export type CsvWhereFilter =
   | CsvWhereEqualsFilter
@@ -120,16 +126,20 @@ export type CsvSingleThreadRowsOptions<TColumns extends CsvColumns | undefined =
 export type CsvParallelRowsOptions<TColumns extends CsvColumns | undefined = undefined> =
   & Omit<
     CsvApiOptionsWithoutSelection,
-    'where' | 'workerCount' | 'strict'
+    'compression' | 'where' | 'workerCount' | 'strict'
   >
   & CsvColumnSelection<TColumns>
   & {
+    compression?: never;
     where?: CsvWhereEqualsFilter | undefined;
     workerCount: number;
     strict?: false | undefined;
   };
 
-export type CsvParseOptions<TColumns extends CsvColumns | undefined = undefined> = CsvSingleThreadRowsOptions<TColumns>;
+export type CsvParseOptions<TColumns extends CsvColumns | undefined = undefined> = CsvDistributiveOmit<
+  CsvSingleThreadRowsOptions<TColumns>,
+  'compression'
+>;
 
 export type CsvRowsOptions<TColumns extends CsvColumns | undefined = undefined> =
   | CsvSingleThreadRowsOptions<TColumns>
@@ -156,9 +166,10 @@ type CsvCountSingleThreadOptions =
   });
 
 export type CsvParallelCountOptions =
-  & Omit<CsvApiOptionsWithoutSelection, 'where' | 'workerCount' | 'strict'>
+  & Omit<CsvApiOptionsWithoutSelection, 'compression' | 'where' | 'workerCount' | 'strict'>
   & CsvColumnSelection<CsvColumns | undefined>
   & {
+    compression?: never;
     where?: CsvWhereFilter | undefined;
     workerCount: number;
     strict?: false | undefined;

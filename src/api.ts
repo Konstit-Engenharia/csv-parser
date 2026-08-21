@@ -1,11 +1,13 @@
-import { createReadStream } from 'node:fs';
 import { NativeCsvRowView } from './batches.ts';
 import type { NativeCsvBatch } from './batches.ts';
+import {
+  readCsvFileChunks,
+  rejectCompressedSharding,
+} from './file-stream.ts';
 import {
   findCsvSafeShards as findCsvSafeShardsNative,
   findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
 } from './files.ts';
-import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import { normalizeColumns } from './normalize.ts';
 import { NativeCsvParser } from './parser.ts';
 import {
@@ -31,6 +33,7 @@ import type {
   CsvRowViewCallback,
   CsvRowViewsOptions,
   CsvShard,
+  CsvShardingOptions,
   CsvWhereFilter,
   CsvWorkerPoolOptions,
 } from './types.ts';
@@ -52,6 +55,9 @@ export async function parse<TColumns extends CsvColumns | undefined = undefined>
   buffer: NodeJS.TypedArray | DataView,
   options: CsvParseOptions<TColumns> = {},
 ): Promise<CsvProjectedRow<TColumns>[]> {
+  if ('compression' in options && options.compression !== undefined) {
+    throw new Error('parse() does not support compression; pass decompressed bytes or use a file API');
+  }
   rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
@@ -81,6 +87,7 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
   options: CsvRowsOptions<TColumns> = {},
 ): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
   if ((options.workerCount ?? 1) > 1) {
+    rejectCompressedSharding(options, 'parallel row parsing');
     yield* parallelRows(path, options as CsvParallelRowsOptions<TColumns>);
     return;
   }
@@ -89,8 +96,8 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      const batch = writeMaterializeBatch(parser, chunk as Buffer, options);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      const batch = writeMaterializeBatch(parser, chunk, options);
       if (batch.rowCount > 0) {
         try {
           validator?.validateBatch(batch);
@@ -142,8 +149,8 @@ export async function* batches(path: string, options: CsvBatchesOptions = {}): A
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      const batch = writeRowsBatch(parser, chunk as Buffer, options);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      const batch = writeRowsBatch(parser, chunk, options);
       if (batch.rowCount > 0) {
         try {
           validator?.validateBatch(batch);
@@ -217,8 +224,8 @@ export async function forEachColumnarBatches<TColumns extends CsvColumns | undef
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      const batch = writeColumnarBatch(parser, chunk as Buffer, options);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      const batch = writeColumnarBatch(parser, chunk, options);
       if (batch.rowCount > 0) {
         try {
           validator?.validateBatch(batch);
@@ -348,6 +355,7 @@ export function withRowViews(
  */
 export async function count(path: string, options: CsvCountOptions = {}): Promise<number> {
   if ((options.workerCount ?? 1) > 1) {
+    rejectCompressedSharding(options, 'parallel counting');
     return parallelCount(path, options as CsvParallelCountOptions);
   }
 
@@ -356,8 +364,8 @@ export async function count(path: string, options: CsvCountOptions = {}): Promis
   let total = 0;
   try {
     if (options.strict === true && options.where === undefined) {
-      for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-        const batch = parser.writeBatch(chunk as Buffer);
+      for await (const chunk of readCsvFileChunks(path, options)) {
+        const batch = parser.writeBatch(chunk);
         try {
           total += batch.rowCount;
         } finally {
@@ -373,8 +381,8 @@ export async function count(path: string, options: CsvCountOptions = {}): Promis
       return total;
     }
 
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      total += writeCount(parser, chunk as Buffer, options.where);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      total += writeCount(parser, chunk, options.where);
     }
     total += finishCount(parser, options.where);
     return total;
@@ -385,11 +393,13 @@ export async function count(path: string, options: CsvCountOptions = {}): Promis
 
 export { parallelCount };
 
-export function findCsvSafeSplitOffsets(path: string, shardCount: number, options: CsvFileOptions = {}): number[] {
+export function findCsvSafeSplitOffsets(path: string, shardCount: number, options: CsvShardingOptions = {}): number[] {
+  rejectCompressedSharding(options, 'CSV split offset scanning');
   return findCsvSafeSplitOffsetsNative(path, shardCount, options.delimiter ?? ',');
 }
 
-export function findCsvSafeShards(path: string, shardCount: number, options: CsvFileOptions = {}): CsvShard[] {
+export function findCsvSafeShards(path: string, shardCount: number, options: CsvShardingOptions = {}): CsvShard[] {
+  rejectCompressedSharding(options, 'CSV shard scanning');
   return findCsvSafeShardsNative(path, shardCount, options.delimiter ?? ',');
 }
 
@@ -402,7 +412,7 @@ export function workerPool<TColumns extends CsvColumns | undefined = undefined>(
  *
  * Use this when one-off worker startup becomes noticeable across repeated calls.
  */
-export function workerPool(path: string, options: CsvApiFileOptions): CsvWorkerPool {
+export function workerPool(path: string, options: CsvWorkerPoolOptions): CsvWorkerPool {
   return createWorkerPool(path, options);
 }
 

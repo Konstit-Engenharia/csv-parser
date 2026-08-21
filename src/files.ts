@@ -1,6 +1,5 @@
-import { createReadStream } from 'node:fs';
+import { readCsvFileChunks } from './file-stream.ts';
 import {
-  DEFAULT_CHUNK_SIZE,
   native,
   u64ToSafeNumber,
 } from './native.ts';
@@ -102,8 +101,8 @@ export async function* parseCsvFile(path: string, options: CsvFileOptions = {}):
   const parser = new NativeCsvParser(options);
   const validator = strictSchemaValidator(options);
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      const batch = parser.writeBatch(chunk as Buffer);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      const batch = parser.writeBatch(chunk);
       try {
         validator?.validateBatch(batch);
         const rows = batch.rowsInto([], options.selectedColumns);
@@ -142,8 +141,8 @@ export async function* parseCsvFileProjected(
     equalsFilter: options.equalsFilter,
   };
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      const batch = parser.writeProjectedBatch(chunk as Buffer, projectionOptions);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      const batch = parser.writeProjectedBatch(chunk, projectionOptions);
       try {
         const rows = batch.rows();
         if (rows.length > 0) {
@@ -174,8 +173,8 @@ export async function countCsvFile(path: string, options: CsvFileOptions = {}): 
   let rows = 0;
   try {
     if (options.strict === true) {
-      for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-        const batch = parser.writeBatch(chunk as Buffer);
+      for await (const chunk of readCsvFileChunks(path, options)) {
+        const batch = parser.writeBatch(chunk);
         try {
           rows += batch.rowCount;
         } finally {
@@ -191,8 +190,8 @@ export async function countCsvFile(path: string, options: CsvFileOptions = {}): 
       return rows;
     }
 
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      rows += parser.writeCount(chunk as Buffer);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      rows += parser.writeCount(chunk);
     }
     rows += parser.endCount();
     return rows;
@@ -212,8 +211,8 @@ export async function countCsvFileWhereEquals(
   const filter = { column: columnIndex, value };
   let rows = 0;
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      rows += parser.writeCountWhereEquals(chunk as Buffer, filter);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      rows += parser.writeCountWhereEquals(chunk, filter);
     }
     rows += parser.endCountWhereEquals(filter);
     return rows;
@@ -237,8 +236,8 @@ export async function countCsvFileWhereIn(
   const filter = { column: columnIndex, values };
   let rows = 0;
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      rows += parser.writeCountWhereIn(chunk as Buffer, filter);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      rows += parser.writeCountWhereIn(chunk, filter);
     }
     rows += parser.endCountWhereIn(filter);
     return rows;
@@ -258,8 +257,8 @@ export async function countCsvFileWhereStartsWith(
   const filter = { column: columnIndex, prefix };
   let rows = 0;
   try {
-    for await (const chunk of createReadStream(path, { highWaterMark: options.chunkSize ?? DEFAULT_CHUNK_SIZE })) {
-      rows += parser.writeCountWhereStartsWith(chunk as Buffer, filter);
+    for await (const chunk of readCsvFileChunks(path, options)) {
+      rows += parser.writeCountWhereStartsWith(chunk, filter);
     }
     rows += parser.endCountWhereStartsWith(filter);
     return rows;

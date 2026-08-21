@@ -1,5 +1,6 @@
 import {
   csv,
+  type CsvCompression,
   type CsvWhereEqualsFilter,
   parallelCount,
   parallelRows,
@@ -9,6 +10,8 @@ import {
 const path = 'example.csv';
 declare const dynamicStrict: boolean;
 declare const optionalEquals: CsvWhereEqualsFilter | undefined;
+const autoCompression: CsvCompression = 'auto';
+void autoCompression;
 
 const tupleRows: AsyncGenerator<[string, string][], void> = csv.rows(path, {
   columns: [0, 2] as const,
@@ -52,7 +55,32 @@ void csv.withColumnarBatches(path, { columns: [0, 2] as const }, (batch) => {
 
 void csv.rows(path, { where: { column: 1, equals: 'SP' } });
 void csv.rows(path, { where: optionalEquals });
+void csv.rows(path, { compression: 'gzip' });
+void csv.rows(path, { compression: 'auto' });
+void csv.batches(path, { compression: 'brotli' });
+void csv.count(path, { compression: 'zstd' });
 void parallelCount(path, { workerCount: 2, where: { column: 1, in: ['SP'] } });
+
+// @ts-expect-error parse() receives decompressed bytes, not a compressed file
+void csv.parse(Buffer.from(''), { compression: 'gzip' });
+
+// @ts-expect-error compressed rows do not support worker sharding
+void csv.rows(path, { compression: 'gzip', workerCount: 2 });
+
+// @ts-expect-error direct parallel rows do not support compressed input
+void parallelRows(path, { compression: 'gzip', workerCount: 2 });
+
+// @ts-expect-error compressed counts do not support worker sharding
+void csv.count(path, { compression: 'gzip', workerCount: 2 });
+
+// @ts-expect-error direct parallel count does not support compressed input
+void parallelCount(path, { compression: 'gzip', workerCount: 2 });
+
+// @ts-expect-error worker pools do not support compressed input
+void workerPool(path, { compression: 'gzip', workerCount: 2 });
+
+// @ts-expect-error CSV byte-offset sharding does not support compressed input
+void csv.findCsvSafeShards(path, 2, { compression: 'gzip' });
 
 // @ts-expect-error dynamic strict state cannot safely combine with filters
 void csv.rows(path, { strict: dynamicStrict, where: { column: 1, equals: 'SP' } });

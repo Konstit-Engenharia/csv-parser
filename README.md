@@ -94,6 +94,11 @@ const selected = csv.rows('data.csv', {
   columns: [0, 2],
   where: { column: 2, equals: 'SP' },
 });
+
+const compressed = csv.rows('data.csv.gz', {
+  compression: 'auto',
+  delimiter: ';',
+});
 ```
 
 Supported helpers:
@@ -109,6 +114,12 @@ Supported helpers:
 - `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
 `rows()` only supports `where.equals`. Use `count()` for `where.in` and `where.startsWith`.
+
+Serial file operations accept `compression: 'auto' | 'gzip' | 'deflate' | 'deflate-raw' | 'brotli' | 'zstd'`.
+Decompression streams into the parser and does not buffer the complete file. `auto` reads at most four prefix bytes and
+combines signatures with `.gz`, `.gzip`, `.zst`, `.zstd`, `.br`, `.zz`, `.zlib`, `.deflate`, or `.deflate-raw`.
+Signature and extension mismatches fail. A `.deflate` file without a zlib wrapper requires explicit `deflate-raw`.
+Compressed input does not support worker pools, parallel operations, or CSV byte-offset sharding.
 
 `delimiter` suggests common CSV delimiters in TypeScript while accepting any string. Runtime parsing still requires
 exactly one character.

@@ -1,3 +1,4 @@
+import { rejectCompressedSharding } from './file-stream.ts';
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import {
@@ -11,6 +12,7 @@ import type {
   CsvProjectedRow,
   CsvShard,
   CsvWhereFilter,
+  CsvWorkerPoolOptions,
 } from './types.ts';
 
 interface WorkerEqualsFilterMessage {
@@ -86,11 +88,12 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
   #closed = false;
   #busy = false;
 
-  constructor(path: string, options: CsvApiFileOptions) {
+  constructor(path: string, options: CsvWorkerPoolOptions<TColumns>) {
     const workerCount = options.workerCount ?? 1;
     if (!Number.isInteger(workerCount) || workerCount <= 1) {
       throw new RangeError(`worker pool requires workerCount > 1: ${workerCount}`);
     }
+    rejectCompressedSharding(options, 'worker pool');
     this.#path = path;
     this.#options = { ...options };
   }
@@ -343,12 +346,11 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
   }
 }
 
-export function createWorkerPool(path: string): CsvWorkerPool;
-export function createWorkerPool<TOptions extends CsvApiFileOptions>(
+export function createWorkerPool<TOptions extends CsvWorkerPoolOptions>(
   path: string,
   options: TOptions,
 ): CsvWorkerPool<CsvSelectedColumnsFromOptions<TOptions>>;
-export function createWorkerPool(path: string, options: CsvApiFileOptions = {}): CsvWorkerPool {
+export function createWorkerPool(path: string, options: CsvWorkerPoolOptions): CsvWorkerPool {
   return new CsvWorkerPool(path, options);
 }
 
