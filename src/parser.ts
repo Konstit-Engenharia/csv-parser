@@ -33,6 +33,9 @@ export class NativeCsvParser {
 
   constructor(options: CsvParserOptions = {}) {
     const delimiter = options.delimiter ?? ',';
+    if (delimiter === 'auto') {
+      throw new Error('automatic delimiter detection is only supported by file APIs');
+    }
     if (delimiter.length !== 1) {
       throw new Error('delimiter must be one character');
     }

@@ -1,4 +1,7 @@
-import { rejectCompressedSharding } from './file-stream.ts';
+import {
+  rejectAutoDelimiterSharding,
+  rejectCompressedSharding,
+} from './file-stream.ts';
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import {
@@ -66,6 +69,7 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
     throw new RangeError(`parallel rows require workerCount > 1: ${workerCount}`);
   }
   rejectCompressedSharding(options, 'parallel row parsing');
+  rejectAutoDelimiterSharding(options, 'parallel row parsing');
   rejectWorkerRowsUnsupported(options);
 
   const selected = selectedColumns(options);

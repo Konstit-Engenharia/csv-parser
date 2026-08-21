@@ -1,4 +1,7 @@
-import { rejectCompressedSharding } from './file-stream.ts';
+import {
+  rejectAutoDelimiterSharding,
+  rejectCompressedSharding,
+} from './file-stream.ts';
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import { normalizeFilterColumn } from './normalize.ts';
@@ -59,6 +62,7 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
     throw new RangeError(`parallel count require workerCount > 1: ${workerCount}`);
   }
   rejectCompressedSharding(options, 'parallel counting');
+  rejectAutoDelimiterSharding(options, 'parallel counting');
   if ((options as { strict?: boolean; }).strict === true) {
     throw new Error('parallel count does not support strict CSV validation; use count() without workers for strict schema checks');
   }

@@ -1,4 +1,7 @@
-import { rejectCompressedSharding } from './file-stream.ts';
+import {
+  rejectAutoDelimiterSharding,
+  rejectCompressedSharding,
+} from './file-stream.ts';
 import { findCsvSafeShards } from './files.ts';
 import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import {
@@ -94,6 +97,7 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
       throw new RangeError(`worker pool requires workerCount > 1: ${workerCount}`);
     }
     rejectCompressedSharding(options, 'worker pool');
+    rejectAutoDelimiterSharding(options, 'worker pool');
     this.#path = path;
     this.#options = { ...options };
   }

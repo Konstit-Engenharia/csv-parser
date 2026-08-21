@@ -1,7 +1,8 @@
 import { NativeCsvRowView } from './batches.ts';
 import type { NativeCsvBatch } from './batches.ts';
 import {
-  readCsvFileChunks,
+  prepareCsvFileInput,
+  rejectAutoDelimiterSharding,
   rejectCompressedSharding,
 } from './file-stream.ts';
 import {
@@ -58,6 +59,9 @@ export async function parse<TColumns extends CsvColumns | undefined = undefined>
   if ('compression' in options && options.compression !== undefined) {
     throw new Error('parse() does not support compression; pass decompressed bytes or use a file API');
   }
+  if (options.delimiter === 'auto') {
+    throw new Error('parse() does not support automatic delimiter detection; specify delimiter or use a file API');
+  }
   rejectFilteredStrictSchema(options);
   const parser = new NativeCsvParser(toParserOptions(options));
   const validator = strictSchemaValidator(options);
@@ -88,36 +92,20 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
 ): AsyncGenerator<CsvProjectedRow<TColumns>[], void> {
   if ((options.workerCount ?? 1) > 1) {
     rejectCompressedSharding(options, 'parallel row parsing');
+    rejectAutoDelimiterSharding(options, 'parallel row parsing');
     yield* parallelRows(path, options as CsvParallelRowsOptions<TColumns>);
     return;
   }
 
   rejectFilteredStrictSchema(options);
-  const parser = new NativeCsvParser(toParserOptions(options));
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser(toParserOptions(options, input.delimiter));
   const validator = strictSchemaValidator(options);
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      const batch = writeMaterializeBatch(parser, chunk, options);
-      if (batch.rowCount > 0) {
-        try {
-          validator?.validateBatch(batch);
-          const values = materializeRows(batch, options);
-          if (values.length > 0) {
-            yield values;
-          }
-        } finally {
-          batch.close();
-        }
-      } else {
-        batch.close();
-      }
-    }
-
-    const batch = finishMaterializeBatch(parser, options);
+  for await (const chunk of input.chunks()) {
+    const batch = writeMaterializeBatch(parser, chunk, options);
     if (batch.rowCount > 0) {
       try {
         validator?.validateBatch(batch);
-        validator?.finish();
         const values = materializeRows(batch, options);
         if (values.length > 0) {
           yield values;
@@ -126,11 +114,25 @@ export async function* rows<TColumns extends CsvColumns | undefined = undefined>
         batch.close();
       }
     } else {
-      validator?.finish();
       batch.close();
     }
-  } finally {
-    parser.close();
+  }
+
+  const batch = finishMaterializeBatch(parser, options);
+  if (batch.rowCount > 0) {
+    try {
+      validator?.validateBatch(batch);
+      validator?.finish();
+      const values = materializeRows(batch, options);
+      if (values.length > 0) {
+        yield values;
+      }
+    } finally {
+      batch.close();
+    }
+  } else {
+    validator?.finish();
+    batch.close();
   }
 }
 
@@ -146,40 +148,37 @@ export { CsvWorkerPool };
 export async function* batches(path: string, options: CsvBatchesOptions = {}): AsyncGenerator<NativeCsvBatch, void> {
   ensureRowsWhereSupported(options.where);
   rejectFilteredStrictSchema(options);
-  const parser = new NativeCsvParser(toParserOptions(options));
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser(toParserOptions(options, input.delimiter));
   const validator = strictSchemaValidator(options);
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      const batch = writeRowsBatch(parser, chunk, options);
-      if (batch.rowCount > 0) {
-        try {
-          validator?.validateBatch(batch);
-        } catch (error) {
-          batch.close();
-          throw error;
-        }
-        yield batch;
-      } else {
-        batch.close();
-      }
-    }
-
-    const batch = finishRowsBatch(parser, options);
+  for await (const chunk of input.chunks()) {
+    const batch = writeRowsBatch(parser, chunk, options);
     if (batch.rowCount > 0) {
       try {
         validator?.validateBatch(batch);
-        validator?.finish();
       } catch (error) {
         batch.close();
         throw error;
       }
       yield batch;
     } else {
-      validator?.finish();
       batch.close();
     }
-  } finally {
-    parser.close();
+  }
+
+  const batch = finishRowsBatch(parser, options);
+  if (batch.rowCount > 0) {
+    try {
+      validator?.validateBatch(batch);
+      validator?.finish();
+    } catch (error) {
+      batch.close();
+      throw error;
+    }
+    yield batch;
+  } else {
+    validator?.finish();
+    batch.close();
   }
 }
 
@@ -221,37 +220,14 @@ export async function forEachColumnarBatches<TColumns extends CsvColumns | undef
   ensureColumnarBatchesSupported(options);
   const scopedBatch = new ScopedCsvColumnarBatchView(selectedColumns(options) as TColumns);
   let batchIndex = 0;
-  const parser = new NativeCsvParser(toParserOptions(options));
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser(toParserOptions(options, input.delimiter));
   const validator = strictSchemaValidator(options);
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      const batch = writeColumnarBatch(parser, chunk, options);
-      if (batch.rowCount > 0) {
-        try {
-          validator?.validateBatch(batch);
-          scopedBatch.bind(batch);
-          try {
-            const result = callback(scopedBatch, batchIndex);
-            if (isPromiseLike(result)) {
-              throw new TypeError('columnar batch callback must be synchronous');
-            }
-          } finally {
-            scopedBatch.release();
-          }
-          ++batchIndex;
-        } finally {
-          batch.close();
-        }
-      } else {
-        batch.close();
-      }
-    }
-
-    const batch = finishColumnarBatch(parser, options);
+  for await (const chunk of input.chunks()) {
+    const batch = writeColumnarBatch(parser, chunk, options);
     if (batch.rowCount > 0) {
       try {
         validator?.validateBatch(batch);
-        validator?.finish();
         scopedBatch.bind(batch);
         try {
           const result = callback(scopedBatch, batchIndex);
@@ -261,15 +237,35 @@ export async function forEachColumnarBatches<TColumns extends CsvColumns | undef
         } finally {
           scopedBatch.release();
         }
+        ++batchIndex;
       } finally {
         batch.close();
       }
     } else {
-      validator?.finish();
       batch.close();
     }
-  } finally {
-    parser.close();
+  }
+
+  const batch = finishColumnarBatch(parser, options);
+  if (batch.rowCount > 0) {
+    try {
+      validator?.validateBatch(batch);
+      validator?.finish();
+      scopedBatch.bind(batch);
+      try {
+        const result = callback(scopedBatch, batchIndex);
+        if (isPromiseLike(result)) {
+          throw new TypeError('columnar batch callback must be synchronous');
+        }
+      } finally {
+        scopedBatch.release();
+      }
+    } finally {
+      batch.close();
+    }
+  } else {
+    validator?.finish();
+    batch.close();
   }
 }
 
@@ -356,50 +352,50 @@ export function withRowViews(
 export async function count(path: string, options: CsvCountOptions = {}): Promise<number> {
   if ((options.workerCount ?? 1) > 1) {
     rejectCompressedSharding(options, 'parallel counting');
+    rejectAutoDelimiterSharding(options, 'parallel counting');
     return parallelCount(path, options as CsvParallelCountOptions);
   }
 
   rejectStrictSchemaUnsupported(options, 'count');
-  const parser = new NativeCsvParser(toParserOptions(options));
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser(toParserOptions(options, input.delimiter));
   let total = 0;
-  try {
-    if (options.strict === true && options.where === undefined) {
-      for await (const chunk of readCsvFileChunks(path, options)) {
-        const batch = parser.writeBatch(chunk);
-        try {
-          total += batch.rowCount;
-        } finally {
-          batch.close();
-        }
-      }
-      const batch = parser.endBatch();
+  if (options.strict === true && options.where === undefined) {
+    for await (const chunk of input.chunks()) {
+      const batch = parser.writeBatch(chunk);
       try {
         total += batch.rowCount;
       } finally {
         batch.close();
       }
-      return total;
     }
-
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      total += writeCount(parser, chunk, options.where);
+    const batch = parser.endBatch();
+    try {
+      total += batch.rowCount;
+    } finally {
+      batch.close();
     }
-    total += finishCount(parser, options.where);
     return total;
-  } finally {
-    parser.close();
   }
+
+  for await (const chunk of input.chunks()) {
+    total += writeCount(parser, chunk, options.where);
+  }
+  total += finishCount(parser, options.where);
+  return total;
 }
 
 export { parallelCount };
 
 export function findCsvSafeSplitOffsets(path: string, shardCount: number, options: CsvShardingOptions = {}): number[] {
   rejectCompressedSharding(options, 'CSV split offset scanning');
+  rejectAutoDelimiterSharding(options, 'CSV split offset scanning');
   return findCsvSafeSplitOffsetsNative(path, shardCount, options.delimiter ?? ',');
 }
 
 export function findCsvSafeShards(path: string, shardCount: number, options: CsvShardingOptions = {}): CsvShard[] {
   rejectCompressedSharding(options, 'CSV shard scanning');
+  rejectAutoDelimiterSharding(options, 'CSV shard scanning');
   return findCsvSafeShardsNative(path, shardCount, options.delimiter ?? ',');
 }
 
@@ -433,7 +429,10 @@ export const csv = {
   findCsvSafeShards,
 };
 
-function toParserOptions(options: CsvApiFileOptions | CsvFileOptions): CsvParserOptions {
+function toParserOptions(
+  options: CsvApiFileOptions | CsvFileOptions,
+  delimiter: CsvParserOptions['delimiter'] = options.delimiter,
+): CsvParserOptions {
   const selectedColumns = 'columns' in options && options.columns !== undefined
     ? options.columns
     : options.selectedColumns;
@@ -441,7 +440,7 @@ function toParserOptions(options: CsvApiFileOptions | CsvFileOptions): CsvParser
     throw new Error('use columns or selectedColumns, not both');
   }
   return {
-    delimiter: options.delimiter,
+    delimiter,
     encoding: options.encoding,
     strict: options.strict,
     selectedColumns,

@@ -1,6 +1,7 @@
 import {
   csv,
   type CsvCompression,
+  type CsvDelimiter,
   type CsvWhereEqualsFilter,
   parallelCount,
   parallelRows,
@@ -12,6 +13,8 @@ declare const dynamicStrict: boolean;
 declare const optionalEquals: CsvWhereEqualsFilter | undefined;
 const autoCompression: CsvCompression = 'auto';
 void autoCompression;
+const autoDelimiter: CsvDelimiter = 'auto';
+void autoDelimiter;
 
 const tupleRows: AsyncGenerator<[string, string][], void> = csv.rows(path, {
   columns: [0, 2] as const,
@@ -57,8 +60,11 @@ void csv.rows(path, { where: { column: 1, equals: 'SP' } });
 void csv.rows(path, { where: optionalEquals });
 void csv.rows(path, { compression: 'gzip' });
 void csv.rows(path, { compression: 'auto' });
+void csv.rows(path, { delimiter: 'auto' });
 void csv.batches(path, { compression: 'brotli' });
+void csv.batches(path, { delimiter: 'auto' });
 void csv.count(path, { compression: 'zstd' });
+void csv.count(path, { delimiter: 'auto' });
 void parallelCount(path, { workerCount: 2, where: { column: 1, in: ['SP'] } });
 
 // @ts-expect-error parse() receives decompressed bytes, not a compressed file

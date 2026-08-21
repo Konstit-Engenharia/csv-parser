@@ -1,4 +1,4 @@
-import { readCsvFileChunks } from './file-stream.ts';
+import { prepareCsvFileInput } from './file-stream.ts';
 import {
   native,
   u64ToSafeNumber,
@@ -98,26 +98,13 @@ export function findCsvSafeShards(path: string, shardCount: number, delimiter = 
 }
 
 export async function* parseCsvFile(path: string, options: CsvFileOptions = {}): AsyncGenerator<CsvRow[], void> {
-  const parser = new NativeCsvParser(options);
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
   const validator = strictSchemaValidator(options);
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      const batch = parser.writeBatch(chunk);
-      try {
-        validator?.validateBatch(batch);
-        const rows = batch.rowsInto([], options.selectedColumns);
-        if (rows.length > 0) {
-          yield rows;
-        }
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endBatch();
+  for await (const chunk of input.chunks()) {
+    const batch = parser.writeBatch(chunk);
     try {
       validator?.validateBatch(batch);
-      validator?.finish();
       const rows = batch.rowsInto([], options.selectedColumns);
       if (rows.length > 0) {
         yield rows;
@@ -125,8 +112,18 @@ export async function* parseCsvFile(path: string, options: CsvFileOptions = {}):
     } finally {
       batch.close();
     }
+  }
+
+  const batch = parser.endBatch();
+  try {
+    validator?.validateBatch(batch);
+    validator?.finish();
+    const rows = batch.rowsInto([], options.selectedColumns);
+    if (rows.length > 0) {
+      yield rows;
+    }
   } finally {
-    parser.close();
+    batch.close();
   }
 }
 
@@ -135,25 +132,14 @@ export async function* parseCsvFileProjected(
   options: CsvFileOptions & CsvNativeProjectionOptions = {},
 ): AsyncGenerator<CsvRow[], void> {
   rejectStrictSchemaUnsupported(options, 'projected file parsing');
-  const parser = new NativeCsvParser(options);
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
   const projectionOptions: CsvNativeProjectionOptions = {
     selectedColumns: options.selectedColumns,
     equalsFilter: options.equalsFilter,
   };
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      const batch = parser.writeProjectedBatch(chunk, projectionOptions);
-      try {
-        const rows = batch.rows();
-        if (rows.length > 0) {
-          yield rows;
-        }
-      } finally {
-        batch.close();
-      }
-    }
-
-    const batch = parser.endProjectedBatch(projectionOptions);
+  for await (const chunk of input.chunks()) {
+    const batch = parser.writeProjectedBatch(chunk, projectionOptions);
     try {
       const rows = batch.rows();
       if (rows.length > 0) {
@@ -162,42 +148,47 @@ export async function* parseCsvFileProjected(
     } finally {
       batch.close();
     }
+  }
+
+  const batch = parser.endProjectedBatch(projectionOptions);
+  try {
+    const rows = batch.rows();
+    if (rows.length > 0) {
+      yield rows;
+    }
   } finally {
-    parser.close();
+    batch.close();
   }
 }
 
 export async function countCsvFile(path: string, options: CsvFileOptions = {}): Promise<number> {
   rejectStrictSchemaUnsupported(options, 'count');
-  const parser = new NativeCsvParser(options);
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
   let rows = 0;
-  try {
-    if (options.strict === true) {
-      for await (const chunk of readCsvFileChunks(path, options)) {
-        const batch = parser.writeBatch(chunk);
-        try {
-          rows += batch.rowCount;
-        } finally {
-          batch.close();
-        }
-      }
-      const batch = parser.endBatch();
+  if (options.strict === true) {
+    for await (const chunk of input.chunks()) {
+      const batch = parser.writeBatch(chunk);
       try {
         rows += batch.rowCount;
       } finally {
         batch.close();
       }
-      return rows;
     }
-
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      rows += parser.writeCount(chunk);
+    const batch = parser.endBatch();
+    try {
+      rows += batch.rowCount;
+    } finally {
+      batch.close();
     }
-    rows += parser.endCount();
     return rows;
-  } finally {
-    parser.close();
   }
+
+  for await (const chunk of input.chunks()) {
+    rows += parser.writeCount(chunk);
+  }
+  rows += parser.endCount();
+  return rows;
 }
 
 export async function countCsvFileWhereEquals(
@@ -207,18 +198,15 @@ export async function countCsvFileWhereEquals(
   options: CsvFileOptions = {},
 ): Promise<number> {
   rejectStrictSchemaUnsupported(options, 'count filters');
-  const parser = new NativeCsvParser(options);
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
   const filter = { column: columnIndex, value };
   let rows = 0;
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      rows += parser.writeCountWhereEquals(chunk, filter);
-    }
-    rows += parser.endCountWhereEquals(filter);
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of input.chunks()) {
+    rows += parser.writeCountWhereEquals(chunk, filter);
   }
+  rows += parser.endCountWhereEquals(filter);
+  return rows;
 }
 
 export async function countCsvFileWhereIn(
@@ -232,18 +220,15 @@ export async function countCsvFileWhereIn(
     return 0;
   }
 
-  const parser = new NativeCsvParser(options);
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
   const filter = { column: columnIndex, values };
   let rows = 0;
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      rows += parser.writeCountWhereIn(chunk, filter);
-    }
-    rows += parser.endCountWhereIn(filter);
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of input.chunks()) {
+    rows += parser.writeCountWhereIn(chunk, filter);
   }
+  rows += parser.endCountWhereIn(filter);
+  return rows;
 }
 
 export async function countCsvFileWhereStartsWith(
@@ -253,16 +238,13 @@ export async function countCsvFileWhereStartsWith(
   options: CsvFileOptions = {},
 ): Promise<number> {
   rejectStrictSchemaUnsupported(options, 'count filters');
-  const parser = new NativeCsvParser(options);
+  await using input = await prepareCsvFileInput(path, options);
+  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
   const filter = { column: columnIndex, prefix };
   let rows = 0;
-  try {
-    for await (const chunk of readCsvFileChunks(path, options)) {
-      rows += parser.writeCountWhereStartsWith(chunk, filter);
-    }
-    rows += parser.endCountWhereStartsWith(filter);
-    return rows;
-  } finally {
-    parser.close();
+  for await (const chunk of input.chunks()) {
+    rows += parser.writeCountWhereStartsWith(chunk, filter);
   }
+  rows += parser.endCountWhereStartsWith(filter);
+  return rows;
 }

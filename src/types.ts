@@ -3,6 +3,7 @@ import type { NativeCsvRowView } from './batches.ts';
 export type CsvEncoding = 'utf8' | 'latin1' | 'iso88591' | 'iso-8859-1';
 export type CsvCompression = Bun.CompressionFormat | 'auto';
 export type CsvDelimiter =
+  | 'auto'
   | ','
   | ';'
   | '\t'

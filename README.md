@@ -97,7 +97,7 @@ const selected = csv.rows('data.csv', {
 
 const compressed = csv.rows('data.csv.gz', {
   compression: 'auto',
-  delimiter: ';',
+  delimiter: 'auto',
 });
 ```
 
@@ -121,8 +121,14 @@ combines signatures with `.gz`, `.gzip`, `.zst`, `.zstd`, `.br`, `.zz`, `.zlib`,
 Signature and extension mismatches fail. A `.deflate` file without a zlib wrapper requires explicit `deflate-raw`.
 Compressed input does not support worker pools, parallel operations, or CSV byte-offset sharding.
 
+Serial file operations also accept `delimiter: 'auto'`. Detection probes at most 64 KiB of decompressed data and
+ignores separators inside quoted fields. It checks comma, tab, semicolon, pipe, colon, caret, and tilde. The `.csv`,
+`.tsv`, `.tab`, and `.psv` extensions are confirmed hints, including before a compression extension such as `.gz`.
+Empty, single-column, inconsistent, and ambiguous probes fail with an error. Omitted `delimiter` still means comma.
+Automatic delimiter detection does not support in-memory parsing, workers, parallel operations, or byte-offset sharding.
+
 `delimiter` suggests common CSV delimiters in TypeScript while accepting any string. Runtime parsing still requires
-exactly one character.
+exactly one character unless a serial file operation uses `auto`.
 
 ## Strict Validation
 
