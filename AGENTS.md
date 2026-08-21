@@ -276,7 +276,7 @@ Before completing a change:
 - Format only the affected source files using the repository's formatter.
 - Run the relevant linter and type checker scripts.
 - Run focused tests for the changed behavior.
-- With Bun's test runner, use `bun test <path-substring>` to filter test files and the appropriate test-name option when filtering by test name.
+- With Bun's test runner, use `bun run test <path-substring>` to filter test files and the appropriate test-name option when filtering by test name.
 - Run the relevant build when changing exports, packaging, generated declarations, bundler configuration, runtime targets, or deployment artifacts.
 - Run benchmarks when making performance-sensitive changes.
 - After an approved dependency change, run `bun audit` in a Bun-managed project and any additional repository-defined dependency audit. Report when an audit command is unavailable.
