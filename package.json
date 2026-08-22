@@ -21,6 +21,9 @@
   "license": "MIT",
   "type": "module",
   "module": "src/index.ts",
+  "bin": {
+    "csv": "./src/cli.ts"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

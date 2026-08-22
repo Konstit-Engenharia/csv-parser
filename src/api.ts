@@ -354,7 +354,7 @@ export function withRowViews(
  * Count rows without materializing them.
  *
  * Full filter support exists here because count has native fast paths for
- * `where.equals`, `where.in`, and `where.startsWith`.
+ * `where.equals`, `where.in`, `where.startsWith`, and `where.regex`.
  */
 export async function count(path: string, options: CsvCountOptions = {}): Promise<number> {
   if ((options.workerCount ?? 1) > 1) {
@@ -363,15 +363,16 @@ export async function count(path: string, options: CsvCountOptions = {}): Promis
     return parallelCount(path, options as CsvParallelCountOptions);
   }
 
-  rejectStrictSchemaUnsupported(options, 'count');
   const filters = toNativeFilters(options.where);
   await using input = await prepareCsvFileInput(path, options);
   using parser = new NativeCsvParser(toParserOptions(options, input.delimiter));
+  const validator = strictSchemaValidator(options);
   let total = 0;
   if (options.strict === true && filters === undefined) {
     for await (const chunk of input.chunks()) {
       const batch = parser.writeBatch(chunk);
       try {
+        validator?.validateBatch(batch);
         total += batch.rowCount;
       } finally {
         batch.close();
@@ -379,6 +380,8 @@ export async function count(path: string, options: CsvCountOptions = {}): Promis
     }
     const batch = parser.endBatch();
     try {
+      validator?.validateBatch(batch);
+      validator?.finish();
       total += batch.rowCount;
     } finally {
       batch.close();

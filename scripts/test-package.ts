@@ -24,6 +24,30 @@ try {
     'import { csv } from \'@konstit/csv\'; const rows = await csv.parse(Buffer.from(\'id,name\\n1,Ada\\n\')); if (rows.length !== 2 || rows[1]?.[1] !== \'Ada\') throw new Error(\'package smoke test failed\');',
   ], directory);
   console.log('package import and native parse smoke passed');
+
+  const csvPath = join(directory, 'input.csv');
+  await Bun.write(csvPath, 'id;name\n1;Ada\n2;Bob\n');
+  const cliResult = Bun.spawnSync({
+    cmd: [
+      'bunx',
+      '@konstit/csv',
+      'count',
+      csvPath,
+      '--chunk-size',
+      '2',
+      '--delimiter',
+      ';',
+      '--where',
+      '{"column":1,"startsWith":"A"}',
+    ],
+    cwd: directory,
+    stderr: 'inherit',
+    stdout: 'pipe',
+  });
+  if (!cliResult.success || cliResult.stdout.toString() !== '1\n') {
+    throw new Error(`package CLI smoke test failed with exit code ${String(cliResult.exitCode)}`);
+  }
+  console.log('package CLI count smoke passed');
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

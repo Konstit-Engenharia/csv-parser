@@ -80,6 +80,31 @@ for await (
 
 In this repo, `corpus/large/example.csv` is semicolon-delimited. Pass `delimiter: ';'` for examples and benchmarks that read it.
 
+## CLI
+
+Count every CSV record in a file, including the header row:
+
+```sh
+bunx @konstit/csv count data.csv
+bunx @konstit/csv count data.csv --delimiter ';' --chunk-size 262144
+```
+
+With Bun 1.4 or newer, install the command globally and use its shorter form:
+
+```sh
+bun add --global @konstit/csv
+csv count data.csv
+```
+
+The CLI uses one process and exposes the serial `CsvCountOptions` fields as flags. It does not expose `workerCount`.
+Run `csv count --help` for the complete list. Pass filters as JSON using the same API field names. CLI filter values are
+strings; use the TypeScript API for `workerCount` and binary `Buffer` or `Uint8Array` values.
+
+```sh
+csv count data.csv --delimiter ';' --where '{"column":2,"equals":"SP"}'
+csv count data.csv --where '{"column":1,"regex":{"source":"^A","flags":"i"}}'
+```
+
 ## High-Level API
 
 Import the `csv` namespace for file-oriented helpers:

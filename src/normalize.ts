@@ -24,7 +24,7 @@ const NATIVE_FILTER_EQUALS = 1;
 const NATIVE_FILTER_IN = 2;
 const NATIVE_FILTER_STARTS_WITH = 3;
 const NATIVE_FILTER_REGEX = 4;
-const MAX_REGEX_FILTER_COUNT = 32;
+export const MAX_REGEX_FILTER_COUNT = 32;
 const MAX_REGEX_PATTERN_BYTES = 4_096;
 
 export function encodingCode(encoding: CsvEncoding = 'utf8'): number {

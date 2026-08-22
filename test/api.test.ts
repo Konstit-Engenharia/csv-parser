@@ -292,6 +292,7 @@ describe('csv high-level API', () => {
     expect(await csv.count(path, { delimiter: ';', where: { column: 1, startsWith: 'A' } })).toBe(1);
     expect(
       await csv.count(path, {
+        chunkSize: 1,
         delimiter: ';',
         where: {
           all: [
@@ -667,6 +668,47 @@ describe('csv high-level API', () => {
     const path = csvFixturePath('api/comma-name.csv');
 
     expect(await csv.count(path, { strict: true })).toBe(2);
+  });
+
+  test('validates strict schema metadata while counting', async () => {
+    const path = csvFixturePath('api/strict-schema-valid.csv');
+
+    expect(
+      await csv.count(path, {
+        chunkSize: 1,
+        delimiter: ';',
+        expectedHeaders: ['id', 'name', 'uf'],
+        minDataRows: 1,
+        requireHeader: true,
+        strict: true,
+      }),
+    ).toBe(2);
+
+    const error = await rejectedError(
+      csv.count(path, {
+        delimiter: ';',
+        expectedHeaders: ['id', 'full_name', 'uf'],
+        strict: true,
+      }),
+    );
+    expect(error.message).toContain('strict CSV schema error: header mismatch at column 1');
+
+    const missingHeaderError = await rejectedError(
+      csv.count(csvFixturePath('empty.csv'), {
+        requireHeader: true,
+        strict: true,
+      }),
+    );
+    expect(missingHeaderError.message).toContain('strict CSV schema error: missing header row');
+
+    const minimumRowsError = await rejectedError(
+      csv.count(path, {
+        delimiter: ';',
+        minDataRows: 2,
+        strict: true,
+      }),
+    );
+    expect(minimumRowsError.message).toContain('strict CSV schema error: expected at least 2 data row(s), got 1');
   });
 
   test('keeps strict selected rows supported', async () => {
