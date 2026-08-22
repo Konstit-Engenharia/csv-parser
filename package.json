@@ -1,5 +1,5 @@
 {
-  "name": "@konstit/csv-parser",
+  "name": "@konstit/csv",
   "version": "0.0.1",
   "description": "Bun-native CSV parser with streaming rows, filters, and low-allocation batches.",
   "author": {

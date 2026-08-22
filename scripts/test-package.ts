@@ -21,7 +21,7 @@ try {
   run([
     'bun',
     '-e',
-    'import { csv } from \'@konstit/csv-parser\'; const rows = await csv.parse(Buffer.from(\'id,name\\n1,Ada\\n\')); if (rows.length !== 2 || rows[1]?.[1] !== \'Ada\') throw new Error(\'package smoke test failed\');',
+    'import { csv } from \'@konstit/csv\'; const rows = await csv.parse(Buffer.from(\'id,name\\n1,Ada\\n\')); if (rows.length !== 2 || rows[1]?.[1] !== \'Ada\') throw new Error(\'package smoke test failed\');',
   ], directory);
   console.log('package import and native parse smoke passed');
 } finally {

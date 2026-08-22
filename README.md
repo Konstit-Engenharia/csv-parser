@@ -1,4 +1,4 @@
-# @konstit/csv-parser
+# @konstit/csv
 
 Bun-native CSV parser using `bun:ffi` and the shared library built from `native/csv_parser.cpp`.
 
@@ -61,7 +61,7 @@ Publication must use this verified artifact; `prepack` rejects packages missing 
 ## Quick Start
 
 ```ts
-import { csv } from '@konstit/csv-parser';
+import { csv } from '@konstit/csv';
 
 const path = 'corpus/large/example.csv';
 
@@ -85,7 +85,7 @@ In this repo, `corpus/large/example.csv` is semicolon-delimited. Pass `delimiter
 Import the `csv` namespace for file-oriented helpers:
 
 ```ts
-import { csv } from '@konstit/csv-parser';
+import { csv } from '@konstit/csv';
 
 const rows = await csv.count('data.csv', { delimiter: ';' });
 
@@ -196,7 +196,7 @@ import {
   csv,
   defineCountOptions,
   defineRowsOptions,
-} from '@konstit/csv-parser';
+} from '@konstit/csv';
 
 const columns = [0, 2] as const;
 
@@ -229,7 +229,7 @@ an index; invalid selections fail before parsing begins.
 Use batches when you need low allocation row access or byte ranges.
 
 ```ts
-import { csv } from '@konstit/csv-parser';
+import { csv } from '@konstit/csv';
 
 await csv.withBatches(
   'data.csv',
@@ -285,7 +285,7 @@ JavaScript-safe numeric ranges in a `Float64Array`.
 Use `NativeCsvParser` when you already own chunking:
 
 ```ts
-import { NativeCsvParser } from '@konstit/csv-parser';
+import { NativeCsvParser } from '@konstit/csv';
 
 using parser = new NativeCsvParser({ delimiter: ';' });
 const rowsBuffer: string[][] = [];
