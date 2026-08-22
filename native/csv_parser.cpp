@@ -1,5 +1,6 @@
 #include <ankerl/unordered_dense.h>
 #include <hwy/highway.h>
+#include <re2/re2.h>
 
 #include <algorithm>
 #include <array>
@@ -37,6 +38,7 @@ enum class row_filter_kind : uint8_t {
   equals = 1,
   in = 2,
   starts_with = 3,
+  regex = 4,
 };
 
 struct row_filter {
@@ -79,6 +81,23 @@ constexpr size_t npos = std::numeric_limits<size_t>::max();
 constexpr uint32_t max_column_index = 2024;
 constexpr uint64_t max_projection_length = 2024;
 constexpr uint64_t max_filter_count = 2024;
+constexpr uint64_t max_regex_filter_count = 32;
+constexpr size_t max_regex_pattern_size = 4096;
+constexpr int64_t max_regex_memory = 1 << 20;
+
+bool compile_regex(const std::string& source, std::unique_ptr<re2::RE2>& expression, std::string& error) {
+  re2::RE2::Options options;
+  options.set_log_errors(false);
+  options.set_max_mem(max_regex_memory);
+  options.set_never_capture(true);
+  auto compiled = std::make_unique<re2::RE2>(source, options);
+  if (!compiled->ok()) {
+    error = "invalid regular expression: " + compiled->error();
+    return false;
+  }
+  expression = std::move(compiled);
+  return true;
+}
 
 struct csv_structural_state {
   bool in_quotes = false;
@@ -584,7 +603,10 @@ public:
     mode_ = output_mode::batch;
     batch_ = batch.get();
     allow_direct_projection_ = true;
-    configure(selected_columns, selected_columns_len, filters, filter_count);
+    if (!configure(selected_columns, selected_columns_len, filters, filter_count)) {
+      batch_ = nullptr;
+      return nullptr;
+    }
     emitted_rows_ = 0;
     parse(data, len);
     if (final) {
@@ -643,7 +665,9 @@ public:
   uint64_t write_count_where_all(const uint8_t* data, size_t len, bool final, const row_filter* filters,
                                  size_t filter_count) {
     mode_ = output_mode::count;
-    configure(nullptr, 0, filters, filter_count);
+    if (!configure(nullptr, 0, filters, filter_count)) {
+      return 0;
+    }
     emitted_rows_ = 0;
     parse(data, len);
     if (final) {
@@ -684,6 +708,7 @@ public:
     first_filter_by_column_.clear();
     next_filter_.clear();
     in_filter_caches_.clear();
+    regex_filter_caches_.clear();
     in_quotes_ = false;
     pending_quote_ = false;
     at_field_start_ = true;
@@ -763,11 +788,17 @@ private:
     bool use_set = false;
   };
 
-  void configure(const uint32_t* selected_columns, size_t selected_columns_len, row_filter filter) {
-    configure(selected_columns, selected_columns_len, filter.enabled ? &filter : nullptr, filter.enabled ? 1 : 0);
+  struct regex_filter_cache {
+    std::string source;
+    std::unique_ptr<re2::RE2> expression;
+  };
+
+  bool configure(const uint32_t* selected_columns, size_t selected_columns_len, row_filter filter) {
+    return configure(selected_columns, selected_columns_len, filter.enabled ? &filter : nullptr,
+                     filter.enabled ? 1 : 0);
   }
 
-  void configure(const uint32_t* selected_columns, size_t selected_columns_len, const row_filter* filters,
+  bool configure(const uint32_t* selected_columns, size_t selected_columns_len, const row_filter* filters,
                  size_t filter_count) {
     selected_columns_ = selected_columns;
     selected_columns_len_ = selected_columns_len;
@@ -777,6 +808,9 @@ private:
       filters_.assign(filters, filters + filter_count);
     }
     prepare_in_filters();
+    if (!prepare_regex_filters()) {
+      return false;
+    }
     prepare_filter_lookup();
     if (row_filter_seen_.size() != filter_count) {
       row_filter_seen_.assign(filter_count, false);
@@ -805,6 +839,7 @@ private:
     }
     direct_projection_ = can_use_direct_projection();
     restore_direct_projection_row();
+    return true;
   }
 
   void prepare_filter_lookup() {
@@ -833,6 +868,37 @@ private:
     for (size_t index = 0; index < filters_.size(); ++index) {
       prepare_in_filter(filters_[index], in_filter_caches_[index]);
     }
+  }
+
+  bool prepare_regex_filters() {
+    regex_filter_caches_.resize(filters_.size());
+    for (size_t index = 0; index < filters_.size(); ++index) {
+      const auto& filter = filters_[index];
+      auto& cache = regex_filter_caches_[index];
+      if (!filter.enabled || filter.kind != row_filter_kind::regex) {
+        cache.source.clear();
+        cache.expression.reset();
+        continue;
+      }
+
+      std::string source;
+      if (filter.value_len != 0) {
+        source.assign(reinterpret_cast<const char*>(filter.value), filter.value_len);
+      }
+      if (cache.expression != nullptr && cache.source == source) {
+        continue;
+      }
+
+      std::unique_ptr<re2::RE2> expression;
+      std::string message;
+      if (!compile_regex(source, expression, message)) {
+        set_error(message.c_str());
+        return false;
+      }
+      cache.source = std::move(source);
+      cache.expression = std::move(expression);
+    }
+    return true;
   }
 
   void prepare_in_filter(const row_filter& filter, in_filter_cache& cache) {
@@ -1581,6 +1647,11 @@ private:
       return field_in_filter(filter, in_filter_caches_[filter_index]);
     case row_filter_kind::starts_with:
       return field_starts_with_filter(filter);
+    case row_filter_kind::regex: {
+      const auto& expression = regex_filter_caches_[filter_index].expression;
+      return expression != nullptr &&
+             re2::RE2::PartialMatch(absl::string_view(field_.data(), field_.size()), *expression);
+    }
     case row_filter_kind::none:
       return true;
     }
@@ -1802,6 +1873,7 @@ private:
   std::vector<std::string> row_fields_;
   std::vector<std::string> projected_fields_;
   std::vector<in_filter_cache> in_filter_caches_;
+  std::vector<regex_filter_cache> regex_filter_caches_;
   std::string error_;
   bool in_quotes_ = false;
   bool pending_quote_ = false;
@@ -1931,6 +2003,7 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
 
   filters.clear();
   filters.reserve(static_cast<size_t>(filter_count));
+  uint64_t regex_filter_count = 0;
   for (size_t index = 0; index < static_cast<size_t>(filter_count); ++index) {
     const size_t descriptor_offset = index * 4;
     const uint32_t raw_kind = descriptors[descriptor_offset];
@@ -1939,7 +2012,7 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
     const uint32_t value_count = descriptors[descriptor_offset + 3];
 
     if (raw_kind < static_cast<uint32_t>(row_filter_kind::equals) ||
-        raw_kind > static_cast<uint32_t>(row_filter_kind::starts_with)) {
+        raw_kind > static_cast<uint32_t>(row_filter_kind::regex)) {
       parser.set_error("filter kind is invalid");
       return false;
     }
@@ -1953,8 +2026,21 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
 
     const auto kind = static_cast<row_filter_kind>(raw_kind);
     if (kind != row_filter_kind::in && value_count != 1) {
-      parser.set_error("equals and starts-with filters require exactly one value");
+      parser.set_error("equals, starts-with, and regex filters require exactly one value");
       return false;
+    }
+    if (kind == row_filter_kind::regex) {
+      ++regex_filter_count;
+      if (regex_filter_count > max_regex_filter_count) {
+        parser.set_error("regex filter count exceeds maximum of 32");
+        return false;
+      }
+      const uint32_t pattern_start = value_offsets[first_value_index];
+      const uint32_t pattern_end = value_offsets[first_value_index + 1];
+      if (pattern_end - pattern_start > max_regex_pattern_size) {
+        parser.set_error("regular expression exceeds 4096 UTF-8 bytes");
+        return false;
+      }
     }
 
     row_filter filter{
@@ -1978,6 +2064,28 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
 }
 
 } // namespace csv_native
+
+CSV_EXPORT const char* csv_regex_validate(const uint8_t* pattern, uint64_t pattern_len) {
+  static thread_local std::string error;
+  error.clear();
+  if (pattern_len > csv_native::max_regex_pattern_size ||
+      pattern_len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    error = "regular expression exceeds 4096 UTF-8 bytes";
+    return error.c_str();
+  }
+  if (pattern == nullptr && pattern_len != 0) {
+    error = "regular expression data is null";
+    return error.c_str();
+  }
+
+  std::string source;
+  if (pattern_len != 0) {
+    source.assign(reinterpret_cast<const char*>(pattern), static_cast<size_t>(pattern_len));
+  }
+  std::unique_ptr<re2::RE2> expression;
+  csv_native::compile_regex(source, expression, error);
+  return error.c_str();
+}
 
 CSV_EXPORT void* csv_parser_create(int encoding, uint8_t delimiter) {
   if (delimiter == 0 || delimiter == '\n' || delimiter == '\r' || delimiter == '"') {

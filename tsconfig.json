@@ -27,4 +27,5 @@
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": true, // Conflicts with Biome's useLiteralKeys
   },
+  "exclude": [".cache", "build"],
 }

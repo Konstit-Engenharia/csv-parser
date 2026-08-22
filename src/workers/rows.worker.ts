@@ -3,6 +3,7 @@ import { NativeCsvParser } from '../parser.ts';
 import type {
   CsvColumns,
   CsvEncoding,
+  CsvRegex,
 } from '../types.ts';
 
 interface WorkerEqualsFilter {
@@ -20,7 +21,12 @@ interface WorkerStartsWithFilter {
   prefix: Uint8Array;
 }
 
-type WorkerFilter = WorkerEqualsFilter | WorkerInFilter | WorkerStartsWithFilter;
+interface WorkerRegexFilter {
+  column: number;
+  regex: CsvRegex;
+}
+
+type WorkerFilter = WorkerEqualsFilter | WorkerInFilter | WorkerRegexFilter | WorkerStartsWithFilter;
 
 interface WorkerRowsMessage {
   chunkSize: number;

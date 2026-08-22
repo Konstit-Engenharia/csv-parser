@@ -96,6 +96,7 @@ const selected = csv.rows('data.csv', {
     all: [
       { column: 2, in: ['SP', 'RJ'] },
       { column: 1, startsWith: 'A' },
+      { column: 3, regex: csv.re(/^[0-9]{5}-[0-9]{3}$/) },
     ],
   },
 });
@@ -122,7 +123,21 @@ Supported helpers:
 - `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
 - `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
-All row and count APIs support `equals`, `in`, and `startsWith`. Use `where: { all: [...] }` to require multiple
+All row and count APIs support `equals`, `in`, `startsWith`, and `regex`. Create regex filters with `csv.re()`:
+
+```ts
+const selected = csv.rows('data.csv', {
+  where: { column: 1, regex: csv.re(/^ana$/iu) },
+});
+```
+
+Regex filters use statically linked RE2 and search the field. Use `^` and `$` for a full-field match. The supported flags
+are `i`, `m`, `s`, and `u`. Unicode matching is enabled by default; `u` documents the JavaScript pattern intent. The
+`g`, `d`, `y`, and `v` flags are rejected. RE2 does not support lookaround or backreferences. `csv.re()` converts
+JavaScript Unicode escapes and escaped `/` characters, then validates the RE2 expression immediately. A compiled
+pattern is limited to 4096 UTF-8 bytes, and one operation can use at most 32 regex filters.
+
+Use `where: { all: [...] }` to require multiple
 predicates. Every predicate in `all` must match the same row. At least one predicate is required.
 
 Serial file operations accept `compression: 'auto' | 'gzip' | 'deflate' | 'deflate-raw' | 'brotli' | 'zstd'`.

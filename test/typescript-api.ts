@@ -62,6 +62,8 @@ void csv.rows(path, { where: { column: 1, equals: 'SP' } });
 void csv.rows(path, { where: optionalEquals });
 void csv.rows(path, { where: { column: 1, in: ['SP'] } });
 void csv.rows(path, { where: { column: 1, startsWith: 'S' } });
+const stateRegex = csv.re(/^(?:SP|RJ)$/);
+void csv.rows(path, { where: { column: 1, regex: stateRegex } });
 void csv.rows(path, {
   where: {
     all: [
@@ -79,6 +81,7 @@ void csv.batches(path, { delimiter: 'auto' });
 void csv.count(path, { compression: 'zstd' });
 void csv.count(path, { delimiter: 'auto' });
 void parallelCount(path, { workerCount: 2, where: { column: 1, in: ['SP'] } });
+void parallelCount(path, { workerCount: 2, where: { column: 1, regex: stateRegex } });
 void parallelRows(path, {
   workerCount: 2,
   where: { all: [{ column: 1, startsWith: 'A' }, { column: 2, equals: 'SP' }] },
@@ -89,6 +92,9 @@ using filteredPool = workerPool(path, {
 });
 void filteredPool.count();
 void filteredPool.rows();
+
+// @ts-expect-error regex filters require csv.re()
+void csv.rows(path, { where: { column: 1, regex: /SP/ } });
 
 // @ts-expect-error parse() receives decompressed bytes, not a compressed file
 void csv.parse(Buffer.from(''), { compression: 'gzip' });

@@ -1,6 +1,7 @@
 import {
   EMPTY_BUFFER,
   EMPTY_U32,
+  native,
 } from './native.ts';
 import type {
   CsvColumns,
@@ -9,6 +10,7 @@ import type {
   CsvFieldValue,
   CsvInFilter,
   CsvNativeFilter,
+  CsvRegex,
   CsvStartsWithFilter,
 } from './types.ts';
 
@@ -21,6 +23,9 @@ const NATIVE_FILTER_DESCRIPTOR_LENGTH = 4;
 const NATIVE_FILTER_EQUALS = 1;
 const NATIVE_FILTER_IN = 2;
 const NATIVE_FILTER_STARTS_WITH = 3;
+const NATIVE_FILTER_REGEX = 4;
+const MAX_REGEX_FILTER_COUNT = 32;
+const MAX_REGEX_PATTERN_BYTES = 4_096;
 
 export function encodingCode(encoding: CsvEncoding = 'utf8'): number {
   const normalized = encoding.toLowerCase();
@@ -111,6 +116,121 @@ export function normalizeFilterValue(value: CsvFieldValue): Uint8Array {
   return typeof value === 'string' ? Buffer.from(value) : value;
 }
 
+type CsvRegexInput = Pick<CsvRegex, 'flags' | 'source'>;
+
+export function normalizeRegex(regex: CsvRegexInput): Uint8Array {
+  if (typeof regex !== 'object' || regex === null || typeof regex.source !== 'string' || typeof regex.flags !== 'string') {
+    throw new TypeError('regex must be created with csv.re()');
+  }
+
+  const unsupportedFlags = regex.flags.replace(/[imsu]/g, '');
+  if (unsupportedFlags.length > 0) {
+    throw new Error(`unsupported regular expression flags: ${unsupportedFlags}`);
+  }
+  if (new Set(regex.flags).size !== regex.flags.length) {
+    throw new Error(`duplicate regular expression flags: ${regex.flags}`);
+  }
+
+  const compatibleSource = convertJavaScriptRegexSource(regex.source, regex.flags.includes('u'));
+  const re2Flags = regex.flags.replace('u', '');
+  const source = re2Flags.length === 0 ? compatibleSource : `(?${re2Flags}:${compatibleSource})`;
+  const encoded = Buffer.from(source);
+  if (encoded.byteLength > MAX_REGEX_PATTERN_BYTES) {
+    throw new RangeError(`regular expression exceeds ${MAX_REGEX_PATTERN_BYTES} UTF-8 bytes`);
+  }
+  return encoded.byteLength === 0 ? EMPTY_BUFFER : encoded;
+}
+
+export function validateRegex(regex: CsvRegexInput): void {
+  const pattern = normalizeRegex(regex);
+  const patternLength = pattern === EMPTY_BUFFER ? 0 : pattern.byteLength;
+  const error = native.symbols.csv_regex_validate(pattern, BigInt(patternLength));
+  if (error !== null && error.length > 0) {
+    throw new SyntaxError(error);
+  }
+}
+
+function convertJavaScriptRegexSource(source: string, unicode: boolean): string {
+  let compatible = '';
+  for (let index = 0; index < source.length;) {
+    if (source[index] !== '\\') {
+      compatible += source[index];
+      ++index;
+      continue;
+    }
+
+    const escapedCharacter = source[index + 1];
+    if (escapedCharacter === undefined) {
+      compatible += '\\';
+      break;
+    }
+    if (escapedCharacter === '\\') {
+      compatible += '\\\\';
+      index += 2;
+      continue;
+    }
+    if (escapedCharacter === '/') {
+      compatible += '/';
+      index += 2;
+      continue;
+    }
+    if (escapedCharacter !== 'u') {
+      compatible += `\\${escapedCharacter}`;
+      index += 2;
+      continue;
+    }
+
+    if (source[index + 2] === '{') {
+      if (!unicode) {
+        compatible += '\\u';
+        index += 2;
+        continue;
+      }
+      const close = source.indexOf('}', index + 3);
+      const digits = close === -1 ? '' : source.slice(index + 3, close);
+      if (!/^[0-9a-fA-F]{1,6}$/.test(digits)) {
+        throw new SyntaxError('invalid JavaScript Unicode escape in regular expression');
+      }
+      const codePoint = Number.parseInt(digits, 16);
+      if (codePoint > 0x10_ffff || isSurrogate(codePoint)) {
+        throw new SyntaxError('regular expression contains an unsupported Unicode surrogate');
+      }
+      compatible += `\\x{${codePoint.toString(16)}}`;
+      index = close + 1;
+      continue;
+    }
+
+    const digits = source.slice(index + 2, index + 6);
+    if (!/^[0-9a-fA-F]{4}$/.test(digits)) {
+      compatible += '\\u';
+      index += 2;
+      continue;
+    }
+    let codePoint = Number.parseInt(digits, 16);
+    index += 6;
+    if (codePoint >= 0xd800 && codePoint <= 0xdbff) {
+      const lowDigits = source.slice(index + 2, index + 6);
+      if (source.slice(index, index + 2) !== '\\u' || !/^[0-9a-fA-F]{4}$/.test(lowDigits)) {
+        throw new SyntaxError('regular expression contains an unsupported Unicode surrogate');
+      }
+      const low = Number.parseInt(lowDigits, 16);
+      if (low < 0xdc00 || low > 0xdfff) {
+        throw new SyntaxError('regular expression contains an unsupported Unicode surrogate');
+      }
+      codePoint = 0x1_0000 + ((codePoint - 0xd800) << 10) + low - 0xdc00;
+      index += 6;
+    } else if (codePoint >= 0xdc00 && codePoint <= 0xdfff) {
+      throw new SyntaxError('regular expression contains an unsupported Unicode surrogate');
+    }
+    compatible += `\\x{${codePoint.toString(16)}}`;
+  }
+  return compatible;
+}
+
+function isSurrogate(codePoint: number): boolean {
+  return codePoint >= 0xd800 && codePoint <= 0xdfff;
+}
+
 export function normalizeInFilter(filter: CsvInFilter): {
   column: number;
   valuesData: Uint8Array;
@@ -192,6 +312,7 @@ export function normalizeNativeFilters(filters: readonly CsvNativeFilter[] | und
   const values: Uint8Array[] = [];
   let valuesDataLength = 0;
   let valueCount = 0;
+  let regexFilterCount = 0;
 
   for (let filterIndex = 0; filterIndex < filters.length; ++filterIndex) {
     const filter = filters[filterIndex];
@@ -211,9 +332,16 @@ export function normalizeNativeFilters(filters: readonly CsvNativeFilter[] | und
       if (filterValues.length === 0) {
         throw new RangeError('filter values must not be empty');
       }
-    } else {
+    } else if ('prefix' in filter) {
       kind = NATIVE_FILTER_STARTS_WITH;
       filterValues = [filter.prefix];
+    } else {
+      ++regexFilterCount;
+      if (regexFilterCount > MAX_REGEX_FILTER_COUNT) {
+        throw new RangeError(`regex filter count out of range: ${regexFilterCount}`);
+      }
+      kind = NATIVE_FILTER_REGEX;
+      filterValues = [normalizeRegex(filter.regex)];
     }
 
     if (filterValues.length > UINT32_MAX - valueCount) {

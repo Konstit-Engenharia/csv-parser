@@ -190,6 +190,12 @@ const CSV_SYMBOLS = {
     returns: 'u64',
   },
   // C signature:
+  // const char* csv_regex_validate(const uint8_t* pattern, uint64_t pattern_len);
+  csv_regex_validate: {
+    args: ['buffer', 'u64'],
+    returns: 'cstring',
+  },
+  // C signature:
   // void* csv_parser_find_split_offsets(const char* path, uint64_t shard_count, uint8_t delimiter);
   csv_parser_find_split_offsets: {
     args: ['cstring', 'u64', 'u8'],

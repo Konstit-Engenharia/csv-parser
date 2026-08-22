@@ -59,6 +59,12 @@ const startsWithCountOptions = {
   where: { column: 1, startsWith: 'A' },
 } satisfies CsvCountOptions;
 
+const regexCountOptions = {
+  chunkSize: 64 * 1024,
+  delimiter: ';',
+  where: { column: 1, regex: csv.re(/^A/u) },
+} satisfies CsvCountOptions;
+
 const multipleFilterRowsOptions = {
   columns,
   delimiter: ';',
@@ -73,6 +79,7 @@ const multipleFilterRowsOptions = {
 void csv.rows(path, strictRowsOptions);
 void csv.count(path, strictCountOptions);
 void csv.count(path, startsWithCountOptions);
+void csv.count(path, regexCountOptions);
 void csv.rows(path, multipleFilterRowsOptions);
 
 // @ts-expect-error parser options do not support string caching

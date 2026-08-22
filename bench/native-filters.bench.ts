@@ -10,6 +10,7 @@ import {
 } from '../src/index.ts';
 import { matchesBenchmarkName } from './benchmark-filter.ts';
 
+// Measures whether native RE2 filtering avoids the row materialization cost of JavaScript RegExp filtering.
 const FILE = Bun.env['CSV_BENCH_FILE'] ?? 'corpus/large/example.csv';
 const CHUNK_SIZE = Number(Bun.env['CSV_BENCH_CHUNK_SIZE'] ?? 8 * 1024 * 1024);
 const DELIMITER = Bun.env['CSV_BENCH_DELIMITER'] ?? ';';
@@ -18,6 +19,8 @@ const FILTER_VALUES = (Bun.env['CSV_BENCH_FILTER_VALUES'] ?? 'SP,RJ')
   .split(',')
   .filter((value) => value.length > 0);
 const FILTER_PREFIX = Bun.env['CSV_BENCH_FILTER_PREFIX'] ?? 'S';
+const FILTER_REGEX = new RegExp(Bun.env['CSV_BENCH_FILTER_REGEX'] ?? '^(?:SP|RJ)$', 'u');
+const NATIVE_FILTER_REGEX = csv.re(FILTER_REGEX);
 const SECOND_FILTER_COLUMN = Number(Bun.env['CSV_BENCH_SECOND_FILTER_COLUMN'] ?? 1);
 const SECOND_FILTER_PREFIX = Bun.env['CSV_BENCH_SECOND_FILTER_PREFIX'] ?? 'A';
 const SELECTED_COLUMNS = [FILTER_COLUMN];
@@ -44,6 +47,14 @@ const cases = [
       delimiter: DELIMITER,
       where: { column: FILTER_COLUMN, startsWith: FILTER_PREFIX },
     })],
+  ['js materialized selected column regex', () => countJsMaterializedSelectedRegex()],
+  ['js projected selected column regex', () => countJsProjectedRegex()],
+  ['native filter regex', () =>
+    csv.count(FILE, {
+      chunkSize: CHUNK_SIZE,
+      delimiter: DELIMITER,
+      where: { column: FILTER_COLUMN, regex: NATIVE_FILTER_REGEX },
+    })],
   ['js projected multiple filters', () => countJsProjectedMultipleFilters()],
   ['native multiple filters', () =>
     csv.count(FILE, {
@@ -66,6 +77,7 @@ console.log({
   filterColumn: FILTER_COLUMN,
   filterValues: FILTER_VALUES,
   filterPrefix: FILTER_PREFIX,
+  filterRegex: FILTER_REGEX.source,
   secondFilterColumn: SECOND_FILTER_COLUMN,
   secondFilterPrefix: SECOND_FILTER_PREFIX,
 });
@@ -103,12 +115,22 @@ if (jsMultipleRows !== undefined && nativeMultipleRows !== undefined && jsMultip
   throw new Error(`multiple filter benchmark result mismatch: JavaScript=${jsMultipleRows}, native=${nativeMultipleRows}`);
 }
 
+const jsRegexRows = measuredRows.get('js projected selected column regex');
+const nativeRegexRows = measuredRows.get('native filter regex');
+if (jsRegexRows !== undefined && nativeRegexRows !== undefined && jsRegexRows !== nativeRegexRows) {
+  throw new Error(`regex benchmark result mismatch: JavaScript=${jsRegexRows}, native=${nativeRegexRows}`);
+}
+
 async function countJsMaterializedSelectedIn(): Promise<number> {
   return countJsMaterializedSelected((value) => filterSet.has(value));
 }
 
 async function countJsMaterializedSelectedStartsWith(): Promise<number> {
   return countJsMaterializedSelected((value) => value.startsWith(FILTER_PREFIX));
+}
+
+async function countJsMaterializedSelectedRegex(): Promise<number> {
+  return countJsMaterializedSelected((value) => FILTER_REGEX.test(value));
 }
 
 async function countJsMaterializedSelected(predicate: (value: string) => boolean): Promise<number> {
@@ -130,6 +152,10 @@ async function countJsProjectedIn(): Promise<number> {
 
 async function countJsProjectedStartsWith(): Promise<number> {
   return countJsProjected((value) => value.startsWith(FILTER_PREFIX));
+}
+
+async function countJsProjectedRegex(): Promise<number> {
+  return countJsProjected((value) => FILTER_REGEX.test(value));
 }
 
 async function countJsProjectedMultipleFilters(): Promise<number> {
