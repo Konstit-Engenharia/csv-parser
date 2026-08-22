@@ -1,6 +1,6 @@
 import {
   countCsvFile,
-  countCsvFileWhereEquals,
+  csv,
   parseCsvFileProjected,
 } from '../../src/index.ts';
 import {
@@ -16,9 +16,10 @@ import {
 export const filterCases = [
   ['native count', () => countCsvFile(FILE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER })],
   ['native filter equals', () =>
-    countCsvFileWhereEquals(FILE, FILTER_COLUMN, FILTER_VALUE, {
+    csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
+      where: { column: FILTER_COLUMN, equals: FILTER_VALUE },
     })],
   ['native projected filter equals', () => countNativeProjectedFilteredRows()],
 ] as const satisfies readonly ExampleBenchCase[];

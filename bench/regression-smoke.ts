@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import {
   countCsvFile,
-  countCsvFileWhereEquals,
+  csv,
   parseCsvBuffer,
   parseCsvFile,
   parseCsvFileProjected,
@@ -80,10 +80,10 @@ async function collectProjectedHotRows(path: string): Promise<number> {
 }
 
 const csvPath = fileURLToPath(new URL(`../corpus/bench/regression-smoke-${ROWS}-rows.csv`, import.meta.url));
-const csv = readFileSync(csvPath);
+const csvBuffer = readFileSync(csvPath);
 
 await measureMedian('materialize buffer', () => {
-  const rows = parseCsvBuffer(csv);
+  const rows = parseCsvBuffer(csvBuffer);
   assertEqual(rows.length, EXPECTED_ROWS, 'materialized row count');
   assertEqual(rows[0]?.[0], 'id', 'header first column');
   assertEqual(rows[1]?.[2], 'Sao Paulo, SP', 'quoted field');
@@ -91,7 +91,7 @@ await measureMedian('materialize buffer', () => {
 });
 
 await measureMedian('strict materialize buffer', () => {
-  const rows = parseCsvBuffer(csv, { strict: true });
+  const rows = parseCsvBuffer(csvBuffer, { strict: true });
   assertEqual(rows.length, EXPECTED_ROWS, 'strict materialized row count');
   assertEqual(rows[ROWS]?.[3], (ROWS - 1) % 10 === 0 ? 'hot' : 'cold', 'strict last status');
 });
@@ -102,8 +102,8 @@ await measureMedian('count file', async () => {
 });
 
 await measureMedian('count where equals', async () => {
-  const count = await countCsvFileWhereEquals(csvPath, 3, 'hot', { chunkSize: 4_096 });
-  assertEqual(count, HOT_ROWS, 'countCsvFileWhereEquals hot row count');
+  const count = await csv.count(csvPath, { chunkSize: 4_096, where: { column: 3, equals: 'hot' } });
+  assertEqual(count, HOT_ROWS, 'csv.count filtered row count');
 });
 
 await measureMedian('stream materialize file', async () => {

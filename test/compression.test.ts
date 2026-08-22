@@ -18,9 +18,6 @@ import {
 } from 'node:zlib';
 import {
   countCsvFile,
-  countCsvFileWhereEquals,
-  countCsvFileWhereIn,
-  countCsvFileWhereStartsWith,
   csv,
   type CsvCountOptions,
   type CsvParallelCountOptions,
@@ -213,9 +210,9 @@ describe('compressed CSV file streams', () => {
       ['3', 'SP'],
     ]);
     expect(await countCsvFile(path, { compression: 'gzip', delimiter: ';' })).toBe(4);
-    expect(await countCsvFileWhereEquals(path, 2, 'SP', { compression: 'gzip', delimiter: ';' })).toBe(2);
-    expect(await countCsvFileWhereIn(path, 2, ['SP', 'RJ'], { compression: 'gzip', delimiter: ';' })).toBe(3);
-    expect(await countCsvFileWhereStartsWith(path, 1, 'B', { compression: 'gzip', delimiter: ';' })).toBe(1);
+    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: { column: 2, equals: 'SP' } })).toBe(2);
+    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
+    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: { column: 1, startsWith: 'B' } })).toBe(1);
   });
 
   test('propagates decompression errors', async () => {

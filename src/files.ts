@@ -14,7 +14,6 @@ import {
   strictSchemaValidator,
 } from './strict-schema.ts';
 import type {
-  CsvFieldValue,
   CsvFileOptions,
   CsvNativeProjectionOptions,
   CsvParserOptions,
@@ -189,63 +188,5 @@ export async function countCsvFile(path: string, options: CsvFileOptions = {}): 
     rows += parser.writeCount(chunk);
   }
   rows += parser.endCount();
-  return rows;
-}
-
-export async function countCsvFileWhereEquals(
-  path: string,
-  columnIndex: number,
-  value: CsvFieldValue,
-  options: CsvFileOptions = {},
-): Promise<number> {
-  rejectStrictSchemaUnsupported(options, 'count filters');
-  await using input = await prepareCsvFileInput(path, options);
-  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
-  const filter = { column: columnIndex, value };
-  let rows = 0;
-  for await (const chunk of input.chunks()) {
-    rows += parser.writeCountWhereEquals(chunk, filter);
-  }
-  rows += parser.endCountWhereEquals(filter);
-  return rows;
-}
-
-export async function countCsvFileWhereIn(
-  path: string,
-  columnIndex: number,
-  values: readonly CsvFieldValue[],
-  options: CsvFileOptions = {},
-): Promise<number> {
-  rejectStrictSchemaUnsupported(options, 'count filters');
-  if (values.length === 0) {
-    return 0;
-  }
-
-  await using input = await prepareCsvFileInput(path, options);
-  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
-  const filter = { column: columnIndex, values };
-  let rows = 0;
-  for await (const chunk of input.chunks()) {
-    rows += parser.writeCountWhereIn(chunk, filter);
-  }
-  rows += parser.endCountWhereIn(filter);
-  return rows;
-}
-
-export async function countCsvFileWhereStartsWith(
-  path: string,
-  columnIndex: number,
-  prefix: CsvFieldValue,
-  options: CsvFileOptions = {},
-): Promise<number> {
-  rejectStrictSchemaUnsupported(options, 'count filters');
-  await using input = await prepareCsvFileInput(path, options);
-  using parser = new NativeCsvParser({ ...options, delimiter: input.delimiter });
-  const filter = { column: columnIndex, prefix };
-  let rows = 0;
-  for await (const chunk of input.chunks()) {
-    rows += parser.writeCountWhereStartsWith(chunk, filter);
-  }
-  rows += parser.endCountWhereStartsWith(filter);
   return rows;
 }

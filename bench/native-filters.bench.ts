@@ -4,8 +4,6 @@ import {
   statSync,
 } from 'node:fs';
 import {
-  countCsvFileWhereIn,
-  countCsvFileWhereStartsWith,
   csv,
   NativeCsvParser,
   parseCsvFileProjected,
@@ -33,16 +31,18 @@ const cases = [
   ['js materialized selected column filter in', () => countJsMaterializedSelectedIn()],
   ['js projected selected column filter in', () => countJsProjectedIn()],
   ['native filter in', () =>
-    countCsvFileWhereIn(FILE, FILTER_COLUMN, FILTER_VALUES, {
+    csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
+      where: { column: FILTER_COLUMN, in: FILTER_VALUES },
     })],
   ['js materialized selected column startsWith', () => countJsMaterializedSelectedStartsWith()],
   ['js projected selected column startsWith', () => countJsProjectedStartsWith()],
   ['native filter startsWith', () =>
-    countCsvFileWhereStartsWith(FILE, FILTER_COLUMN, FILTER_PREFIX, {
+    csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
+      where: { column: FILTER_COLUMN, startsWith: FILTER_PREFIX },
     })],
   ['js projected multiple filters', () => countJsProjectedMultipleFilters()],
   ['native multiple filters', () =>

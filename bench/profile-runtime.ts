@@ -5,7 +5,7 @@ import {
 } from 'node:fs';
 import {
   countCsvFile,
-  countCsvFileWhereEquals,
+  csv,
   NativeCsvParser,
   parseCsvFile,
   parseCsvFileProjected,
@@ -73,7 +73,11 @@ async function runMode(mode: ProfileMode): Promise<number> {
     case 'count':
       return countCsvFile(FILE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER });
     case 'filter-equals':
-      return countCsvFileWhereEquals(FILE, FILTER_COLUMN, FILTER_VALUE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER });
+      return csv.count(FILE, {
+        chunkSize: CHUNK_SIZE,
+        delimiter: DELIMITER,
+        where: { column: FILTER_COLUMN, equals: FILTER_VALUE },
+      });
     case 'project-filter-equals-native':
       return countNativeProjectedFilteredRows();
   }

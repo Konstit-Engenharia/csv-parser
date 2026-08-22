@@ -13,9 +13,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   countCsvFile,
-  countCsvFileWhereEquals,
-  countCsvFileWhereIn,
-  countCsvFileWhereStartsWith,
   csv,
   NativeCsvParser,
   parallelCount,
@@ -99,7 +96,7 @@ describe('automatic delimiter detection', () => {
     ).toBe(3);
   });
 
-  test('supports batch callbacks and direct file helpers', async () => {
+  test('supports batch callbacks, filtered counts, and direct file helpers', async () => {
     const batchRows: string[][] = [];
     for await (using batch of csv.batches(semicolonPath, { delimiter: 'auto' })) {
       batchRows.push(...batch.rows());
@@ -139,9 +136,9 @@ describe('automatic delimiter detection', () => {
       ['2', 'us'],
     ]);
     expect(await countCsvFile(semicolonPath, { delimiter: 'auto' })).toBe(3);
-    expect(await countCsvFileWhereEquals(semicolonPath, 2, 'br', { delimiter: 'auto' })).toBe(1);
-    expect(await countCsvFileWhereIn(semicolonPath, 2, ['br', 'us'], { delimiter: 'auto' })).toBe(2);
-    expect(await countCsvFileWhereStartsWith(semicolonPath, 1, 'A', { delimiter: 'auto' })).toBe(1);
+    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: { column: 2, equals: 'br' } })).toBe(1);
+    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: { column: 2, in: ['br', 'us'] } })).toBe(2);
+    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: { column: 1, startsWith: 'A' } })).toBe(1);
   });
 
   test('uses a confirmed extension hint to resolve a probe tie', async () => {

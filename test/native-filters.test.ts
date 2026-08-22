@@ -3,16 +3,8 @@ import {
   expect,
   test,
 } from 'bun:test';
-import {
-  countCsvFileWhereEquals,
-  countCsvFileWhereIn,
-  countCsvFileWhereStartsWith,
-  NativeCsvParser,
-} from '../src/index.ts';
-import {
-  csvFixturePath,
-  readCsvFixture,
-} from './fixtures.ts';
+import { NativeCsvParser } from '../src/index.ts';
+import { readCsvFixture } from './fixtures.ts';
 
 describe('NativeCsvParser native filters', () => {
   test('projects and filters inside native parser', () => {
@@ -126,24 +118,6 @@ describe('NativeCsvParser native filters', () => {
           'filter column out of range: 2025',
         );
     }
-  });
-
-  test('countCsvFileWhereEquals filters natively by column bytes', async () => {
-    const path = csvFixturePath('native/quoted-semicolon-people-with-header.csv');
-    expect(await countCsvFileWhereEquals(path, 2, 'SP', { delimiter: ';' })).toBe(2);
-  });
-
-  test('countCsvFileWhereIn filters natively by a set of byte values', async () => {
-    const path = csvFixturePath('native/quoted-semicolon-people-with-mg.csv');
-    expect(await countCsvFileWhereIn(path, 2, ['SP', 'RJ'], { delimiter: ';', chunkSize: 11 })).toBe(3);
-    expect(await countCsvFileWhereIn(path, 2, [Buffer.from('MG')], { delimiter: ';', chunkSize: 7 })).toBe(1);
-    expect(await countCsvFileWhereIn(path, 2, [], { delimiter: ';' })).toBe(0);
-  });
-
-  test('countCsvFileWhereStartsWith filters natively by prefix bytes', async () => {
-    const path = csvFixturePath('native/quoted-semicolon-cities.csv');
-    expect(await countCsvFileWhereStartsWith(path, 2, 'Sa', { delimiter: ';', chunkSize: 13 })).toBe(2);
-    expect(await countCsvFileWhereStartsWith(path, 2, Buffer.from('Rio'), { delimiter: ';', chunkSize: 9 })).toBe(1);
   });
 
   test('NativeCsvParser streams in and startsWith native filters across chunks', () => {

@@ -63,15 +63,6 @@ export {
   workerPool,
 } from './api.ts';
 export { NativeCsvBatch, NativeCsvRowView } from './batches.ts';
-export {
-  countCsvFile,
-  countCsvFileWhereEquals,
-  countCsvFileWhereIn,
-  countCsvFileWhereStartsWith,
-  countTrustedNewlineRows,
-  parseCsvBuffer,
-  parseCsvFile,
-  parseCsvFileProjected,
-} from './files.ts';
+export { countCsvFile, countTrustedNewlineRows, parseCsvBuffer, parseCsvFile, parseCsvFileProjected } from './files.ts';
 export { defineColumnarOptions, defineCountOptions, defineRowsOptions, defineRowViewOptions } from './options.ts';
 export { NativeCsvParser } from './parser.ts';
