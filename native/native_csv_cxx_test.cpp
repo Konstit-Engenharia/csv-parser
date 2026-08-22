@@ -38,6 +38,7 @@ uint64_t csv_parser_write_count_where_all(void* parser, const uint8_t* data, uin
 uint64_t csv_parser_finish_count_where_all(void* parser, const uint32_t* filter_descriptors, uint64_t filter_count,
                                            const uint8_t* values_data, uint64_t values_data_len,
                                            const uint32_t* value_offsets, uint64_t total_value_count);
+const char* csv_regex_validate(const uint8_t* pattern, uint64_t pattern_len);
 uint64_t csv_parser_write_count_where_equals(void* parser, const uint8_t* data, uint64_t len, bool final,
                                              uint32_t filter_column, const uint8_t* filter_value,
                                              uint64_t filter_value_len);
@@ -701,6 +702,45 @@ TEST_CASE("native C ABI evaluates multiple filters on one column") {
   REQUIRE(csv_parser_write_count_where_all(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true,
                                            filters, 2, reinterpret_cast<const uint8_t*>(values.data()), values.size(),
                                            value_offsets, 2) == 2);
+  csv_parser_destroy(parser);
+}
+
+TEST_CASE("native C ABI compiles one RE2 filter across chunks") {
+  const std::string input = "alpha,SP\nalpine,RJ\nbeta,MG\ngamma,SP\n";
+  const std::string pattern = "^(?:SP|RJ)$";
+  const uint32_t value_offsets[] = {0, static_cast<uint32_t>(pattern.size())};
+  const uint32_t filters[] = {4, 1, 0, 1};
+
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  uint64_t rows = 0;
+  for (size_t offset = 0; offset < input.size(); offset += 3) {
+    const size_t chunk_size = std::min<size_t>(3, input.size() - offset);
+    rows += csv_parser_write_count_where_all(
+        parser, reinterpret_cast<const uint8_t*>(input.data() + offset), chunk_size, false, filters, 1,
+        reinterpret_cast<const uint8_t*>(pattern.data()), pattern.size(), value_offsets, 1);
+  }
+  rows += csv_parser_finish_count_where_all(parser, filters, 1, reinterpret_cast<const uint8_t*>(pattern.data()),
+                                            pattern.size(), value_offsets, 1);
+
+  REQUIRE(rows == 3);
+  REQUIRE(std::string_view(csv_parser_last_error(parser)).empty());
+  csv_parser_destroy(parser);
+}
+
+TEST_CASE("native C ABI reports invalid RE2 syntax") {
+  const std::string invalid = "(?=SP)";
+  REQUIRE(std::string_view(csv_regex_validate(reinterpret_cast<const uint8_t*>(invalid.data()), invalid.size()))
+              .find("invalid perl operator") != std::string_view::npos);
+
+  const uint32_t value_offsets[] = {0, static_cast<uint32_t>(invalid.size())};
+  const uint32_t filters[] = {4, 0, 0, 1};
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, filters, 1,
+                                           reinterpret_cast<const uint8_t*>(invalid.data()), invalid.size(),
+                                           value_offsets, 1) == 0);
+  REQUIRE(std::string_view(csv_parser_last_error(parser)).find("invalid perl operator") != std::string_view::npos);
   csv_parser_destroy(parser);
 }
 

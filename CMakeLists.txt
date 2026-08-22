@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.25)
 
 project(konstit_csv_parser LANGUAGES C CXX)
 
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
   message(FATAL_ERROR "konstit_csv_parser supports Clang and AppleClang only")
 endif()
@@ -47,8 +53,11 @@ endif()
 
 include(FetchContent)
 
-set(BUILD_SHARED_LIBS OFF)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(ABSL_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(ABSL_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
 set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
@@ -61,6 +70,10 @@ set(WITH_FUZZERS OFF CACHE BOOL "" FORCE)
 set(WITH_GTEST OFF CACHE BOOL "" FORCE)
 set(WITH_GZFILEOP OFF CACHE BOOL "" FORCE)
 set(WITH_NATIVE_INSTRUCTIONS ON CACHE BOOL "" FORCE)
+set(RE2_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(RE2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(RE2_INSTALL OFF CACHE BOOL "" FORCE)
+set(RE2_TEST OFF CACHE BOOL "" FORCE)
 if(CSV_NATIVE_ARCH STREQUAL "x86_64")
   set(NATIVE_ARCH_OVERRIDE "-mavx2" CACHE STRING "" FORCE)
 else()
@@ -68,9 +81,25 @@ else()
 endif()
 
 FetchContent_Declare(
+  abseil
+  GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+  GIT_TAG d38452e1ee03523a208362186fd42248ff2609f6 # 20250814.1
+  GIT_SHALLOW FALSE
+  EXCLUDE_FROM_ALL
+  SYSTEM
+)
+FetchContent_Declare(
   highway
   GIT_REPOSITORY https://github.com/google/highway.git
   GIT_TAG 2607d3b5b0113992fe84d3848859eae13b3b52c1 # 1.4.0
+  GIT_SHALLOW FALSE
+  EXCLUDE_FROM_ALL
+  SYSTEM
+)
+FetchContent_Declare(
+  re2
+  GIT_REPOSITORY https://github.com/google/re2.git
+  GIT_TAG 927f5d53caf8111721e734cf24724686bb745f55 # 2025-11-05
   GIT_SHALLOW FALSE
   EXCLUDE_FROM_ALL
   SYSTEM
@@ -91,7 +120,7 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
   SYSTEM
 )
-FetchContent_MakeAvailable(highway unordered_dense)
+FetchContent_MakeAvailable(abseil highway re2 unordered_dense)
 set(CSV_NATIVE_BUILD_TESTING "${BUILD_TESTING}")
 set(BUILD_TESTING OFF)
 FetchContent_MakeAvailable(zlib_ng)
@@ -137,7 +166,7 @@ endfunction()
 csv_native_target_options(csv_native)
 target_compile_options(csv_native PRIVATE -fno-exceptions -fno-rtti)
 target_link_options(csv_native PRIVATE -fno-exceptions -fno-rtti)
-target_link_libraries(csv_native PRIVATE hwy unordered_dense::unordered_dense zlib-ng::zlibstatic)
+target_link_libraries(csv_native PRIVATE hwy re2::re2 unordered_dense::unordered_dense zlib-ng::zlibstatic)
 
 set_target_properties(csv_native PROPERTIES
   CXX_VISIBILITY_PRESET hidden

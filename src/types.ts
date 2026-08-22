@@ -22,6 +22,14 @@ export type CsvRow = string[];
 export type CsvColumns = readonly number[];
 export type CsvFieldValue = string | Buffer | Uint8Array;
 
+declare const csvRegexBrand: unique symbol;
+
+export interface CsvRegex {
+  readonly source: string;
+  readonly flags: string;
+  readonly [csvRegexBrand]: true;
+}
+
 export interface CsvFieldRange {
   start: number;
   end: number;
@@ -55,6 +63,7 @@ export type CsvShardingOptions = Omit<CsvFileOptions, 'compression'> & {
 export type CsvWherePredicate =
   | CsvWhereEqualsFilter
   | CsvWhereInFilter
+  | CsvWhereRegexFilter
   | CsvWhereStartsWithFilter;
 
 export interface CsvWhereAllFilter {
@@ -78,7 +87,12 @@ export interface CsvStartsWithFilter {
   prefix: CsvFieldValue;
 }
 
-export type CsvNativeFilter = CsvEqualsFilter | CsvInFilter | CsvStartsWithFilter;
+export interface CsvRegexFilter {
+  column: number;
+  regex: CsvRegex;
+}
+
+export type CsvNativeFilter = CsvEqualsFilter | CsvInFilter | CsvRegexFilter | CsvStartsWithFilter;
 
 export interface CsvWhereEqualsFilter {
   column: number;
@@ -94,6 +108,8 @@ export interface CsvWhereStartsWithFilter {
   column: number;
   startsWith: CsvFieldValue;
 }
+
+export type CsvWhereRegexFilter = CsvRegexFilter;
 
 export interface CsvNativeProjectionOptions {
   selectedColumns?: CsvColumns;

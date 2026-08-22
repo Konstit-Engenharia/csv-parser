@@ -354,38 +354,36 @@ export class NativeCsvParser {
     const normalized = normalizeNativeFilters(filters);
     const handle = this.#requireHandle();
     const input = normalizeChunk(chunk);
-    return u64ToSafeNumber(
-      native.symbols.csv_parser_write_count_where_all(
-        handle,
-        input,
-        BigInt(input.byteLength),
-        final,
-        normalized.descriptors,
-        BigInt(normalized.filterCount),
-        normalized.valuesData,
-        BigInt(normalized.valuesDataLength),
-        normalized.valueOffsets,
-        BigInt(normalized.valueCount),
-      ),
-      'CSV filtered row count',
+    const count = native.symbols.csv_parser_write_count_where_all(
+      handle,
+      input,
+      BigInt(input.byteLength),
+      final,
+      normalized.descriptors,
+      BigInt(normalized.filterCount),
+      normalized.valuesData,
+      BigInt(normalized.valuesDataLength),
+      normalized.valueOffsets,
+      BigInt(normalized.valueCount),
     );
+    this.#throwIfNativeError();
+    return u64ToSafeNumber(count, 'CSV filtered row count');
   }
 
   endCountWhereAll(filters: readonly CsvNativeFilter[]): number {
     this.#rejectStrictUnsupported('count filters');
     const normalized = normalizeNativeFilters(filters);
-    return u64ToSafeNumber(
-      native.symbols.csv_parser_finish_count_where_all(
-        this.#requireHandle(),
-        normalized.descriptors,
-        BigInt(normalized.filterCount),
-        normalized.valuesData,
-        BigInt(normalized.valuesDataLength),
-        normalized.valueOffsets,
-        BigInt(normalized.valueCount),
-      ),
-      'CSV filtered row count',
+    const count = native.symbols.csv_parser_finish_count_where_all(
+      this.#requireHandle(),
+      normalized.descriptors,
+      BigInt(normalized.filterCount),
+      normalized.valuesData,
+      BigInt(normalized.valuesDataLength),
+      normalized.valueOffsets,
+      BigInt(normalized.valueCount),
     );
+    this.#throwIfNativeError();
+    return u64ToSafeNumber(count, 'CSV filtered row count');
   }
 
   reset(): void {
@@ -423,6 +421,13 @@ export class NativeCsvParser {
       return 'parser is closed';
     }
     return native.symbols.csv_parser_last_error(this.#handle) ?? 'native parser error unavailable';
+  }
+
+  #throwIfNativeError(): void {
+    const error = this.#lastError();
+    if (error.length > 0) {
+      throw new Error(`native CSV parser failed: ${error}`);
+    }
   }
 
   #rejectStrictUnsupported(operation: string): void {

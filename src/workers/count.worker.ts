@@ -1,7 +1,10 @@
 import { createReadStream } from 'node:fs';
 import { DEFAULT_CHUNK_SIZE } from '../native.ts';
 import { NativeCsvParser } from '../parser.ts';
-import type { CsvEncoding } from '../types.ts';
+import type {
+  CsvEncoding,
+  CsvRegex,
+} from '../types.ts';
 
 interface WorkerEqualsFilterMessage {
   column: number;
@@ -18,7 +21,16 @@ interface WorkerStartsWithFilterMessage {
   prefix: Uint8Array;
 }
 
-type WorkerFilterMessage = WorkerEqualsFilterMessage | WorkerInFilterMessage | WorkerStartsWithFilterMessage;
+interface WorkerRegexFilterMessage {
+  column: number;
+  regex: CsvRegex;
+}
+
+type WorkerFilterMessage =
+  | WorkerEqualsFilterMessage
+  | WorkerInFilterMessage
+  | WorkerRegexFilterMessage
+  | WorkerStartsWithFilterMessage;
 
 interface WorkerCountMessage {
   chunkSize?: number;

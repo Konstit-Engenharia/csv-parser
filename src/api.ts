@@ -9,7 +9,10 @@ import {
   findCsvSafeShards as findCsvSafeShardsNative,
   findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
 } from './files.ts';
-import { normalizeColumns } from './normalize.ts';
+import {
+  normalizeColumns,
+  validateRegex,
+} from './normalize.ts';
 import { NativeCsvParser } from './parser.ts';
 import {
   rejectStrictSchemaUnsupported,
@@ -30,6 +33,7 @@ import type {
   CsvParseOptions,
   CsvParserOptions,
   CsvProjectedRow,
+  CsvRegex,
   CsvRowsOptions,
   CsvRowView,
   CsvRowViewCallback,
@@ -416,7 +420,20 @@ export function workerPool(path: string, options: CsvWorkerPoolOptions): CsvWork
   return createWorkerPool(path, options);
 }
 
+export function re(pattern: RegExp): CsvRegex {
+  if (!(pattern instanceof RegExp)) {
+    throw new TypeError('csv.re() requires a RegExp');
+  }
+  const regex = {
+    flags: pattern.flags,
+    source: pattern.source,
+  };
+  validateRegex(regex);
+  return Object.freeze(regex) as CsvRegex;
+}
+
 export const csv = {
+  re,
   workerPool,
   parse,
   rows,
@@ -811,5 +828,8 @@ function toNativeFilter(predicate: CsvWherePredicate): CsvNativeFilter {
   if ('in' in predicate) {
     return { column: predicate.column, values: predicate.in };
   }
-  return { column: predicate.column, prefix: predicate.startsWith };
+  if ('startsWith' in predicate) {
+    return { column: predicate.column, prefix: predicate.startsWith };
+  }
+  return { column: predicate.column, regex: predicate.regex };
 }

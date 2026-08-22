@@ -7,10 +7,12 @@ import { DEFAULT_CHUNK_SIZE } from './native.ts';
 import {
   MAX_FILTER_COUNT,
   normalizeFilterColumn,
+  validateRegex,
 } from './normalize.ts';
 import type {
   CsvFieldValue,
   CsvParallelCountOptions,
+  CsvRegex,
   CsvWhereFilter,
   CsvWherePredicate,
 } from './types.ts';
@@ -30,7 +32,16 @@ interface WorkerStartsWithFilterMessage {
   prefix: Uint8Array;
 }
 
-type WorkerFilterMessage = WorkerEqualsFilterMessage | WorkerInFilterMessage | WorkerStartsWithFilterMessage;
+interface WorkerRegexFilterMessage {
+  column: number;
+  regex: CsvRegex;
+}
+
+type WorkerFilterMessage =
+  | WorkerEqualsFilterMessage
+  | WorkerInFilterMessage
+  | WorkerRegexFilterMessage
+  | WorkerStartsWithFilterMessage;
 
 interface WorkerCountMessage {
   chunkSize?: number;
@@ -184,9 +195,16 @@ function normalizePredicate(predicate: CsvWherePredicate): WorkerFilterMessage {
       values: predicate.in.map((value) => normalizeFieldValue(value)),
     };
   }
+  if ('startsWith' in predicate) {
+    return {
+      column: normalizeFilterColumn(predicate.column),
+      prefix: normalizeFieldValue(predicate.startsWith),
+    };
+  }
+  validateRegex(predicate.regex);
   return {
     column: normalizeFilterColumn(predicate.column),
-    prefix: normalizeFieldValue(predicate.startsWith),
+    regex: predicate.regex,
   };
 }
 
