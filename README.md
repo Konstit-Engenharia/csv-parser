@@ -97,12 +97,20 @@ csv count data.csv
 ```
 
 The CLI uses one process and exposes the serial `CsvCountOptions` fields as flags. It does not expose `workerCount`.
-Run `csv count --help` for the complete list. Pass filters as JSON using the same API field names. CLI filter values are
-strings; use the TypeScript API for `workerCount` and binary `Buffer` or `Uint8Array` values.
+Run `csv count --help` for the complete list. Friendly filter flags use `column=value`. Repeat `--where-in` for each
+accepted value. Different filter clauses combine with AND. CLI filter values are strings; use the TypeScript API for
+`workerCount` and binary `Buffer` or `Uint8Array` values.
 
 ```sh
-csv count data.csv --delimiter ';' --where '{"column":2,"equals":"SP"}'
-csv count data.csv --where '{"column":1,"regex":{"source":"^A","flags":"i"}}'
+csv count data.csv --delimiter ';' --where-eq 2=SP
+csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
+csv count data.csv --where-regex '1=/^A/i'
+```
+
+For generated or advanced filters, `--where <json>` keeps the `CsvWhereFilter` API shape:
+
+```sh
+csv count data.csv --where '{"all":[{"column":2,"in":["SP","RJ"]},{"column":1,"startsWith":"A"}]}'
 ```
 
 ## High-Level API

@@ -54,21 +54,29 @@ Parser options:
   --require-header                 Require a header row; requires --strict
   --min-data-rows <count>          Require a non-negative data row count; requires --strict
 
-Filter option:
-  --where <json>                   CsvWhereFilter JSON with string field values
+Friendly filter options (repeatable):
+  --where-eq <column=value>        Match one exact value
+  --where-in <column=value>        Add a value to a column IN filter
+  --where-prefix <column=value>    Match a value prefix
+  --where-regex <column=/re/flags> Match an RE2-compatible JavaScript regex
 
-Regex filters support flags i, m, s, and u, and use:
-  {"column":1,"regex":{"source":"^A","flags":"i"}}
+Advanced filter option:
+  --where <json>                   Advanced CsvWhereFilter JSON
+
+All filter clauses use AND. Repeated --where-in clauses for the same column
+form one IN filter. Quote values that contain spaces or shell characters.
+Regex flags can be i, m, s, and u.
 
 Compatibility:
-  Strict mode cannot use --where.
+  Strict mode cannot use filter options.
   --fixed-columns and schema options require --strict.
   ZIP options require --compression zip and --zip-entry.
 
 Examples:
   csv count data.csv --delimiter ';' --chunk-size 262144
-  csv count data.csv --where '{"column":2,"equals":"SP"}'
-  csv count data.csv --where '{"all":[{"column":2,"in":["SP","RJ"]},{"column":1,"startsWith":"A"}]}'`;
+  csv count data.csv --where-eq 2=SP
+  csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
+  csv count data.csv --where-regex '1=/^ana/i'`;
 
 const countOptionDefinitions = {
   'columns': { type: 'string' },
@@ -86,6 +94,10 @@ const countOptionDefinitions = {
   'selected-columns': { type: 'string' },
   'strict': { type: 'boolean' },
   'where': { type: 'string' },
+  'where-eq': { multiple: true, type: 'string' },
+  'where-in': { multiple: true, type: 'string' },
+  'where-prefix': { multiple: true, type: 'string' },
+  'where-regex': { multiple: true, type: 'string' },
   'zip-entry': { type: 'string' },
 } as const;
 
@@ -182,9 +194,7 @@ function parseCountInput(arguments_: readonly string[]): CountInput {
   if (values['min-data-rows'] !== undefined) {
     options.minDataRows = parseInteger(values['min-data-rows'], 'minimum data rows', 0);
   }
-  if (values.where !== undefined) {
-    options.where = parseWhere(values.where);
-  }
+  options.where = parseWhereOptions(values);
 
   options.compression = parseCompression(values);
   validateCountOptionCombinations(options);
@@ -282,7 +292,7 @@ function validateCountOptionCombinations(options: CsvApiFileOptions): void {
     throw new Error('--fixed-columns requires --strict');
   }
   if (options.strict === true && options.where !== undefined) {
-    throw new Error('--strict cannot be combined with --where');
+    throw new Error('--strict cannot be combined with filter options');
   }
 }
 
@@ -301,7 +311,80 @@ function parseUint32(value: string, label: string): number {
   return number;
 }
 
-function parseWhere(value: string): CsvWhereFilter {
+function parseWhereOptions(values: {
+  readonly 'where'?: string;
+  readonly 'where-eq'?: readonly string[];
+  readonly 'where-in'?: readonly string[];
+  readonly 'where-prefix'?: readonly string[];
+  readonly 'where-regex'?: readonly string[];
+}): CsvWhereFilter | undefined {
+  const predicates: CsvWherePredicate[] = [];
+  if (values.where !== undefined) {
+    const jsonFilter = parseWhereJson(values.where);
+    if ('all' in jsonFilter) {
+      predicates.push(...jsonFilter.all);
+    } else {
+      predicates.push(jsonFilter);
+    }
+  }
+
+  for (const expression of values['where-eq'] ?? []) {
+    const { column, value } = parseColumnValue(expression, '--where-eq');
+    predicates.push({ column, equals: value });
+  }
+
+  const inValuesByColumn = new Map<number, string[]>();
+  for (const expression of values['where-in'] ?? []) {
+    const { column, value } = parseColumnValue(expression, '--where-in');
+    const columnValues = inValuesByColumn.get(column);
+    if (columnValues === undefined) {
+      inValuesByColumn.set(column, [value]);
+    } else {
+      columnValues.push(value);
+    }
+  }
+  for (const [column, inValues,] of inValuesByColumn) {
+    predicates.push({ column, in: inValues });
+  }
+
+  for (const expression of values['where-prefix'] ?? []) {
+    const { column, value } = parseColumnValue(expression, '--where-prefix');
+    predicates.push({ column, startsWith: value });
+  }
+  for (const expression of values['where-regex'] ?? []) {
+    predicates.push(parseRegexExpression(expression));
+  }
+
+  if (predicates.length === 0) {
+    return undefined;
+  }
+  validatePredicateLimits(predicates);
+  const firstPredicate = predicates[0];
+  return predicates.length === 1 && firstPredicate !== undefined ? firstPredicate : { all: predicates };
+}
+
+function parseColumnValue(expression: string, option: string): { column: number; value: string; } {
+  const separator = expression.indexOf('=');
+  if (separator <= 0) {
+    throw new Error(`${option} must use <column>=<value>: ${JSON.stringify(expression)}`);
+  }
+  const column = parseInteger(expression.slice(0, separator), `${option} column`, 0);
+  normalizeFilterColumn(column);
+  return { column, value: expression.slice(separator + 1) };
+}
+
+function parseRegexExpression(expression: string): CsvWherePredicate {
+  const { column, value } = parseColumnValue(expression, '--where-regex');
+  const closingSlash = value.lastIndexOf('/');
+  if (!value.startsWith('/') || closingSlash === 0) {
+    throw new Error(`--where-regex must use <column>=/<pattern>/<flags>: ${JSON.stringify(expression)}`);
+  }
+  const source = value.slice(1, closingSlash);
+  const flags = value.slice(closingSlash + 1);
+  return { column, regex: csv.re(new RegExp(source, flags)) };
+}
+
+function parseWhereJson(value: string): CsvWhereFilter {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -316,18 +399,21 @@ function parseWhere(value: string): CsvWhereFilter {
     if (!Array.isArray(parsed['all']) || parsed['all'].length === 0) {
       throw new Error('--where.all must be a non-empty array');
     }
-    if (parsed['all'].length > MAX_FILTER_COUNT) {
-      throw new Error(`filter count out of range: ${String(parsed['all'].length)}`);
-    }
-    const regexFilterCount = parsed['all'].filter((predicate) => isObject(predicate) && 'regex' in predicate).length;
-    if (regexFilterCount > MAX_REGEX_FILTER_COUNT) {
-      throw new Error(`regex filter count out of range: ${String(regexFilterCount)}`);
-    }
-    return {
-      all: parsed['all'].map((predicate, index) => parseWherePredicate(predicate, `--where.all[${String(index)}]`)),
-    };
+    const predicates = parsed['all'].map((predicate, index) => parseWherePredicate(predicate, `--where.all[${String(index)}]`));
+    validatePredicateLimits(predicates);
+    return { all: predicates };
   }
   return parseWherePredicate(parsed, '--where');
+}
+
+function validatePredicateLimits(predicates: readonly CsvWherePredicate[]): void {
+  if (predicates.length > MAX_FILTER_COUNT) {
+    throw new Error(`filter count out of range: ${String(predicates.length)}`);
+  }
+  const regexFilterCount = predicates.filter((predicate) => 'regex' in predicate).length;
+  if (regexFilterCount > MAX_REGEX_FILTER_COUNT) {
+    throw new Error(`regex filter count out of range: ${String(regexFilterCount)}`);
+  }
 }
 
 function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {

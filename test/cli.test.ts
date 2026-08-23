@@ -31,6 +31,7 @@ beforeAll(async () => {
     join(temporaryDirectory, 'high-ratio.zip'),
     createZip([{ data: Buffer.from('a;b\n'.repeat(4_096)), method: 8, name: 'input.csv' }]),
   );
+  await Bun.write(join(temporaryDirectory, 'equals.csv'), 'id,value\n1,a=b\n2,other\n');
   await Bun.write(join(temporaryDirectory, 'empty.csv'), '');
 });
 
@@ -299,7 +300,7 @@ describe('csv CLI', () => {
   ] as const;
 
   for (const { expected, filter, name } of filterCases) {
-    test(`supports a ${name} filter`, () => {
+    test(`supports a ${name} JSON filter`, () => {
       const result = runCli(
         'count',
         csvFixturePath('api/unquoted-people-sp-filter.csv'),
@@ -314,6 +315,76 @@ describe('csv CLI', () => {
       expect(result.stderr.toString()).toBe('');
     });
   }
+
+  const friendlyFilterCases: readonly {
+    arguments: readonly string[];
+    expected: string;
+    name: string;
+  }[] = [
+    {
+      arguments: ['--where-eq', '2=SP'],
+      expected: '2\n',
+      name: 'equality',
+    },
+    {
+      arguments: ['--where-in', '2=SP', '--where-in', '2=RJ'],
+      expected: '3\n',
+      name: 'grouped IN',
+    },
+    {
+      arguments: ['--where-prefix', '1=B'],
+      expected: '1\n',
+      name: 'prefix',
+    },
+    {
+      arguments: ['--where-regex', '2=/^sp$/i'],
+      expected: '2\n',
+      name: 'regex',
+    },
+    {
+      arguments: [
+        '--where-in',
+        '2=SP',
+        '--where-in',
+        '2=RJ',
+        '--where-prefix',
+        '1=B',
+        '--where-eq',
+        '0=3',
+      ],
+      expected: '1\n',
+      name: 'implicit AND',
+    },
+    {
+      arguments: ['--where', '{"column":2,"in":["SP","RJ"]}', '--where-prefix', '1=B'],
+      expected: '1\n',
+      name: 'JSON and friendly AND',
+    },
+  ];
+
+  for (const filterCase of friendlyFilterCases) {
+    test(`supports ${filterCase.name} filter flags`, () => {
+      const result = runCli(
+        'count',
+        csvFixturePath('api/unquoted-people-sp-filter.csv'),
+        '--delimiter',
+        ';',
+        ...filterCase.arguments,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toBe(filterCase.expected);
+      expect(result.stderr.toString()).toBe('');
+    });
+  }
+
+  test('allows equals signs in friendly filter values', () => {
+    const result = runCli('count', join(temporaryDirectory, 'equals.csv'), '--where-eq', '1=a=b');
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('1\n');
+    expect(result.stderr.toString()).toBe('');
+  });
 
   test('shows command help', () => {
     const result = runCli('--help');
@@ -347,12 +418,18 @@ describe('csv CLI', () => {
         '--require-header',
         '--min-data-rows',
         '--where',
+        '--where-eq',
+        '--where-in',
+        '--where-prefix',
+        '--where-regex',
       ]
     ) {
       expect(stdout).toContain(option);
     }
-    expect(stdout).toContain('"regex":{"source":"^A","flags":"i"}');
-    expect(stdout).toContain('Strict mode cannot use --where.');
+    expect(stdout).toContain('--where-eq 2=SP');
+    expect(stdout).toContain('--where-regex \'1=/^ana/i\'');
+    expect(stdout).toContain('All filter clauses use AND.');
+    expect(stdout).toContain('Strict mode cannot use filter options.');
     expect(stdout).not.toContain('--worker-count');
     expect(result.stderr.toString()).toBe('');
   });
@@ -505,6 +582,36 @@ describe('csv CLI', () => {
       message: 'selected column out of range: 2025',
       name: 'an excessive selected column',
     },
+    {
+      arguments: ['--where-eq', '2'],
+      message: '--where-eq must use <column>=<value>',
+      name: 'an equality flag without a value separator',
+    },
+    {
+      arguments: ['--where-eq', 'state=SP'],
+      message: '--where-eq column must be an integer',
+      name: 'a non-numeric friendly filter column',
+    },
+    {
+      arguments: ['--where-prefix', '2025=A'],
+      message: 'filter column out of range: 2025',
+      name: 'an excessive friendly filter column',
+    },
+    {
+      arguments: ['--where-regex', '1=^A'],
+      message: '--where-regex must use <column>=/<pattern>/<flags>',
+      name: 'a regex flag without literal syntax',
+    },
+    {
+      arguments: ['--where-regex', '1=/[/'],
+      message: 'Invalid regular expression',
+      name: 'invalid friendly JavaScript regex syntax',
+    },
+    {
+      arguments: ['--where-regex', '1=/(?=A)/'],
+      message: 'invalid regular expression: invalid perl operator',
+      name: 'a friendly RE2-incompatible regex',
+    },
   ];
 
   for (const invalidCase of invalidOptionCases) {
@@ -541,8 +648,13 @@ describe('csv CLI', () => {
     },
     {
       arguments: ['--strict', '--where', '{"column":2,"equals":"SP"}'],
-      message: '--strict cannot be combined with --where',
+      message: '--strict cannot be combined with filter options',
       name: 'strict mode and filtering',
+    },
+    {
+      arguments: ['--strict', '--where-eq', '2=SP'],
+      message: '--strict cannot be combined with filter options',
+      name: 'strict mode and friendly filtering',
     },
   ];
 
