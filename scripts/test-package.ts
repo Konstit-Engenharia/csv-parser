@@ -48,6 +48,31 @@ try {
     throw new Error(`package CLI smoke test failed with exit code ${String(cliResult.exitCode)}`);
   }
   console.log('package CLI count smoke passed');
+
+  const linesResult = Bun.spawnSync({
+    cmd: [
+      'bunx',
+      '@konstit/csv',
+      'lines',
+      csvPath,
+      '--delimiter',
+      ';',
+      '--columns',
+      '0,1',
+      '--where-prefix',
+      '1=A',
+      '--json',
+      '--limit',
+      '1',
+    ],
+    cwd: directory,
+    stderr: 'inherit',
+    stdout: 'pipe',
+  });
+  if (!linesResult.success || linesResult.stdout.toString() !== '["1","Ada"]\n') {
+    throw new Error(`package CLI lines smoke test failed with exit code ${String(linesResult.exitCode)}`);
+  }
+  console.log('package CLI lines smoke passed');
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

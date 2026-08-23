@@ -33,6 +33,18 @@ beforeAll(async () => {
   );
   await Bun.write(join(temporaryDirectory, 'equals.csv'), 'id,value\n1,a=b\n2,other\n');
   await Bun.write(join(temporaryDirectory, 'empty.csv'), '');
+  await Bun.write(
+    join(temporaryDirectory, 'quoted.csv'),
+    'id;text;note\n1;"a,b";"say ""hi"""\n2;"multi\nline";\n3;plain;done\n',
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'strict-prefix.csv'),
+    'id,name\n1,A"da\n',
+  );
+  await Bun.write(
+    join(temporaryDirectory, 'large.csv'),
+    `id,value\n${Array.from({ length: 10_000 }, (_, index) => `${String(index)},value-${String(index)}\n`).join('')}`,
+  );
 });
 
 afterAll(async () => {
@@ -386,12 +398,258 @@ describe('csv CLI', () => {
     expect(result.stderr.toString()).toBe('');
   });
 
+  test('streams normalized CSV records', () => {
+    const result = runCli('lines', csvFixturePath('rfc4180/simple-lf.csv'));
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('id,name,total\n7,Ada,12\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('streams records as NDJSON string arrays', () => {
+    const result = runCli('lines', csvFixturePath('rfc4180/simple-lf.csv'), '--json');
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('["id","name","total"]\n["7","Ada","12"]\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('escapes quoted multiline fields in JSON output', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'quoted.csv'),
+      '--delimiter',
+      ';',
+      '--json',
+      '--limit',
+      '3',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe(
+      '["id","text","note"]\n["1","a,b","say \\"hi\\""]\n["2","multi\\nline",""]\n',
+    );
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('applies filters and projections before JSON output', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('api/unquoted-people-sp-filter.csv'),
+      '--delimiter',
+      ';',
+      '--columns',
+      '0,1',
+      '--where-eq',
+      '2=SP',
+      '--json',
+      '--limit',
+      '1',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('["1","Ana"]\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('quotes fields for the output delimiter', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'quoted.csv'),
+      '--delimiter',
+      ';',
+      '--output-delimiter',
+      ',',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe(
+      'id,text,note\n1,"a,b","say ""hi"""\n2,"multi\nline",\n3,plain,done\n',
+    );
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('uses the selected output delimiter', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'quoted.csv'),
+      '--delimiter',
+      ';',
+      '--output-delimiter',
+      '|',
+      '--limit',
+      '2',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('id|text|note\n1|a,b|"say ""hi"""\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('supports filters and projected output columns', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('api/unquoted-people-sp-filter.csv'),
+      '--delimiter',
+      ';',
+      '--columns',
+      '0,1',
+      '--where-eq',
+      '2=SP',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('1,Ana\n3,Bia\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('supports compressed lines input', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'input.csv.gz'),
+      '--compression',
+      'auto',
+      '--delimiter',
+      ';',
+      '--limit',
+      '2',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('id,name\n1,Ada\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('emits no bytes for an empty input file', () => {
+    const result = runCli('lines', join(temporaryDirectory, 'empty.csv'));
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('stops after the requested 1-indexed output record', () => {
+    const result = runCli('lines', csvFixturePath('rfc4180/simple-lf.csv'), '--limit', '1');
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('id,name,total\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('applies the line limit after filtering', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('api/unquoted-people-sp-filter.csv'),
+      '--delimiter',
+      ';',
+      '--where-eq',
+      '2=SP',
+      '--limit',
+      '1',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('1,Ana,SP\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('counts a quoted multiline record as one output record', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'quoted.csv'),
+      '--delimiter',
+      ';',
+      '--limit',
+      '3',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('id,text,note\n1,"a,b","say ""hi"""\n2,"multi\nline",\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('does not validate input after the requested line', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'strict-prefix.csv'),
+      '--strict',
+      '--limit',
+      '1',
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('id,name\n');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('keeps records streamed before a later input error', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'strict-prefix.csv'),
+      '--strict',
+      '--chunk-size',
+      '8',
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout.toString()).toBe('id,name\n');
+    expect(result.stderr.toString()).toContain('strict CSV quote syntax error');
+  });
+
+  test('rejects strict line limits with compressed input', () => {
+    const result = runCli(
+      'lines',
+      join(temporaryDirectory, 'input.csv.gz'),
+      '--compression',
+      'gzip',
+      '--strict',
+      '--limit',
+      '1',
+    );
+
+    expectUsageError(result, '--strict with --limit does not support compressed input', 'lines');
+  });
+
+  test('exits successfully when the output pipe closes', () => {
+    const result = Bun.spawnSync({
+      cmd: [
+        'bash',
+        '-o',
+        'pipefail',
+        '-c',
+        '"$1" "$2" lines "$3" | head -n 1 >/dev/null',
+        'csv-lines-epipe',
+        process.execPath,
+        cliPath,
+        join(temporaryDirectory, 'large.csv'),
+      ],
+      stderr: 'pipe',
+      stdout: 'pipe',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe('');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('streams output larger than its write buffer', () => {
+    const result = runCli('lines', join(temporaryDirectory, 'large.csv'));
+    const stdout = result.stdout.toString();
+
+    expect(result.exitCode).toBe(0);
+    expect(stdout).toStartWith('id,value\n0,value-0\n');
+    expect(stdout).toEndWith('9999,value-9999\n');
+    expect(stdout.split('\n')).toHaveLength(10_002);
+    expect(result.stderr.toString()).toBe('');
+  });
+
   test('shows command help', () => {
     const result = runCli('--help');
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain('count <path>');
-    expect(result.stdout.toString()).toContain('bunx @konstit/csv count <path>');
+    expect(result.stdout.toString()).toContain('lines <path>');
+    expect(result.stdout.toString()).toContain('bunx @konstit/csv <command> <path>');
     expect(result.stderr.toString()).toBe('');
   });
 
@@ -432,6 +690,104 @@ describe('csv CLI', () => {
     expect(stdout).toContain('Strict mode cannot use filter options.');
     expect(stdout).not.toContain('--worker-count');
     expect(result.stderr.toString()).toBe('');
+  });
+
+  test('shows every lines option in lines help', () => {
+    const result = runCli('lines', '--help');
+    const stdout = result.stdout.toString();
+
+    expect(result.exitCode).toBe(0);
+    for (const option of Object.keys(countOptionNames).concat('--json', '--output-delimiter', '--limit')) {
+      expect(stdout).toContain(option);
+    }
+    expect(stdout).toContain('matching output record N, numbered from 1');
+    expect(stdout).toContain('Filters use original input column indexes.');
+    expect(stdout).toContain('validation stops');
+    expect(stdout).toContain('at the selected record');
+    expect(stdout).not.toContain('--worker-count');
+    expect(result.stderr.toString()).toBe('');
+  });
+
+  test('reports invalid lines usage without a stack trace', () => {
+    const result = runCli('lines');
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout.toString()).toBe('');
+    expect(result.stderr.toString()).toBe('csv: lines requires one file path\nRun \'csv lines --help\' for usage.\n');
+  });
+
+  for (const value of ['0', '-1', '1.5', '9007199254740992']) {
+    test(`rejects lines limit ${value}`, () => {
+      const limitArguments = value.startsWith('-') ? [`--limit=${value}`] : ['--limit', value];
+      const result = runCli('lines', csvFixturePath('rfc4180/simple-lf.csv'), ...limitArguments);
+
+      expectUsageError(result, 'limit must be an integer greater than or equal to 1', 'lines');
+    });
+  }
+
+  test('rejects an automatic output delimiter', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('rfc4180/simple-lf.csv'),
+      '--output-delimiter',
+      'auto',
+    );
+
+    expectUsageError(result, 'output delimiter must be one safe ASCII character; auto is not supported', 'lines');
+  });
+
+  test('rejects a JSON output delimiter', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('rfc4180/simple-lf.csv'),
+      '--json',
+      '--output-delimiter',
+      ';',
+    );
+
+    expectUsageError(result, '--json cannot be combined with --output-delimiter', 'lines');
+  });
+
+  test('rejects a line limit with a whole-file row requirement', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('rfc4180/simple-lf.csv'),
+      '--strict',
+      '--min-data-rows',
+      '1',
+      '--limit',
+      '1',
+    );
+
+    expectUsageError(result, '--limit cannot be combined with --min-data-rows', 'lines');
+  });
+
+  test('rejects strict line limits with read-ahead options', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('rfc4180/simple-lf.csv'),
+      '--strict',
+      '--limit',
+      '1',
+      '--chunk-size',
+      '2',
+    );
+
+    expectUsageError(result, '--strict with --limit requires --chunk-size 1', 'lines');
+  });
+
+  test('rejects strict line limits with automatic delimiter detection', () => {
+    const result = runCli(
+      'lines',
+      csvFixturePath('rfc4180/simple-lf.csv'),
+      '--strict',
+      '--limit',
+      '1',
+      '--delimiter',
+      'auto',
+    );
+
+    expectUsageError(result, '--strict with --limit requires a fixed input delimiter', 'lines');
   });
 
   test('reports invalid usage without a stack trace', () => {
@@ -690,11 +1046,33 @@ function runCli(...arguments_: string[]) {
   });
 }
 
-function expectUsageError(result: ReturnType<typeof runCli>, message: string): void {
+const countOptionNames = {
+  '--chunk-size': true,
+  '--columns': true,
+  '--compression': true,
+  '--delimiter': true,
+  '--encoding': true,
+  '--expected-header': true,
+  '--fixed-columns': true,
+  '--max-compression-ratio': true,
+  '--max-decompressed-bytes': true,
+  '--min-data-rows': true,
+  '--require-header': true,
+  '--selected-columns': true,
+  '--strict': true,
+  '--where': true,
+  '--where-eq': true,
+  '--where-in': true,
+  '--where-prefix': true,
+  '--where-regex': true,
+  '--zip-entry': true,
+};
+
+function expectUsageError(result: ReturnType<typeof runCli>, message: string, command = 'count'): void {
   expect(result.exitCode).toBe(2);
   expect(result.stdout.toString()).toBe('');
   expect(result.stderr.toString()).toContain(`csv: ${message}`);
-  expect(result.stderr.toString()).toContain('Run \'csv count --help\' for usage.');
+  expect(result.stderr.toString()).toContain(`Run 'csv ${command} --help' for usage.`);
   expect(result.stderr.toString()).not.toContain('\n    at ');
 }
 

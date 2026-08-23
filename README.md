@@ -96,15 +96,48 @@ bun add --global @konstit/csv
 csv count data.csv
 ```
 
-The CLI uses one process and exposes the serial `CsvCountOptions` fields as flags. It does not expose `workerCount`.
-Run `csv count --help` for the complete list. Friendly filter flags use `column=value`. Repeat `--where-in` for each
-accepted value. Different filter clauses combine with AND. CLI filter values are strings; use the TypeScript API for
-`workerCount` and binary `Buffer` or `Uint8Array` values.
+Stream parsed records as normalized UTF-8 CSV:
+
+```sh
+csv lines data.csv
+csv lines data.csv --limit 10
+csv lines data.csv --json --limit 10
+csv lines data.csv --columns 0,2 --where-eq 3=active --limit 10
+csv lines input.tsv --delimiter $'\t' --output-delimiter ',' > selected.csv
+```
+
+`--limit N` stops after matching output record `N`, numbered from 1. A quoted field can contain embedded newlines, but
+its enclosing record counts as one. The header counts only when it is emitted. Early stop validates only the consumed
+input prefix, so `--limit` cannot be combined with `--min-data-rows`. With `--strict`, a limit requires a fixed input
+delimiter and either an omitted chunk size or `--chunk-size 1`; the CLI uses one-byte chunks to avoid strict read-ahead.
+`--strict` with `--limit` cannot use `--compression`, including `auto`.
+
+`lines` writes normalized UTF-8 CSV, not the original source bytes. The default output uses commas, LF record endings,
+and standard quote escaping. Use `--output-delimiter` to select another safe ASCII delimiter. `--columns` selects the
+output fields and their order. Filters still use the original input column indexes.
+
+Use `--json` for newline-delimited JSON. Each output line is one array of strings, including the header when it is
+emitted. JSON output escapes embedded field newlines and quotes. Stdout contains only JSON records. Diagnostics remain
+on stderr. `--json` cannot be combined with `--output-delimiter`.
+
+The CLI uses one process and exposes the serial file, parser, projection, and filter fields as flags. It does not expose
+`workerCount`. Run `csv count --help` or `csv lines --help` for the complete list. Friendly filter flags use
+`column=value`. Repeat `--where-in` for each accepted value. Different filter clauses combine with AND. CLI filter values
+are strings; use the TypeScript API for `workerCount` and binary `Buffer` or `Uint8Array` values.
 
 ```sh
 csv count data.csv --delimiter ';' --where-eq 2=SP
 csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
 csv count data.csv --where-regex '1=/^A/i'
+csv lines data.csv --where-in 2=SP --where-in 2=RJ --limit 25
+csv lines data.csv --columns 0,1 --json --limit 25
+```
+
+The large corpus file in this repository is semicolon-delimited:
+
+```sh
+csv lines corpus/large/example.csv --delimiter ';' --limit 10
+csv lines corpus/large/example.csv --delimiter ';' --columns 0,1,2 --limit 100 > sample.csv
 ```
 
 For generated or advanced filters, `--where <json>` keeps the `CsvWhereFilter` API shape:

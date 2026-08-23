@@ -11,10 +11,12 @@ import {
 } from './normalize.ts';
 import type {
   CsvApiFileOptions,
+  CsvColumns,
   CsvCompression,
   CsvCountOptions,
   CsvDelimiter,
   CsvEncoding,
+  CsvRowsOptions,
   CsvWhereFilter,
   CsvWherePredicate,
 } from './types.ts';
@@ -23,14 +25,15 @@ const help = `Usage: csv <command>
 
 Commands:
   count <path> [options]  Count CSV records
+  lines <path> [options]  Stream matching CSV records to stdout
 
 Options:
   -h, --help              Show this help
 
-Run 'csv count --help' for count options.
+Run 'csv <command> --help' for command options.
 
 Run without installing:
-  bunx @konstit/csv count <path>`;
+  bunx @konstit/csv <command> <path>`;
 
 const countHelp = `Usage: csv count <path> [options]
 
@@ -78,6 +81,70 @@ Examples:
   csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
   csv count data.csv --where-regex '1=/^ana/i'`;
 
+const linesHelp = `Usage: csv lines <path> [options]
+
+Parse a CSV file and stream matching records as normalized UTF-8 CSV or NDJSON.
+CSV output uses comma delimiters and LF record endings by default.
+
+File options:
+  --delimiter <value>              Input delimiter: one safe ASCII character or auto (default: ,)
+  --encoding <value>               utf8, latin1, iso88591, or iso-8859-1 (default: utf8)
+  --chunk-size <bytes>             Integer from 1 through 67108864 (default: 1048576)
+  --compression <format>           auto, gzip, deflate, deflate-raw, brotli, zstd, or zip (default: none)
+  --zip-entry <path>               Entry used with --compression zip
+  --max-compression-ratio <ratio>  ZIP expansion ratio integer from 1 through 4294967295
+  --max-decompressed-bytes <bytes> Positive ZIP output byte limit
+
+Output options:
+  --json                           Emit one JSON string array per record (NDJSON)
+  --output-delimiter <value>       One safe ASCII output delimiter (default: ,)
+  --limit <N>                      Stop after matching output record N, numbered from 1
+
+Parser options:
+  --strict                         Enable strict RFC 4180 validation
+  --fixed-columns <count>          Require this positive field count in strict mode
+  --columns <indexes>              Select zero-based input columns and output order
+  --selected-columns <indexes>     Alias for --columns; do not use both
+  --expected-header <value>        Expected header; repeat per column; requires --strict
+  --require-header                 Require a header row; requires --strict
+  --min-data-rows <count>          Require a non-negative data row count; requires --strict
+
+Friendly filter options (repeatable):
+  --where-eq <column=value>        Match one exact value
+  --where-in <column=value>        Add a value to a column IN filter
+  --where-prefix <column=value>    Match a value prefix
+  --where-regex <column=/re/flags> Match an RE2-compatible JavaScript regex
+
+Advanced filter option:
+  --where <json>                   Advanced CsvWhereFilter JSON
+
+Filters use original input column indexes. All filter clauses use AND.
+Repeated --where-in clauses for the same column form one IN filter.
+Quote values that contain spaces or shell characters. Regex flags can be
+i, m, s, and u.
+
+CSV output is normalized and can differ from the input quoting, delimiter, and
+record endings. With --json, stdout contains only NDJSON string arrays. A quoted
+field can contain physical newlines. With --strict and --limit, validation stops
+at the selected record and uses one-byte input chunks. Partial output can exist
+if a later input error occurs.
+
+Compatibility:
+  Strict mode cannot use filter options.
+  --fixed-columns and schema options require --strict.
+  --json cannot be combined with --output-delimiter.
+  --limit cannot be combined with --min-data-rows.
+  --strict with --limit requires a fixed delimiter and uses --chunk-size 1.
+  --strict with --limit cannot use --compression, including auto.
+  ZIP options require --compression zip and --zip-entry.
+
+Examples:
+  csv lines data.csv
+  csv lines data.csv --json --limit 10
+  csv lines input.tsv --delimiter $'\\t' --output-delimiter ','
+  csv lines data.csv --columns 0,2 --where-eq 3=active --limit 10
+  csv lines data.csv.gz --compression auto > selected.csv`;
+
 const countOptionDefinitions = {
   'columns': { type: 'string' },
   'compression': { type: 'string' },
@@ -101,9 +168,17 @@ const countOptionDefinitions = {
   'zip-entry': { type: 'string' },
 } as const;
 
+const linesOptionDefinitions = {
+  ...countOptionDefinitions,
+  'json': { type: 'boolean' },
+  'limit': { type: 'string' },
+  'output-delimiter': { type: 'string' },
+} as const;
+
 const compressionFormats = new Set(['auto', 'gzip', 'deflate', 'deflate-raw', 'brotli', 'zstd']);
 const encodings = new Set(['utf8', 'latin1', 'iso88591', 'iso-8859-1']);
 const MAX_CHUNK_SIZE = 64 * 1024 * 1024;
+const OUTPUT_BUFFER_SIZE = 64 * 1024;
 
 async function run(arguments_: readonly string[]): Promise<number> {
   const command = arguments_[0];
@@ -114,13 +189,19 @@ async function run(arguments_: readonly string[]): Promise<number> {
   if (command === undefined) {
     return usageError('missing command');
   }
-  if (command !== 'count') {
-    return usageError(`unknown command: ${command}`);
+  if (command === 'count') {
+    return runCount(arguments_.slice(1));
   }
+  if (command === 'lines') {
+    return runLines(arguments_.slice(1));
+  }
+  return usageError(`unknown command: ${command}`);
+}
 
+async function runCount(arguments_: readonly string[]): Promise<number> {
   let input: CountInput;
   try {
-    input = parseCountInput(arguments_.slice(1));
+    input = parseCountInput(arguments_);
   } catch (error) {
     return usageError(error instanceof Error ? error.message : String(error), 'csv count --help');
   }
@@ -139,10 +220,67 @@ async function run(arguments_: readonly string[]): Promise<number> {
   }
 }
 
+async function runLines(arguments_: readonly string[]): Promise<number> {
+  let input: LinesInput;
+  try {
+    input = parseLinesInput(arguments_);
+  } catch (error) {
+    return usageError(error instanceof Error ? error.message : String(error), 'csv lines --help');
+  }
+  if (input.help) {
+    console.log(linesHelp);
+    return 0;
+  }
+
+  try {
+    await streamLines(input);
+    return 0;
+  } catch (error) {
+    if (isBrokenPipe(error)) {
+      return 0;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`csv: ${message}`);
+    return 1;
+  }
+}
+
 interface CountInput {
   help: boolean;
   options: CsvCountOptions;
   path: string;
+}
+
+interface LinesInput {
+  help: boolean;
+  json: boolean;
+  limit?: number;
+  options: CsvRowsOptions<CsvColumns | undefined>;
+  outputDelimiter: string;
+  path: string;
+}
+
+interface CommonOptionValues {
+  readonly 'chunk-size'?: string;
+  readonly 'columns'?: string;
+  readonly 'compression'?: string;
+  readonly 'delimiter'?: string;
+  readonly 'encoding'?: string;
+  readonly 'expected-header'?: readonly string[];
+  readonly 'fixed-columns'?: string;
+  readonly 'help'?: boolean;
+  readonly 'max-compression-ratio'?: string;
+  readonly 'max-decompressed-bytes'?: string;
+  readonly 'min-data-rows'?: string;
+  readonly 'require-header'?: boolean;
+  readonly 'selected-columns'?: string;
+  readonly 'strict'?: boolean;
+  readonly 'where'?: string;
+  readonly 'where-eq'?: readonly string[];
+  readonly 'where-in'?: readonly string[];
+  readonly 'where-prefix'?: readonly string[];
+  readonly 'where-regex'?: readonly string[];
+  readonly 'zip-entry'?: string;
 }
 
 function parseCountInput(arguments_: readonly string[]): CountInput {
@@ -159,6 +297,67 @@ function parseCountInput(arguments_: readonly string[]): CountInput {
     throw new Error('count requires one file path');
   }
 
+  const options = parseCommonOptions(values);
+  if (!isCountOptions(options)) {
+    throw new Error('count options are incompatible');
+  }
+
+  return { help: false, options, path: positionals[0] ?? '' };
+}
+
+function parseLinesInput(arguments_: readonly string[]): LinesInput {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    args: [...arguments_],
+    options: linesOptionDefinitions,
+    strict: true,
+  });
+  if (values.help === true) {
+    return { help: true, json: false, options: {}, outputDelimiter: ',', path: '' };
+  }
+  if (positionals.length !== 1) {
+    throw new Error('lines requires one file path');
+  }
+
+  const options = parseCommonOptions(values);
+  const limit = values.limit === undefined ? undefined : parseInteger(values.limit, 'limit', 1);
+  if (limit !== undefined && options.minDataRows !== undefined) {
+    throw new Error('--limit cannot be combined with --min-data-rows');
+  }
+  if (limit !== undefined && options.strict === true) {
+    if (options.compression !== undefined) {
+      throw new Error('--strict with --limit does not support compressed input');
+    }
+    if (options.delimiter === 'auto') {
+      throw new Error('--strict with --limit requires a fixed input delimiter');
+    }
+    if (options.chunkSize !== undefined && options.chunkSize !== 1) {
+      throw new Error('--strict with --limit requires --chunk-size 1');
+    }
+    options.chunkSize = 1;
+  }
+  if (!isRowsOptions(options)) {
+    throw new Error('lines options are incompatible');
+  }
+  const json = values.json === true;
+  if (json && values['output-delimiter'] !== undefined) {
+    throw new Error('--json cannot be combined with --output-delimiter');
+  }
+  const outputDelimiter = values['output-delimiter'] === undefined
+    ? ','
+    : parseOutputDelimiter(values['output-delimiter']);
+
+  return {
+    help: false,
+    json,
+    ...(limit === undefined ? {} : { limit }),
+    options,
+    outputDelimiter,
+    path: positionals[0] ?? '',
+  };
+}
+
+function parseCommonOptions(values: CommonOptionValues): CsvApiFileOptions {
   const options: CsvApiFileOptions = {};
   if (values.delimiter !== undefined) {
     options.delimiter = parseDelimiter(values.delimiter);
@@ -198,11 +397,7 @@ function parseCountInput(arguments_: readonly string[]): CountInput {
 
   options.compression = parseCompression(values);
   validateCountOptionCombinations(options);
-  if (!isCountOptions(options)) {
-    throw new Error('count options are incompatible');
-  }
-
-  return { help: false, options, path: positionals[0] ?? '' };
+  return options;
 }
 
 function parseDelimiter(value: string): CsvDelimiter {
@@ -219,6 +414,14 @@ function parseDelimiter(value: string): CsvDelimiter {
     throw new Error(`delimiter must be one safe ASCII character or auto: ${JSON.stringify(value)}`);
   }
   return value;
+}
+
+function parseOutputDelimiter(value: string): string {
+  const delimiter = parseDelimiter(value);
+  if (delimiter === 'auto') {
+    throw new Error('output delimiter must be one safe ASCII character; auto is not supported');
+  }
+  return delimiter;
 }
 
 function parseEncoding(value: string): CsvEncoding {
@@ -245,7 +448,7 @@ function parseColumns(value: string, label: string): number[] {
   return columns;
 }
 
-function parseCompression(values: Record<string, boolean | string | string[] | undefined>): CsvCompression | undefined {
+function parseCompression(values: CommonOptionValues): CsvCompression | undefined {
   const compression = values['compression'];
   const zipEntry = values['zip-entry'];
   const maxCompressionRatio = values['max-compression-ratio'];
@@ -301,6 +504,65 @@ function isCountOptions(options: CsvApiFileOptions): options is CsvCountOptions 
     return false;
   }
   return options.strict !== true || options.where === undefined;
+}
+
+function isRowsOptions(options: CsvApiFileOptions): options is CsvRowsOptions<CsvColumns | undefined> {
+  if (options.columns !== undefined && options.selectedColumns !== undefined) {
+    return false;
+  }
+  if (options.workerCount !== undefined && options.workerCount !== 1) {
+    return false;
+  }
+  return options.strict !== true || options.where === undefined;
+}
+
+async function streamLines(input: LinesInput): Promise<void> {
+  let chunks: string[] = [];
+  let chunksLength = 0;
+  let emitted = 0;
+
+  output: for await (const rows of csv.rows(input.path, input.options)) {
+    for (const row of rows) {
+      const record = input.json ? `${JSON.stringify(row)}\n` : serializeCsvRecord(row, input.outputDelimiter);
+      chunks.push(record);
+      chunksLength += record.length;
+      ++emitted;
+
+      if (chunksLength >= OUTPUT_BUFFER_SIZE) {
+        await Bun.write(Bun.stdout, chunks.join(''));
+        chunks = [];
+        chunksLength = 0;
+      }
+      if (emitted === input.limit) {
+        break output;
+      }
+    }
+
+    if (chunksLength > 0) {
+      await Bun.write(Bun.stdout, chunks.join(''));
+      chunks = [];
+      chunksLength = 0;
+    }
+  }
+
+  if (chunksLength > 0) {
+    await Bun.write(Bun.stdout, chunks.join(''));
+  }
+}
+
+function serializeCsvRecord(row: readonly string[], delimiter: string): string {
+  return `${row.map((field) => serializeCsvField(field, delimiter)).join(delimiter)}\n`;
+}
+
+function serializeCsvField(field: string, delimiter: string): string {
+  if (!field.includes(delimiter) && !field.includes('"') && !field.includes('\r') && !field.includes('\n')) {
+    return field;
+  }
+  return `"${field.replaceAll('"', '""')}"`;
+}
+
+function isBrokenPipe(error: unknown): boolean {
+  return isObject(error) && error['code'] === 'EPIPE';
 }
 
 function parseUint32(value: string, label: string): number {
