@@ -47,7 +47,7 @@ describe('csv high-level API', () => {
         where: {
           all: [
             { column: 2, in: ['SP', 'RJ'] },
-            { column: 2, notNequals: 'RJ' },
+            { column: 2, notEquals: 'RJ' },
             { column: 2, notIn: ['MG'] },
             { column: 1, startsWith: 'B' },
             { column: 0, equals: '3' },
@@ -251,7 +251,7 @@ describe('csv high-level API', () => {
         where: {
           all: [
             { column: 2, in: ['SP', 'RJ'] },
-            { column: 2, notNequals: 'RJ' },
+            { column: 2, notEquals: 'RJ' },
             { column: 2, notIn: ['MG'] },
             { column: 1, startsWith: 'B' },
             { column: 0, equals: '3' },
@@ -274,7 +274,7 @@ describe('csv high-level API', () => {
       where: {
         all: [
           { column: 2, in: ['SP', 'RJ'] },
-          { column: 2, notNequals: 'RJ' },
+          { column: 2, notEquals: 'RJ' },
           { column: 2, notIn: ['MG'] },
           { column: 1, startsWith: 'B' },
         ],
@@ -295,7 +295,7 @@ describe('csv high-level API', () => {
     expect(await csv.count(path, { delimiter: ';' })).toBe(4);
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, equals: 'SP' } })).toBe(2);
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
-    expect(await csv.count(path, { delimiter: ';', where: { column: 2, notNequals: 'SP' } })).toBe(2);
+    expect(await csv.count(path, { delimiter: ';', where: { column: 2, notEquals: 'SP' } })).toBe(2);
     expect(await csv.count(path, { delimiter: ';', where: { column: 2, notIn: ['SP', 'RJ'] } })).toBe(1);
     expect(await csv.count(path, { delimiter: ';', where: { column: 1, startsWith: 'A' } })).toBe(1);
     expect(
@@ -328,7 +328,7 @@ describe('csv high-level API', () => {
         where: { all: [{ column: 2, equals: 'SP' }, { column: 20, startsWith: '' }] },
       }),
     ).toBe(0);
-    expect(await csv.count(path, { delimiter: ';', where: { column: 20, notNequals: '' } })).toBe(0);
+    expect(await csv.count(path, { delimiter: ';', where: { column: 20, notEquals: '' } })).toBe(0);
   });
 
   test('counts rows through workers with native shard splitting', async () => {
@@ -337,7 +337,7 @@ describe('csv high-level API', () => {
     expect(await csv.count(path, { delimiter: ';', workerCount: 2 })).toBe(5);
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, equals: 'SP' } })).toBe(2);
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
-    expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, notNequals: 'SP' } })).toBe(3);
+    expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, notEquals: 'SP' } })).toBe(3);
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 2, notIn: ['SP', 'RJ'] } })).toBe(2);
     expect(await csv.count(path, { delimiter: ';', workerCount: 2, where: { column: 1, startsWith: 'A' } })).toBe(1);
     expect(

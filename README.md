@@ -191,7 +191,7 @@ Supported helpers:
 - `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
 - `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
-All row and count APIs support `equals`, `in`, `notNequals`, `notIn`, `startsWith`, and `regex`. `notNequals` means not
+All row and count APIs support `equals`, `in`, `notEquals`, `notIn`, `startsWith`, and `regex`. `notEquals` means not
 equal, and `notIn` means not in the supplied values. Create regex filters with `csv.re()`:
 
 ```ts

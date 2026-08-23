@@ -334,9 +334,9 @@ export function normalizeNativeFilters(filters: readonly CsvNativeFilter[] | und
       if (filterValues.length === 0) {
         throw new RangeError('filter values must not be empty');
       }
-    } else if ('notNequals' in filter) {
+    } else if ('notEquals' in filter) {
       kind = NATIVE_FILTER_NEQ;
-      filterValues = [filter.notNequals];
+      filterValues = [filter.notEquals];
     } else if ('notIn' in filter) {
       kind = NATIVE_FILTER_NOIN;
       filterValues = filter.notIn;

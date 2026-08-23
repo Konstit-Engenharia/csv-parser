@@ -608,7 +608,7 @@ function parseWhereOptions(values: {
 
   for (const expression of values['where-neq'] ?? []) {
     const { column, value } = parseColumnValue(expression, '--where-neq');
-    predicates.push({ column, notNequals: value });
+    predicates.push({ column, notEquals: value });
   }
 
   const inValuesByColumn = new Map<number, string[]>();
@@ -732,9 +732,9 @@ function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {
       in: value['in'].map((item, index) => requireString(item, `${label}.in[${String(index)}]`)),
     };
   }
-  if ('notNequals' in value) {
-    requireExactKeys(value, ['column', 'notNequals'], label);
-    return { column, notNequals: requireString(value['notNequals'], `${label}.notNequals`) };
+  if ('notEquals' in value) {
+    requireExactKeys(value, ['column', 'notEquals'], label);
+    return { column, notEquals: requireString(value['notEquals'], `${label}.notEquals`) };
   }
   if ('notIn' in value) {
     requireExactKeys(value, ['column', 'notIn'], label);
@@ -762,7 +762,7 @@ function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {
       : requireString(value['regex']['flags'], `${label}.regex.flags`);
     return { column, regex: csv.re(new RegExp(source, flags)) };
   }
-  throw new Error(`${label} must contain equals, in, notNequals, notIn, startsWith, or regex`);
+  throw new Error(`${label} must contain equals, in, notEquals, notIn, startsWith, or regex`);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

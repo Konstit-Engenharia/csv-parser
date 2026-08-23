@@ -64,7 +64,7 @@ export type CsvWherePredicate =
   | CsvWhereEqualsFilter
   | CsvWhereInFilter
   | CsvWhereNotInFilter
-  | CsvWhereNotNequalsFilter
+  | CsvWhereNotEqualsFilter
   | CsvWhereRegexFilter
   | CsvWhereStartsWithFilter;
 
@@ -84,9 +84,9 @@ export interface CsvInFilter {
   values: readonly CsvFieldValue[];
 }
 
-export interface CsvNotNequalsFilter {
+export interface CsvNotEqualsFilter {
   column: number;
-  notNequals: CsvFieldValue;
+  notEquals: CsvFieldValue;
 }
 
 export interface CsvNotInFilter {
@@ -108,7 +108,7 @@ export type CsvNativeFilter =
   | CsvEqualsFilter
   | CsvInFilter
   | CsvNotInFilter
-  | CsvNotNequalsFilter
+  | CsvNotEqualsFilter
   | CsvRegexFilter
   | CsvStartsWithFilter;
 
@@ -122,7 +122,7 @@ export interface CsvWhereInFilter {
   in: readonly CsvFieldValue[];
 }
 
-export type CsvWhereNotNequalsFilter = CsvNotNequalsFilter;
+export type CsvWhereNotEqualsFilter = CsvNotEqualsFilter;
 
 export type CsvWhereNotInFilter = CsvNotInFilter;
 

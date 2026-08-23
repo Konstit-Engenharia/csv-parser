@@ -290,8 +290,8 @@ describe('csv CLI', () => {
     },
     {
       expected: '2\n',
-      filter: { column: 2, notNequals: 'SP' },
-      name: 'notNequals',
+      filter: { column: 2, notEquals: 'SP' },
+      name: 'notEquals',
     },
     {
       expected: '1\n',

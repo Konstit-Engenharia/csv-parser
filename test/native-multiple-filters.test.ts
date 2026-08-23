@@ -16,7 +16,7 @@ describe('NativeCsvParser multiple native filters', () => {
       { column: 2, value: 'SP' },
       { column: 1, values: ['A', ''] },
       { column: 0, prefix: Buffer.from('x') },
-      { column: 3, notNequals: 'RJ' },
+      { column: 3, notEquals: 'RJ' },
       { column: 4, notIn: ['', 'MG'] },
     ]);
 
@@ -87,9 +87,9 @@ describe('NativeCsvParser multiple native filters', () => {
     expect(rows).toEqual([['SP', 'Ana']]);
   });
 
-  test('counts notNequals and notIn filters across chunks', () => {
+  test('counts notEquals and notIn filters across chunks', () => {
     const filters = [
-      { column: 1, notNequals: 'SP' },
+      { column: 1, notEquals: 'SP' },
       { column: 1, notIn: ['RJ', 'SC', 'PR', 'RS', 'BA', 'AM', 'PA', 'AC'] },
     ] satisfies readonly CsvNativeFilter[];
     const input = Buffer.from('id;uf\n1;SP\n2;RJ\n3;MG\n4\n');

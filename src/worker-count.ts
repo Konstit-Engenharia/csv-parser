@@ -27,9 +27,9 @@ interface WorkerInFilterMessage {
   values: Uint8Array[];
 }
 
-interface WorkerNotNequalsFilterMessage {
+interface WorkerNotEqualsFilterMessage {
   column: number;
-  notNequals: Uint8Array;
+  notEquals: Uint8Array;
 }
 
 interface WorkerNotInFilterMessage {
@@ -51,7 +51,7 @@ type WorkerFilterMessage =
   | WorkerEqualsFilterMessage
   | WorkerInFilterMessage
   | WorkerNotInFilterMessage
-  | WorkerNotNequalsFilterMessage
+  | WorkerNotEqualsFilterMessage
   | WorkerRegexFilterMessage
   | WorkerStartsWithFilterMessage;
 
@@ -207,10 +207,10 @@ function normalizePredicate(predicate: CsvWherePredicate): WorkerFilterMessage {
       values: predicate.in.map((value) => normalizeFieldValue(value)),
     };
   }
-  if ('notNequals' in predicate) {
+  if ('notEquals' in predicate) {
     return {
       column: normalizeFilterColumn(predicate.column),
-      notNequals: normalizeFieldValue(predicate.notNequals),
+      notEquals: normalizeFieldValue(predicate.notEquals),
     };
   }
   if ('notIn' in predicate) {

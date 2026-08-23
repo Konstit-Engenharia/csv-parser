@@ -16,9 +16,9 @@ interface WorkerInFilter {
   values: Uint8Array[];
 }
 
-interface WorkerNotNequalsFilter {
+interface WorkerNotEqualsFilter {
   column: number;
-  notNequals: Uint8Array;
+  notEquals: Uint8Array;
 }
 
 interface WorkerNotInFilter {
@@ -40,7 +40,7 @@ type WorkerFilter =
   | WorkerEqualsFilter
   | WorkerInFilter
   | WorkerNotInFilter
-  | WorkerNotNequalsFilter
+  | WorkerNotEqualsFilter
   | WorkerRegexFilter
   | WorkerStartsWithFilter;
 
