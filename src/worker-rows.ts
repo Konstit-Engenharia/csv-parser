@@ -1,15 +1,15 @@
 import {
   rejectAutoDelimiterSharding,
   rejectCompressedSharding,
-} from './file-stream.ts';
-import { findCsvSafeShards } from './files.ts';
-import { DEFAULT_CHUNK_SIZE } from './native.ts';
+} from './file-stream.js';
+import { findCsvSafeShards } from './files.js';
+import { DEFAULT_CHUNK_SIZE } from './native.js';
 import {
   MAX_FILTER_COUNT,
   normalizeColumns,
   normalizeFilterColumn,
   validateRegex,
-} from './normalize.ts';
+} from './normalize.js';
 import type {
   CsvApiFileOptions,
   CsvColumns,
@@ -20,7 +20,8 @@ import type {
   CsvRegex,
   CsvWhereFilter,
   CsvWherePredicate,
-} from './types.ts';
+} from './types.js';
+import { workerModuleUrl } from './worker-module.js';
 
 interface WorkerEqualsFilterMessage {
   column: number;
@@ -117,7 +118,7 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
   }
 
   const workers = shards.map(() =>
-    new Worker(new URL('./workers/rows.worker.ts', import.meta.url).href, {
+    new Worker(workerModuleUrl('rows'), {
       preload: [],
       type: 'module',
     })

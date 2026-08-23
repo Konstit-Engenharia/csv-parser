@@ -3,5 +3,5 @@
 !LICENSE
 !README.md
 !THIRD_PARTY_NOTICES.md
-!src/**
+!dist/**
 !prebuilds/**

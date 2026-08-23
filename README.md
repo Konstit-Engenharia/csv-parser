@@ -54,9 +54,11 @@ If no matching library exists, imports fail with:
 native library not found. Run: bun run build:native
 ```
 
-Package assembly is separate from publication. The `Package` workflow builds target-specific native libraries on macOS and
-Linux, verifies every required target, creates the tarball, and installs that tarball in a clean smoke-test project.
-Publication must use this verified artifact; `prepack` rejects packages missing any required native library.
+Package assembly is separate from publication. `bun run build:package` uses Bun's transpiler for runtime JavaScript and
+TypeScript for declarations, with both outputs written to `dist/`. The `Package` workflow builds target-specific native
+libraries on macOS and Linux, verifies every required target, creates the tarball, and installs that tarball in a clean
+smoke-test project. Publication must use this verified artifact; `prepack` rebuilds `dist/` and rejects packages missing any
+required native library.
 
 ## Quick Start
 

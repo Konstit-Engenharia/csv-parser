@@ -1,21 +1,22 @@
 import {
   rejectAutoDelimiterSharding,
   rejectCompressedSharding,
-} from './file-stream.ts';
-import { findCsvSafeShards } from './files.ts';
-import { DEFAULT_CHUNK_SIZE } from './native.ts';
+} from './file-stream.js';
+import { findCsvSafeShards } from './files.js';
+import { DEFAULT_CHUNK_SIZE } from './native.js';
 import {
   MAX_FILTER_COUNT,
   normalizeFilterColumn,
   validateRegex,
-} from './normalize.ts';
+} from './normalize.js';
 import type {
   CsvFieldValue,
   CsvParallelCountOptions,
   CsvRegex,
   CsvWhereFilter,
   CsvWherePredicate,
-} from './types.ts';
+} from './types.js';
+import { workerModuleUrl } from './worker-module.js';
 
 interface WorkerEqualsFilterMessage {
   column: number;
@@ -98,7 +99,7 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
   }
 
   const workers = shards.map(() =>
-    new Worker(new URL('./workers/count.worker.ts', import.meta.url).href, {
+    new Worker(workerModuleUrl('count'), {
       preload: [],
       type: 'module',
     })

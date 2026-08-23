@@ -1,23 +1,23 @@
-import { NativeCsvRowView } from './batches.ts';
-import type { NativeCsvBatch } from './batches.ts';
+import { NativeCsvRowView } from './batches.js';
+import type { NativeCsvBatch } from './batches.js';
 import {
   prepareCsvFileInput,
   rejectAutoDelimiterSharding,
   rejectCompressedSharding,
-} from './file-stream.ts';
+} from './file-stream.js';
 import {
   findCsvSafeShards as findCsvSafeShardsNative,
   findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
-} from './files.ts';
+} from './files.js';
 import {
   normalizeColumns,
   validateRegex,
-} from './normalize.ts';
-import { NativeCsvParser } from './parser.ts';
+} from './normalize.js';
+import { NativeCsvParser } from './parser.js';
 import {
   rejectStrictSchemaUnsupported,
   strictSchemaValidator,
-} from './strict-schema.ts';
+} from './strict-schema.js';
 import type {
   CsvApiFileOptions,
   CsvBatchesOptions,
@@ -43,13 +43,13 @@ import type {
   CsvWhereFilter,
   CsvWherePredicate,
   CsvWorkerPoolOptions,
-} from './types.ts';
-import { parallelCount } from './worker-count.ts';
+} from './types.js';
+import { parallelCount } from './worker-count.js';
 import {
   createWorkerPool,
   CsvWorkerPool,
-} from './worker-pool.ts';
-import { parallelRows } from './worker-rows.ts';
+} from './worker-pool.js';
+import { parallelRows } from './worker-rows.js';
 
 /**
  * Parse one in-memory chunk into materialized rows.

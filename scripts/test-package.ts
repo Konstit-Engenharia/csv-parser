@@ -1,13 +1,16 @@
 // Installs a package tarball in a temporary project and smoke-tests its native CSV parser.
+import { Glob } from 'bun';
 import {
   mkdtemp,
   rm,
+  stat,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import {
   join,
   resolve,
 } from 'node:path';
+import { repoRoot } from './native-target.ts';
 
 const tarball = process.argv[2];
 if (tarball === undefined) {
@@ -18,6 +21,7 @@ const directory = await mkdtemp(join(tmpdir(), 'konstit-csv-parser-package-'));
 try {
   await Bun.write(join(directory, 'package.json'), '{"private":true,"type":"module"}\n');
   run(['bun', 'add', resolve(tarball)], directory);
+  await verifyInstalledPackage(directory);
   run([
     'bun',
     '-e',
@@ -27,6 +31,15 @@ try {
 
   const csvPath = join(directory, 'input.csv');
   await Bun.write(csvPath, 'id;name\n1;Ada\n2;Bob\n');
+  run([
+    'bun',
+    '-e',
+    `import { csv } from '@konstit/csv'; const count = await csv.count(${
+      JSON.stringify(csvPath)
+    }, { delimiter: ';', workerCount: 2 }); if (count !== 3) throw new Error('package worker count smoke test failed');`,
+  ], directory);
+  console.log('package worker count smoke passed');
+
   const cliResult = Bun.spawnSync({
     cmd: [
       'bunx',
@@ -75,6 +88,76 @@ try {
   console.log('package CLI lines smoke passed');
 } finally {
   await rm(directory, { recursive: true, force: true });
+}
+
+async function verifyInstalledPackage(directory: string): Promise<void> {
+  const packageDirectory = join(directory, 'node_modules', '@konstit', 'csv');
+  const manifest: unknown = await Bun.file(join(packageDirectory, 'package.json')).json();
+  if (!isObject(manifest) || !isObject(manifest['bin']) || manifest['bin']['csv'] !== './dist/cli.js') {
+    throw new Error('installed package does not expose the compiled CLI');
+  }
+  if (manifest['module'] !== './dist/index.js' || manifest['types'] !== './dist/index.d.ts') {
+    throw new Error('installed package does not expose compiled JavaScript and declarations');
+  }
+
+  const files = await Array.fromAsync(new Glob('**/*').scan({ cwd: packageDirectory, onlyFiles: true }));
+  const requiredFiles = [
+    'dist/index.js',
+    'dist/index.d.ts',
+    'dist/cli.js',
+    'dist/workers/count.worker.js',
+    'dist/workers/rows.worker.js',
+  ] as const;
+  const missingFile = requiredFiles.find((file) => !files.includes(file));
+  if (missingFile !== undefined) {
+    throw new Error(`installed package is missing ${missingFile}`);
+  }
+  const runtimeTypeScriptFile = files.find((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'));
+  if (runtimeTypeScriptFile !== undefined) {
+    throw new Error(`installed package contains TypeScript runtime source: ${runtimeTypeScriptFile}`);
+  }
+
+  const cliInfo = await stat(join(packageDirectory, 'dist', 'cli.js'));
+  if ((cliInfo.mode & 0o111) === 0) {
+    throw new Error('installed package CLI is not executable');
+  }
+
+  await Bun.write(
+    join(directory, 'typecheck.ts'),
+    'import { csv, type CsvNotEqualsFilter } from \'@konstit/csv\';\nconst filter: CsvNotEqualsFilter = { column: 1, notEquals: \'SP\' };\nvoid csv.count(\'input.csv\', { where: filter });\n',
+  );
+  await Bun.write(
+    join(directory, 'tsconfig.json'),
+    `${
+      JSON.stringify(
+        {
+          compilerOptions: {
+            module: 'Preserve',
+            moduleResolution: 'Bundler',
+            noEmit: true,
+            strict: true,
+            target: 'ESNext',
+            typeRoots: [join(repoRoot, 'node_modules', '@types')],
+            types: ['bun'],
+          },
+          files: ['typecheck.ts'],
+        },
+        null,
+        2,
+      )
+    }\n`,
+  );
+  run([
+    process.execPath,
+    join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+    '--project',
+    join(directory, 'tsconfig.json'),
+  ], directory);
+  console.log('package files and declarations smoke passed');
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function run(command: string[], cwd: string): void {

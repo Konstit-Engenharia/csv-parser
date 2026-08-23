@@ -1,9 +1,9 @@
-import { NativeCsvBatch } from './batches.ts';
+import { NativeCsvBatch } from './batches.js';
 import {
   native,
   type NativePointer,
   u64ToSafeNumber,
-} from './native.ts';
+} from './native.js';
 import {
   encodingCode,
   normalizeChunk,
@@ -13,7 +13,7 @@ import {
   normalizeInFilter,
   normalizeNativeFilters,
   normalizeStartsWithFilter,
-} from './normalize.ts';
+} from './normalize.js';
 import type {
   CsvEqualsFilter,
   CsvInFilter,
@@ -22,7 +22,7 @@ import type {
   CsvParserOptions,
   CsvRow,
   CsvStartsWithFilter,
-} from './types.ts';
+} from './types.js';
 
 const nativeCsvParserFinalizer = new FinalizationRegistry<NativePointer>((handle) => {
   native.symbols.csv_parser_destroy(handle);

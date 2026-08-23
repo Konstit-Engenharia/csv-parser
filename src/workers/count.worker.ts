@@ -1,10 +1,10 @@
 import { createReadStream } from 'node:fs';
-import { DEFAULT_CHUNK_SIZE } from '../native.ts';
-import { NativeCsvParser } from '../parser.ts';
+import { DEFAULT_CHUNK_SIZE } from '../native.js';
+import { NativeCsvParser } from '../parser.js';
 import type {
   CsvEncoding,
   CsvRegex,
-} from '../types.ts';
+} from '../types.js';
 
 interface WorkerEqualsFilterMessage {
   column: number;

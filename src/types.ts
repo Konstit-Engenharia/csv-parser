@@ -1,4 +1,4 @@
-import type { NativeCsvRowView } from './batches.ts';
+import type { NativeCsvRowView } from './batches.js';
 
 export type CsvEncoding = 'utf8' | 'latin1' | 'iso88591' | 'iso-8859-1';
 export interface CsvZipCompression {

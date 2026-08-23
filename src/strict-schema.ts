@@ -1,8 +1,8 @@
-import type { NativeCsvBatch } from './batches.ts';
+import type { NativeCsvBatch } from './batches.js';
 import type {
   CsvParserOptions,
   CsvRow,
-} from './types.ts';
+} from './types.js';
 
 interface StrictSchemaOptions {
   expectedHeaders?: readonly string[];

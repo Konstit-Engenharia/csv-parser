@@ -2,7 +2,7 @@ import {
   EMPTY_BUFFER,
   EMPTY_U32,
   native,
-} from './native.ts';
+} from './native.js';
 import type {
   CsvColumns,
   CsvEncoding,
@@ -12,7 +12,7 @@ import type {
   CsvNativeFilter,
   CsvRegex,
   CsvStartsWithFilter,
-} from './types.ts';
+} from './types.js';
 
 export const MAX_COLUMN_INDEX = 2024;
 export const MAX_PROJECTION_LENGTH = 2024;

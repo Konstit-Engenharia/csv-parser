@@ -5,11 +5,11 @@ import {
   requirePtr,
   toArrayBuffer,
   u64ToSafeNumber,
-} from './native.ts';
+} from './native.js';
 import {
   normalizeColumns,
   normalizeFilterColumn,
-} from './normalize.ts';
+} from './normalize.js';
 import type {
   CsvColumnBytesCallback,
   CsvColumnRangeCallback,
@@ -18,7 +18,7 @@ import type {
   CsvRow,
   CsvScanColumnsCallback,
   NativeCsvRowCallback,
-} from './types.ts';
+} from './types.js';
 
 export class NativeCsvRowView {
   #data: Buffer;

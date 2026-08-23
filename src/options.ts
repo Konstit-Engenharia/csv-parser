@@ -4,7 +4,7 @@ import type {
   CsvCountOptions,
   CsvRowsOptions,
   CsvRowViewsOptions,
-} from './types.ts';
+} from './types.js';
 
 /**
  * Preserve literal inference for `csv.rows()` options.

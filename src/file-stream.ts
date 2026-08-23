@@ -1,13 +1,13 @@
 import { createReadStream } from 'node:fs';
 import { extname } from 'node:path';
-import { DEFAULT_CHUNK_SIZE } from './native.ts';
+import { DEFAULT_CHUNK_SIZE } from './native.js';
 import type {
   CsvCompression,
   CsvDelimiter,
   CsvFileOptions,
   CsvZipCompression,
-} from './types.ts';
-import { readZipEntryChunks } from './zip-reader.ts';
+} from './types.js';
+import { readZipEntryChunks } from './zip-reader.js';
 
 const DELIMITER_PROBE_SIZE = 64 * 1024;
 const MAX_DELIMITER_PROBE_ROWS = 128;

@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from 'node:util';
-import { csv } from './api.ts';
+import { csv } from './api.js';
 import {
   MAX_FILTER_COUNT,
   MAX_REGEX_FILTER_COUNT,
   normalizeColumns,
   normalizeFilterColumn,
   normalizeFixedColumnsCount,
-} from './normalize.ts';
+} from './normalize.js';
 import type {
   CsvApiFileOptions,
   CsvColumns,
@@ -19,7 +19,7 @@ import type {
   CsvRowsOptions,
   CsvWhereFilter,
   CsvWherePredicate,
-} from './types.ts';
+} from './types.js';
 
 const help = `Usage: csv <command>
 

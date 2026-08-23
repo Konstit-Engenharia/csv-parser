@@ -1,25 +1,25 @@
-import { prepareCsvFileInput } from './file-stream.ts';
+import { prepareCsvFileInput } from './file-stream.js';
 import {
   native,
   u64ToSafeNumber,
-} from './native.ts';
+} from './native.js';
 import {
   requirePtr,
   toArrayBuffer,
-} from './native.ts';
-import { normalizeChunk } from './normalize.ts';
-import { NativeCsvParser } from './parser.ts';
+} from './native.js';
+import { normalizeChunk } from './normalize.js';
+import { NativeCsvParser } from './parser.js';
 import {
   rejectStrictSchemaUnsupported,
   strictSchemaValidator,
-} from './strict-schema.ts';
+} from './strict-schema.js';
 import type {
   CsvFileOptions,
   CsvNativeProjectionOptions,
   CsvParserOptions,
   CsvRow,
   CsvShard,
-} from './types.ts';
+} from './types.js';
 
 export function parseCsvBuffer(buffer: NodeJS.TypedArray | DataView, options: CsvParserOptions = {}): CsvRow[] {
   const parser = new NativeCsvParser(options);

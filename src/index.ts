@@ -54,7 +54,7 @@ export type {
   CsvWorkerPoolOptions,
   CsvZipCompression,
   NativeCsvRowCallback,
-} from './types.ts';
+} from './types.js';
 
 export {
   csv,
@@ -68,8 +68,8 @@ export {
   withColumnarBatches,
   withRowViews,
   workerPool,
-} from './api.ts';
-export { NativeCsvBatch, NativeCsvRowView } from './batches.ts';
-export { countCsvFile, countTrustedNewlineRows, parseCsvBuffer, parseCsvFile, parseCsvFileProjected } from './files.ts';
-export { defineColumnarOptions, defineCountOptions, defineRowsOptions, defineRowViewOptions } from './options.ts';
-export { NativeCsvParser } from './parser.ts';
+} from './api.js';
+export { NativeCsvBatch, NativeCsvRowView } from './batches.js';
+export { countCsvFile, countTrustedNewlineRows, parseCsvBuffer, parseCsvFile, parseCsvFileProjected } from './files.js';
+export { defineColumnarOptions, defineCountOptions, defineRowsOptions, defineRowViewOptions } from './options.js';
+export { NativeCsvParser } from './parser.js';

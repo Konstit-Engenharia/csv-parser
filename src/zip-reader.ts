@@ -2,8 +2,8 @@ import {
   native,
   type Pointer,
   u64ToSafeNumber,
-} from './native.ts';
-import type { CsvZipCompression } from './types.ts';
+} from './native.js';
+import type { CsvZipCompression } from './types.js';
 
 type ZipReaderPointer = Pointer | bigint;
 

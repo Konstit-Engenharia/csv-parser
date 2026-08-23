@@ -1,10 +1,10 @@
 import { createReadStream } from 'node:fs';
-import { NativeCsvParser } from '../parser.ts';
+import { NativeCsvParser } from '../parser.js';
 import type {
   CsvColumns,
   CsvEncoding,
   CsvRegex,
-} from '../types.ts';
+} from '../types.js';
 
 interface WorkerEqualsFilter {
   column: number;
