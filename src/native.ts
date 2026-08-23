@@ -342,12 +342,21 @@ function loadNative(): Library<typeof CSV_SYMBOLS> {
     join(root, 'build', 'Release', `libcsv_native.${suffix}`),
     join(root, `libcsv_native.${suffix}`),
   ];
-  const libraryPath = candidates.find((candidate) => existsSync(candidate));
-  if (libraryPath === undefined) {
-    throw new Error(`native library not found. Run: bun run build:native`);
-  }
+  const libraryPath = requireNativeLibraryPath(candidates);
 
   return dlopen(resolve(libraryPath), CSV_SYMBOLS);
+}
+
+export function findNativeLibraryPath(candidates: readonly string[]): string | undefined {
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+export function requireNativeLibraryPath(candidates: readonly string[]): string {
+  const libraryPath = findNativeLibraryPath(candidates);
+  if (libraryPath === undefined) {
+    throw new Error('native library not found. Run: bun run build:native');
+  }
+  return libraryPath;
 }
 
 export function requirePtr(ptr: NativePointer | null): NativePointer {

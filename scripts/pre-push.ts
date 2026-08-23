@@ -15,20 +15,26 @@ export type VersionReader = (object: string) => Promise<string | undefined>;
 const ZERO_OBJECT = /^0+$/;
 const GIT_OBJECT = /^[0-9a-f]{40,64}$/i;
 
-if (import.meta.main) {
-  await main();
+await (import.meta.main ? main() : Promise.resolve());
+
+export interface PrePushDependencies {
+  readonly input?: Promise<string>;
+  readonly registry?: string | undefined;
+  readonly readVersion?: VersionReader;
+  readonly run?: typeof run;
+  readonly requireSafe?: typeof requireSafePublishState;
 }
 
-async function main(): Promise<void> {
-  const registry = normalizeRegistry(process.env['KONSTIT_NPM_REGISTRY']);
-  const updates = parsePushUpdates(await Bun.stdin.text());
-  const versionBump = registry === undefined ? undefined : await findVersionBump(updates, readPackageVersionAt);
+export async function main(dependencies: PrePushDependencies = {}): Promise<void> {
+  const registry = normalizeRegistry(dependencies.registry ?? process.env['KONSTIT_NPM_REGISTRY']);
+  const updates = parsePushUpdates(await (dependencies.input ?? Bun.stdin.text()));
+  const versionBump = registry === undefined ? undefined : await findVersionBump(updates, dependencies.readVersion ?? readPackageVersionAt);
 
   if (versionBump !== undefined) {
-    await requireSafePublishState(versionBump);
+    await (dependencies.requireSafe ?? requireSafePublishState)(versionBump);
   }
 
-  await run([
+  await (dependencies.run ?? run)([
     process.execPath,
     'run',
     'prepush',
@@ -39,7 +45,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`Publishing package version ${versionBump.version} to ${registry}`);
-  await run([
+  await (dependencies.run ?? run)([
     process.execPath,
     'publish',
     '--registry',
@@ -133,8 +139,8 @@ export function normalizeRegistry(value: string | undefined): string | undefined
   return registry.href;
 }
 
-async function requireSafePublishState(versionBump: VersionBump): Promise<void> {
-  const head = await gitOutput(['rev-parse', 'HEAD']);
+export async function requireSafePublishState(versionBump: VersionBump, output = gitOutput): Promise<void> {
+  const head = await output(['rev-parse', 'HEAD']);
   if (versionBump.localObject !== head) {
     throw new Error('cannot publish a package version from a pushed object other than HEAD');
   }
@@ -142,21 +148,21 @@ async function requireSafePublishState(versionBump: VersionBump): Promise<void> 
   if (worktreeVersion !== versionBump.version) {
     throw new Error('working-tree package version does not match the pushed package version');
   }
-  const status = await gitOutput(['status', '--porcelain', '--untracked-files=normal']);
+  const status = await output(['status', '--porcelain', '--untracked-files=normal']);
   if (status.length !== 0) {
     throw new Error('cannot publish a package version from a dirty worktree');
   }
 }
 
-async function readPackageVersionAt(object: string): Promise<string | undefined> {
-  const result = Bun.spawnSync({
+export async function readPackageVersionAt(object: string, spawn = Bun.spawnSync): Promise<string | undefined> {
+  const result = spawn({
     cmd: ['git', 'show', `${object}:package.json`],
     cwd: process.cwd(),
     stderr: 'pipe',
     stdout: 'pipe',
   });
   if (!result.success) {
-    const commit = Bun.spawnSync({
+    const commit = spawn({
       cmd: ['git', 'cat-file', '-e', `${object}^{commit}`],
       cwd: process.cwd(),
       stderr: 'pipe',
@@ -177,7 +183,7 @@ async function readPackageVersionAt(object: string): Promise<string | undefined>
   return readPackageVersion(manifest);
 }
 
-function readPackageVersion(manifest: unknown): string {
+export function readPackageVersion(manifest: unknown): string {
   if (!isObject(manifest) || typeof manifest['version'] !== 'string') {
     throw new Error('package.json must contain a version string');
   }
@@ -190,7 +196,7 @@ function readPackageVersion(manifest: unknown): string {
   return version;
 }
 
-async function gitOutput(arguments_: readonly string[]): Promise<string> {
+export async function gitOutput(arguments_: readonly string[]): Promise<string> {
   const result = Bun.spawnSync({
     cmd: ['git', ...arguments_],
     cwd: process.cwd(),
@@ -203,7 +209,7 @@ async function gitOutput(arguments_: readonly string[]): Promise<string> {
   return result.stdout.toString().trim();
 }
 
-async function run(command: string[], label: string): Promise<void> {
+export async function run(command: string[], label: string): Promise<void> {
   const child = Bun.spawn(command, {
     cwd: process.cwd(),
     stderr: 'inherit',
@@ -216,6 +222,6 @@ async function run(command: string[], label: string): Promise<void> {
   }
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

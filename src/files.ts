@@ -68,9 +68,6 @@ export function findCsvSafeSplitOffsets(path: string, shardCount: number, delimi
 
   try {
     const count = u64ToSafeNumber(native.symbols.csv_split_offsets_batch_count(batch), 'CSV split offset count');
-    if (count === 0) {
-      return [];
-    }
     const ptr = native.symbols.csv_split_offsets_batch_ptr(batch);
     const offsets = new BigUint64Array(toArrayBuffer(requirePtr(ptr), 0, count * BigUint64Array.BYTES_PER_ELEMENT));
     return Array.from(offsets, (offset) => u64ToSafeNumber(offset, 'CSV split offset'));

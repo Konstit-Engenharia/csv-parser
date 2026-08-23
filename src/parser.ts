@@ -24,9 +24,11 @@ import type {
   CsvStartsWithFilter,
 } from './types.js';
 
-const nativeCsvParserFinalizer = new FinalizationRegistry<NativePointer>((handle) => {
+function destroyNativeCsvParser(handle: NativePointer): void {
   native.symbols.csv_parser_destroy(handle);
-});
+}
+
+const nativeCsvParserFinalizer = new FinalizationRegistry<NativePointer>(destroyNativeCsvParser);
 
 export class NativeCsvParser {
   #handle: NativePointer | null;
@@ -398,7 +400,7 @@ export class NativeCsvParser {
 
     this.#handle = null;
     nativeCsvParserFinalizer.unregister(this);
-    native.symbols.csv_parser_destroy(handle);
+    destroyNativeCsvParser(handle);
   }
 
   dispose(): void {

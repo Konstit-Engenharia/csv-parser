@@ -21,6 +21,7 @@ import type {
   CsvWherePredicate,
   CsvWorkerPoolOptions,
 } from './types.js';
+import { createWorker } from './worker-factory.js';
 import { workerModuleUrl } from './worker-module.js';
 
 interface WorkerEqualsFilterMessage {
@@ -100,6 +101,11 @@ interface WorkerErrorMessage {
   type: 'error';
 }
 
+interface ShardWorker {
+  readonly shard: CsvShard;
+  readonly worker: Worker;
+}
+
 type CsvSelectedColumnsFromOptions<TOptions extends CsvApiFileOptions> = TOptions extends { columns: infer TColumns extends CsvColumns; }
   ? TColumns
   : TOptions extends { selectedColumns: infer TColumns extends CsvColumns; } ? TColumns
@@ -108,9 +114,10 @@ type CsvSelectedColumnsFromOptions<TOptions extends CsvApiFileOptions> = TOption
 export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> {
   readonly #path: string;
   readonly #options: CsvApiFileOptions;
-  #countWorkers: Worker[] | undefined;
-  #rowsWorkers: Worker[] | undefined;
+  #countWorkers: ShardWorker[] | undefined;
+  #rowsWorkers: ShardWorker[] | undefined;
   #shards: CsvShard[] | undefined;
+  #cancelActive: ((error: Error) => void) | undefined;
   #closed = false;
   #busy = false;
 
@@ -136,13 +143,14 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
     }
 
     this.#busy = true;
+    let cancelActive: ((error: Error) => void) | undefined;
     try {
       const filters = normalizeWhere(this.#options.where);
       const shards = this.#ensureShards();
       if (shards.length === 0) {
         return 0;
       }
-      const workers = this.#ensureCountWorkers(shards.length);
+      const workers = this.#ensureCountWorkers(shards);
       return await new Promise<number>((resolve, reject) => {
         let settled = false;
         let doneWorkers = 0;
@@ -161,48 +169,60 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
             return;
           }
           settled = true;
+          this.#invalidateCountWorkers();
           reject(error);
         };
 
-        workers.forEach((worker, shardIndex) => {
-          const shard = shards[shardIndex];
-          if (shard === undefined) {
-            fail(new Error(`missing shard ${String(shardIndex)}`));
-            return;
+        cancelActive = (error) => fail(error);
+        this.#cancelActive = cancelActive;
+
+        try {
+          for (const [shardIndex, { shard, worker },] of workers.entries()) {
+            if (settled) {
+              break;
+            }
+            worker.onmessage = (event: MessageEvent<WorkerDoneMessage | WorkerErrorMessage>) => {
+              if (settled) {
+                return;
+              }
+              const message = event.data;
+              if (message.type === 'error') {
+                fail(new Error(`worker ${message.shardIndex}: ${message.error}`));
+                return;
+              }
+              total += message.rows ?? 0;
+              if (!Number.isSafeInteger(total)) {
+                fail(new RangeError(`parallel row count exceeds Number.MAX_SAFE_INTEGER: ${total}`));
+                return;
+              }
+              ++doneWorkers;
+              if (doneWorkers === workers.length) {
+                finish(total);
+              }
+            };
+            worker.onerror = (event) => {
+              fail(event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`));
+            };
+            worker.postMessage(
+              {
+                chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
+                delimiter: this.#options.delimiter,
+                encoding: this.#options.encoding,
+                path: this.#path,
+                shard,
+                shardIndex,
+                filters,
+              } satisfies WorkerCountMessage,
+            );
           }
-          worker.onmessage = (event: MessageEvent<WorkerDoneMessage | WorkerErrorMessage>) => {
-            const message = event.data;
-            if (message.type === 'error') {
-              fail(new Error(`worker ${message.shardIndex}: ${message.error}`));
-              return;
-            }
-            total += message.rows ?? 0;
-            if (!Number.isSafeInteger(total)) {
-              fail(new RangeError(`parallel row count exceeds Number.MAX_SAFE_INTEGER: ${total}`));
-              return;
-            }
-            ++doneWorkers;
-            if (doneWorkers === workers.length) {
-              finish(total);
-            }
-          };
-          worker.onerror = (event) => {
-            fail(event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`));
-          };
-          worker.postMessage(
-            {
-              chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
-              delimiter: this.#options.delimiter,
-              encoding: this.#options.encoding,
-              path: this.#path,
-              shard,
-              shardIndex,
-              filters,
-            } satisfies WorkerCountMessage,
-          );
-        });
+        } catch (error) {
+          fail(error);
+        }
       });
     } finally {
+      if (this.#cancelActive === cancelActive) {
+        this.#cancelActive = undefined;
+      }
       this.#busy = false;
     }
   }
@@ -213,12 +233,14 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
     const filters = normalizeWhere(this.#options.where);
 
     this.#busy = true;
+    let cancelActive: ((error: Error) => void) | undefined;
+    let completed = false;
     try {
       const shards = this.#ensureShards();
       if (shards.length === 0) {
         return;
       }
-      const workers = this.#ensureRowsWorkers(shards.length);
+      const workers = this.#ensureRowsWorkers(shards);
       const selected = selectedColumns(this.#options);
 
       type QueueItem =
@@ -236,50 +258,64 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
       };
 
       let doneWorkers = 0;
+      let failed = false;
 
-      workers.forEach((worker, shardIndex) => {
-        const shard = shards[shardIndex];
-        if (shard === undefined) {
-          push({ error: new Error(`missing shard ${String(shardIndex)}`) });
+      const fail = (error: Error) => {
+        if (failed) {
           return;
         }
-        worker.onmessage = (event: MessageEvent<WorkerRowsBatchMessage | WorkerDoneMessage | WorkerErrorMessage>) => {
-          const message = event.data;
-          if (message.type === 'rows') {
-            push({
-              rows: message.rows as CsvProjectedRow<TColumns>[],
-            });
-            return;
+        failed = true;
+        this.#invalidateRowsWorkers();
+        push({ error });
+      };
+
+      cancelActive = fail;
+      this.#cancelActive = cancelActive;
+
+      try {
+        for (const [shardIndex, { shard, worker },] of workers.entries()) {
+          if (failed) {
+            break;
           }
-          if (message.type === 'error') {
-            push({
-              error: new Error(`worker ${message.shardIndex}: ${message.error}`),
-            });
-            return;
-          }
-          ++doneWorkers;
-          if (doneWorkers === workers.length) {
-            push({ done: true });
-          }
-        };
-        worker.onerror = (event) => {
-          push({
-            error: event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`),
-          });
-        };
-        worker.postMessage(
-          {
-            chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
-            delimiter: this.#options.delimiter,
-            encoding: this.#options.encoding,
-            path: this.#path,
-            selectedColumns: selected,
-            shard,
-            shardIndex,
-            filters,
-          } satisfies WorkerRowsMessage,
-        );
-      });
+          worker.onmessage = (event: MessageEvent<WorkerRowsBatchMessage | WorkerDoneMessage | WorkerErrorMessage>) => {
+            if (failed) {
+              return;
+            }
+            const message = event.data;
+            if (message.type === 'rows') {
+              push({
+                rows: message.rows as CsvProjectedRow<TColumns>[],
+              });
+              return;
+            }
+            if (message.type === 'error') {
+              fail(new Error(`worker ${message.shardIndex}: ${message.error}`));
+              return;
+            }
+            ++doneWorkers;
+            if (doneWorkers === workers.length) {
+              push({ done: true });
+            }
+          };
+          worker.onerror = (event) => {
+            fail(event.error instanceof Error ? event.error : new Error(`worker ${shardIndex} failed`));
+          };
+          worker.postMessage(
+            {
+              chunkSize: this.#options.chunkSize ?? DEFAULT_CHUNK_SIZE,
+              delimiter: this.#options.delimiter,
+              encoding: this.#options.encoding,
+              path: this.#path,
+              selectedColumns: selected,
+              shard,
+              shardIndex,
+              filters,
+            } satisfies WorkerRowsMessage,
+          );
+        }
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
 
       while (true) {
         if (queue.length === 0) {
@@ -297,6 +333,7 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
             throw item.error;
           }
           if ('done' in item) {
+            completed = true;
             return;
           }
           if (item.rows.length > 0) {
@@ -305,6 +342,12 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
         }
       }
     } finally {
+      if (!completed) {
+        this.#invalidateRowsWorkers();
+      }
+      if (this.#cancelActive === cancelActive) {
+        this.#cancelActive = undefined;
+      }
       this.#busy = false;
     }
   }
@@ -314,14 +357,9 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
       return;
     }
     this.#closed = true;
-    for (const worker of this.#countWorkers ?? []) {
-      worker.terminate();
-    }
-    for (const worker of this.#rowsWorkers ?? []) {
-      worker.terminate();
-    }
-    this.#countWorkers = undefined;
-    this.#rowsWorkers = undefined;
+    this.#cancelActive?.(new Error('worker pool is closed'));
+    this.#invalidateCountWorkers();
+    this.#invalidateRowsWorkers();
   }
 
   [Symbol.dispose](): void {
@@ -349,28 +387,60 @@ export class CsvWorkerPool<TColumns extends CsvColumns | undefined = undefined> 
     return this.#shards;
   }
 
-  #ensureCountWorkers(count: number): Worker[] {
+  #ensureCountWorkers(shards: readonly CsvShard[]): ShardWorker[] {
     if (this.#countWorkers !== undefined) {
       return this.#countWorkers;
     }
-    this.#countWorkers = Array.from({ length: count }, () =>
-      new Worker(workerModuleUrl('count'), {
-        preload: [],
-        type: 'module',
-      }));
+    this.#countWorkers = createShardWorkers(shards, 'count');
     return this.#countWorkers;
   }
 
-  #ensureRowsWorkers(count: number): Worker[] {
+  #ensureRowsWorkers(shards: readonly CsvShard[]): ShardWorker[] {
     if (this.#rowsWorkers !== undefined) {
       return this.#rowsWorkers;
     }
-    this.#rowsWorkers = Array.from({ length: count }, () =>
-      new Worker(workerModuleUrl('rows'), {
-        preload: [],
-        type: 'module',
-      }));
+    this.#rowsWorkers = createShardWorkers(shards, 'rows');
     return this.#rowsWorkers;
+  }
+
+  #invalidateCountWorkers(): void {
+    terminateShardWorkers(this.#countWorkers ?? []);
+    this.#countWorkers = undefined;
+  }
+
+  #invalidateRowsWorkers(): void {
+    terminateShardWorkers(this.#rowsWorkers ?? []);
+    this.#rowsWorkers = undefined;
+  }
+}
+
+function createShardWorkers(shards: readonly CsvShard[], kind: 'count' | 'rows'): ShardWorker[] {
+  const workers: ShardWorker[] = [];
+  let workersCreated = false;
+  try {
+    for (const shard of shards) {
+      workers.push({
+        shard,
+        worker: createWorker(workerModuleUrl(kind), {
+          preload: [],
+          type: 'module',
+        }),
+      });
+    }
+    workersCreated = true;
+    return workers;
+  } finally {
+    if (!workersCreated) {
+      terminateShardWorkers(workers);
+    }
+  }
+}
+
+function terminateShardWorkers(workers: readonly ShardWorker[]): void {
+  for (const { worker } of workers) {
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.terminate();
   }
 }
 

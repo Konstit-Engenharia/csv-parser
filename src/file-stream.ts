@@ -246,7 +246,7 @@ function detectDelimiter(path: string, probe: Uint8Array, sourceEnded: boolean):
   );
 }
 
-function scanDelimiterCounts(probe: Uint8Array, sourceEnded: boolean): number[][] {
+export function scanDelimiterCounts(probe: Uint8Array, sourceEnded: boolean): number[][] {
   const rows: number[][] = [];
   let counts = Array.from({ length: DELIMITER_CANDIDATES.length }, () => 0);
   let inQuotes = false;

@@ -1,6 +1,6 @@
-if (!process.versions.bun) {
-  throw new Error('This package requires Bun');
-}
+import { requireBunRuntime } from './runtime.js';
+
+requireBunRuntime();
 
 export type {
   CsvApiFileOptions,

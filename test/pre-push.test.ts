@@ -88,6 +88,7 @@ describe('pre-push package publication', () => {
     expect(normalizeRegistry('http://localhost:4873')).toBe('http://localhost:4873/');
     expect(() => normalizeRegistry('http://registry.example.com')).toThrow('must use HTTPS');
     expect(() => normalizeRegistry('https://user:secret@registry.example.com')).toThrow('must not contain credentials');
+    expect(() => normalizeRegistry('https://registry.example.com/?x=1')).toThrow('query or fragment');
     expect(() => normalizeRegistry('not a URL')).toThrow('must be a valid URL');
   });
 });

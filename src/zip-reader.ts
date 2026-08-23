@@ -12,9 +12,11 @@ const DEFAULT_MAXIMUM_COMPRESSION_RATIO = 1_000;
 const ZIP_READER_DONE = 1;
 const ZIP_READER_ERROR = 2;
 
-const nativeZipReaderFinalizer = new FinalizationRegistry<ZipReaderPointer>((handle) => {
+const nativeZipReaderFinalizer = new FinalizationRegistry<ZipReaderPointer>(destroyNativeZipReader);
+
+function destroyNativeZipReader(handle: ZipReaderPointer): void {
   native.symbols.csv_zip_reader_destroy(handle);
-});
+}
 
 class NativeZipReader {
   #handle: ZipReaderPointer | null;
@@ -78,7 +80,7 @@ class NativeZipReader {
     }
     this.#handle = null;
     nativeZipReaderFinalizer.unregister(this);
-    native.symbols.csv_zip_reader_destroy(handle);
+    destroyNativeZipReader(handle);
   }
 
   [Symbol.dispose](): void {

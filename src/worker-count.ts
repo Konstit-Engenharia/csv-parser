@@ -13,9 +13,11 @@ import type {
   CsvFieldValue,
   CsvParallelCountOptions,
   CsvRegex,
+  CsvShard,
   CsvWhereFilter,
   CsvWherePredicate,
 } from './types.js';
+import { createWorker } from './worker-factory.js';
 import { workerModuleUrl } from './worker-module.js';
 
 interface WorkerEqualsFilterMessage {
@@ -98,12 +100,26 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
     return 0;
   }
 
-  const workers = shards.map(() =>
-    new Worker(workerModuleUrl('count'), {
-      preload: [],
-      type: 'module',
-    })
-  );
+  const shardWorkers: { readonly shard: CsvShard; readonly worker: Worker; }[] = [];
+  let workersCreated = false;
+  try {
+    for (const shard of shards) {
+      shardWorkers.push({
+        shard,
+        worker: createWorker(workerModuleUrl('count'), {
+          preload: [],
+          type: 'module',
+        }),
+      });
+    }
+    workersCreated = true;
+  } finally {
+    if (!workersCreated) {
+      for (const { worker } of shardWorkers) {
+        worker.terminate();
+      }
+    }
+  }
 
   try {
     return await new Promise<number>((resolve, reject) => {
@@ -116,7 +132,7 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
           return;
         }
         settled = true;
-        for (const worker of workers) {
+        for (const { worker } of shardWorkers) {
           worker.terminate();
         }
         resolve(value);
@@ -127,18 +143,13 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
           return;
         }
         settled = true;
-        for (const worker of workers) {
+        for (const { worker } of shardWorkers) {
           worker.terminate();
         }
         reject(error);
       };
 
-      workers.forEach((worker, shardIndex) => {
-        const shard = shards[shardIndex];
-        if (shard === undefined) {
-          fail(new Error(`missing shard ${String(shardIndex)}`));
-          return;
-        }
+      shardWorkers.forEach(({ shard, worker }, shardIndex) => {
         worker.onmessage = (event: MessageEvent<WorkerDoneMessage | WorkerErrorMessage>) => {
           const message = event.data;
           if (message.type === 'error') {
@@ -151,7 +162,7 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
             return;
           }
           ++doneWorkers;
-          if (doneWorkers === workers.length) {
+          if (doneWorkers === shardWorkers.length) {
             finish(total);
           }
         };
@@ -172,7 +183,7 @@ export async function parallelCount(path: string, options: CsvParallelCountOptio
       });
     });
   } finally {
-    for (const worker of workers) {
+    for (const { worker } of shardWorkers) {
       worker.terminate();
     }
   }

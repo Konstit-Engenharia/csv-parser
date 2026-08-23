@@ -18,9 +18,11 @@ import type {
   CsvParallelRowsOptions,
   CsvProjectedRow,
   CsvRegex,
+  CsvShard,
   CsvWhereFilter,
   CsvWherePredicate,
 } from './types.js';
+import { createWorker } from './worker-factory.js';
 import { workerModuleUrl } from './worker-module.js';
 
 interface WorkerEqualsFilterMessage {
@@ -117,12 +119,26 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
     return;
   }
 
-  const workers = shards.map(() =>
-    new Worker(workerModuleUrl('rows'), {
-      preload: [],
-      type: 'module',
-    })
-  );
+  const shardWorkers: { readonly shard: CsvShard; readonly worker: Worker; }[] = [];
+  let workersCreated = false;
+  try {
+    for (const shard of shards) {
+      shardWorkers.push({
+        shard,
+        worker: createWorker(workerModuleUrl('rows'), {
+          preload: [],
+          type: 'module',
+        }),
+      });
+    }
+    workersCreated = true;
+  } finally {
+    if (!workersCreated) {
+      for (const { worker } of shardWorkers) {
+        worker.terminate();
+      }
+    }
+  }
 
   type QueueItem<T extends CsvColumns | undefined> =
     | { done: true; }
@@ -141,12 +157,7 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
   let doneWorkers = 0;
 
   try {
-    workers.forEach((worker, shardIndex) => {
-      const shard = shards[shardIndex];
-      if (shard === undefined) {
-        push({ error: new Error(`missing shard ${String(shardIndex)}`) });
-        return;
-      }
+    shardWorkers.forEach(({ shard, worker }, shardIndex) => {
       worker.onmessage = (event: MessageEvent<WorkerRowsBatchMessage | WorkerDoneMessage | WorkerErrorMessage>) => {
         const message = event.data;
         if (message.type === 'rows') {
@@ -163,7 +174,7 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
         }
 
         ++doneWorkers;
-        if (doneWorkers === workers.length) {
+        if (doneWorkers === shardWorkers.length) {
           push({ done: true });
         }
       };
@@ -194,10 +205,10 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
         });
       }
 
-      while (queue.length > 0) {
+      while (true) {
         const item = queue.shift();
         if (item === undefined) {
-          continue;
+          break;
         }
         if ('error' in item) {
           throw item.error;
@@ -211,7 +222,7 @@ export async function* parallelRows<TColumns extends CsvColumns | undefined = un
       }
     }
   } finally {
-    for (const worker of workers) {
+    for (const { worker } of shardWorkers) {
       worker.terminate();
     }
   }
