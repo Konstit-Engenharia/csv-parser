@@ -54,11 +54,11 @@ If no matching library exists, imports fail with:
 native library not found. Run: bun run build:native
 ```
 
-Package assembly is separate from publication. `bun run build:package` uses Bun's transpiler for runtime JavaScript and
-TypeScript for declarations, with both outputs written to `dist/`. The `Package` workflow builds target-specific native
-libraries on macOS and Linux, verifies every required target, creates the tarball, and installs that tarball in a clean
-smoke-test project. Publication must use this verified artifact; `prepack` rebuilds `dist/` and rejects packages missing any
-required native library.
+Package assembly is separate from publication. `bun run build:package` builds and stages the native libraries supported by
+the current host, uses Bun's transpiler for runtime JavaScript, and uses TypeScript for declarations. The JavaScript and
+declarations are written to `dist/`. The `Package` workflow builds target-specific native libraries on macOS and Linux,
+verifies every required target, creates the tarball, and installs that tarball in a clean smoke-test project. Publication
+must use this verified artifact; `prepack` rebuilds the package and rejects missing native libraries.
 
 ## Quick Start
 
@@ -412,6 +412,11 @@ bun run hooks:install
 Before every push, the hook builds the host's native libraries and the Linux x64 library, checks TypeScript and C++
 formatting, runs the linters and type checker, and runs both the Bun and native test suites. Building Linux x64 requires
 Docker to be installed and running. Run the same checks manually with `bun run prepush`.
+
+If `KONSTIT_NPM_REGISTRY` contains a registry URL, the hook also compares the package versions in the local and remote
+commits. A version increase publishes the committed package after all checks pass. The publish step requires the pushed
+commit to be `HEAD` and the worktree to be clean. Configure authentication for the registry through Bun's npm
+configuration.
 
 Full-file benchmarks against `corpus/large/example.csv` are long CPU-bound runs. Run them separately when comparing numbers.
 

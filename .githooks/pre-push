@@ -5,4 +5,4 @@ set -eu
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
 
-exec bun run prepush
+exec bun scripts/pre-push.ts "$@"

@@ -15,6 +15,7 @@ const sourceDirectory = join(repoRoot, 'src');
 await rm(distDirectory, { force: true, recursive: true });
 
 const buildResults = await Promise.allSettled([
+  buildNative(),
   transpileJavaScript(),
   emitDeclarations(),
 ]);
@@ -28,6 +29,27 @@ if (failures.length > 1) {
 
 await verifyPackageOutput();
 await chmod(join(distDirectory, 'cli.js'), 0o755);
+
+async function buildNative(): Promise<void> {
+  await runBunScript('scripts/build-native.ts', 'native build');
+  await runBunScript('scripts/stage-native.ts', 'native staging');
+}
+
+async function runBunScript(script: string, label: string): Promise<void> {
+  console.log(`$ bun ${script}`);
+  const child = Bun.spawn([
+    process.execPath,
+    script,
+  ], {
+    cwd: repoRoot,
+    stderr: 'inherit',
+    stdout: 'inherit',
+  });
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    throw new Error(`${label} failed with exit code ${String(exitCode)}`);
+  }
+}
 
 async function transpileJavaScript(): Promise<void> {
   const transpiler = new Bun.Transpiler({
