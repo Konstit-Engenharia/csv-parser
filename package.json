@@ -1,6 +1,6 @@
 {
   "name": "@konstit/csv",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Bun-native CSV parser with streaming rows, filters, and low-allocation batches.",
   "author": {
     "name": "KONSTIT ENGENHARIA E TECNOLOGIA LTDA",
