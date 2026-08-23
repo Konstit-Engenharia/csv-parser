@@ -16,6 +16,16 @@ interface WorkerInFilterMessage {
   values: Uint8Array[];
 }
 
+interface WorkerNotNequalsFilterMessage {
+  column: number;
+  notNequals: Uint8Array;
+}
+
+interface WorkerNotInFilterMessage {
+  column: number;
+  notIn: Uint8Array[];
+}
+
 interface WorkerStartsWithFilterMessage {
   column: number;
   prefix: Uint8Array;
@@ -29,6 +39,8 @@ interface WorkerRegexFilterMessage {
 type WorkerFilterMessage =
   | WorkerEqualsFilterMessage
   | WorkerInFilterMessage
+  | WorkerNotInFilterMessage
+  | WorkerNotNequalsFilterMessage
   | WorkerRegexFilterMessage
   | WorkerStartsWithFilterMessage;
 

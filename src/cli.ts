@@ -60,14 +60,16 @@ Parser options:
 Friendly filter options (repeatable):
   --where-eq <column=value>        Match one exact value
   --where-in <column=value>        Add a value to a column IN filter
+  --where-neq <column=value>       Exclude one exact value
+  --where-noin <column=value>      Add a value to a column NOT IN filter
   --where-prefix <column=value>    Match a value prefix
   --where-regex <column=/re/flags> Match an RE2-compatible JavaScript regex
 
 Advanced filter option:
   --where <json>                   Advanced CsvWhereFilter JSON
 
-All filter clauses use AND. Repeated --where-in clauses for the same column
-form one IN filter. Quote values that contain spaces or shell characters.
+All filter clauses use AND. Repeated --where-in and --where-noin clauses for
+the same column form one filter. Quote values that contain spaces or shell characters.
 Regex flags can be i, m, s, and u.
 
 Compatibility:
@@ -78,6 +80,7 @@ Compatibility:
 Examples:
   csv count data.csv --delimiter ';' --chunk-size 262144
   csv count data.csv --where-eq 2=SP
+  csv count data.csv --where-neq 2=SP
   csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
   csv count data.csv --where-regex '1=/^ana/i'`;
 
@@ -112,6 +115,8 @@ Parser options:
 Friendly filter options (repeatable):
   --where-eq <column=value>        Match one exact value
   --where-in <column=value>        Add a value to a column IN filter
+  --where-neq <column=value>       Exclude one exact value
+  --where-noin <column=value>      Add a value to a column NOT IN filter
   --where-prefix <column=value>    Match a value prefix
   --where-regex <column=/re/flags> Match an RE2-compatible JavaScript regex
 
@@ -119,7 +124,7 @@ Advanced filter option:
   --where <json>                   Advanced CsvWhereFilter JSON
 
 Filters use original input column indexes. All filter clauses use AND.
-Repeated --where-in clauses for the same column form one IN filter.
+Repeated --where-in and --where-noin clauses for the same column form one filter.
 Quote values that contain spaces or shell characters. Regex flags can be
 i, m, s, and u.
 
@@ -163,6 +168,8 @@ const countOptionDefinitions = {
   'where': { type: 'string' },
   'where-eq': { multiple: true, type: 'string' },
   'where-in': { multiple: true, type: 'string' },
+  'where-neq': { multiple: true, type: 'string' },
+  'where-noin': { multiple: true, type: 'string' },
   'where-prefix': { multiple: true, type: 'string' },
   'where-regex': { multiple: true, type: 'string' },
   'zip-entry': { type: 'string' },
@@ -278,6 +285,8 @@ interface CommonOptionValues {
   readonly 'where'?: string;
   readonly 'where-eq'?: readonly string[];
   readonly 'where-in'?: readonly string[];
+  readonly 'where-neq'?: readonly string[];
+  readonly 'where-noin'?: readonly string[];
   readonly 'where-prefix'?: readonly string[];
   readonly 'where-regex'?: readonly string[];
   readonly 'zip-entry'?: string;
@@ -577,6 +586,8 @@ function parseWhereOptions(values: {
   readonly 'where'?: string;
   readonly 'where-eq'?: readonly string[];
   readonly 'where-in'?: readonly string[];
+  readonly 'where-neq'?: readonly string[];
+  readonly 'where-noin'?: readonly string[];
   readonly 'where-prefix'?: readonly string[];
   readonly 'where-regex'?: readonly string[];
 }): CsvWhereFilter | undefined {
@@ -595,6 +606,11 @@ function parseWhereOptions(values: {
     predicates.push({ column, equals: value });
   }
 
+  for (const expression of values['where-neq'] ?? []) {
+    const { column, value } = parseColumnValue(expression, '--where-neq');
+    predicates.push({ column, notNequals: value });
+  }
+
   const inValuesByColumn = new Map<number, string[]>();
   for (const expression of values['where-in'] ?? []) {
     const { column, value } = parseColumnValue(expression, '--where-in');
@@ -607,6 +623,20 @@ function parseWhereOptions(values: {
   }
   for (const [column, inValues,] of inValuesByColumn) {
     predicates.push({ column, in: inValues });
+  }
+
+  const notInValuesByColumn = new Map<number, string[]>();
+  for (const expression of values['where-noin'] ?? []) {
+    const { column, value } = parseColumnValue(expression, '--where-noin');
+    const columnValues = notInValuesByColumn.get(column);
+    if (columnValues === undefined) {
+      notInValuesByColumn.set(column, [value]);
+    } else {
+      columnValues.push(value);
+    }
+  }
+  for (const [column, notInValues,] of notInValuesByColumn) {
+    predicates.push({ column, notIn: notInValues });
   }
 
   for (const expression of values['where-prefix'] ?? []) {
@@ -702,6 +732,20 @@ function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {
       in: value['in'].map((item, index) => requireString(item, `${label}.in[${String(index)}]`)),
     };
   }
+  if ('notNequals' in value) {
+    requireExactKeys(value, ['column', 'notNequals'], label);
+    return { column, notNequals: requireString(value['notNequals'], `${label}.notNequals`) };
+  }
+  if ('notIn' in value) {
+    requireExactKeys(value, ['column', 'notIn'], label);
+    if (!Array.isArray(value['notIn']) || value['notIn'].length === 0) {
+      throw new Error(`${label}.notIn must be a non-empty string array`);
+    }
+    return {
+      column,
+      notIn: value['notIn'].map((item, index) => requireString(item, `${label}.notIn[${String(index)}]`)),
+    };
+  }
   if ('startsWith' in value) {
     requireExactKeys(value, ['column', 'startsWith'], label);
     return { column, startsWith: requireString(value['startsWith'], `${label}.startsWith`) };
@@ -718,7 +762,7 @@ function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {
       : requireString(value['regex']['flags'], `${label}.regex.flags`);
     return { column, regex: csv.re(new RegExp(source, flags)) };
   }
-  throw new Error(`${label} must contain equals, in, startsWith, or regex`);
+  throw new Error(`${label} must contain equals, in, notNequals, notIn, startsWith, or regex`);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

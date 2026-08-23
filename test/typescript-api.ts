@@ -2,6 +2,8 @@ import {
   csv,
   type CsvCompression,
   type CsvDelimiter,
+  type CsvNotInFilter,
+  type CsvNotNequalsFilter,
   type CsvWhereEqualsFilter,
   parallelCount,
   parallelRows,
@@ -11,6 +13,10 @@ import {
 const path = 'corpus/large/example.csv';
 declare const dynamicStrict: boolean;
 declare const optionalEquals: CsvWhereEqualsFilter | undefined;
+const nativeNotNequals: CsvNotNequalsFilter = { column: 1, notNequals: 'SP' };
+const nativeNotIn: CsvNotInFilter = { column: 1, notIn: ['SP', 'RJ'] };
+void nativeNotNequals;
+void nativeNotIn;
 const autoCompression: CsvCompression = 'auto';
 void autoCompression;
 const zipCompression: CsvCompression = { entry: 'data.csv', format: 'zip' };
@@ -61,6 +67,8 @@ void csv.withColumnarBatches(path, { columns: [0, 2] as const }, (batch) => {
 void csv.rows(path, { where: { column: 1, equals: 'SP' } });
 void csv.rows(path, { where: optionalEquals });
 void csv.rows(path, { where: { column: 1, in: ['SP'] } });
+void csv.rows(path, { where: { column: 1, notNequals: 'SP' } });
+void csv.rows(path, { where: { column: 1, notIn: ['SP', 'RJ'] } });
 void csv.rows(path, { where: { column: 1, startsWith: 'S' } });
 const stateRegex = csv.re(/^(?:SP|RJ)$/);
 void csv.rows(path, { where: { column: 1, regex: stateRegex } });
@@ -92,6 +100,12 @@ using filteredPool = workerPool(path, {
 });
 void filteredPool.count();
 void filteredPool.rows();
+
+// @ts-expect-error neq was renamed to notNequals
+void csv.rows(path, { where: { column: 1, neq: 'SP' } });
+
+// @ts-expect-error noin was renamed to notIn
+void csv.rows(path, { where: { column: 1, noin: ['SP'] } });
 
 // @ts-expect-error regex filters require csv.re()
 void csv.rows(path, { where: { column: 1, regex: /SP/ } });

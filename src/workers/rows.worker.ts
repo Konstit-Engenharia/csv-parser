@@ -16,6 +16,16 @@ interface WorkerInFilter {
   values: Uint8Array[];
 }
 
+interface WorkerNotNequalsFilter {
+  column: number;
+  notNequals: Uint8Array;
+}
+
+interface WorkerNotInFilter {
+  column: number;
+  notIn: Uint8Array[];
+}
+
 interface WorkerStartsWithFilter {
   column: number;
   prefix: Uint8Array;
@@ -26,7 +36,13 @@ interface WorkerRegexFilter {
   regex: CsvRegex;
 }
 
-type WorkerFilter = WorkerEqualsFilter | WorkerInFilter | WorkerRegexFilter | WorkerStartsWithFilter;
+type WorkerFilter =
+  | WorkerEqualsFilter
+  | WorkerInFilter
+  | WorkerNotInFilter
+  | WorkerNotNequalsFilter
+  | WorkerRegexFilter
+  | WorkerStartsWithFilter;
 
 interface WorkerRowsMessage {
   chunkSize: number;

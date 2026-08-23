@@ -705,6 +705,25 @@ TEST_CASE("native C ABI evaluates multiple filters on one column") {
   csv_parser_destroy(parser);
 }
 
+TEST_CASE("native C ABI evaluates neq and noin filters") {
+  const std::string input = "a,SP\nb,RJ\nc,MG\nd\n";
+  const std::string values = "SPRJ";
+  const uint32_t value_offsets[] = {0, 2, 4};
+  const uint32_t filters[] = {
+      5, 1, 0, 1, // neq "SP"
+      6, 1, 1, 1, // noin {"RJ"}
+  };
+
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  const uint64_t rows = csv_parser_write_count_where_all(
+      parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true, filters, 2,
+      reinterpret_cast<const uint8_t*>(values.data()), values.size(), value_offsets, 2);
+  REQUIRE(rows == 1);
+  REQUIRE(std::string_view(csv_parser_last_error(parser)).empty());
+  csv_parser_destroy(parser);
+}
+
 TEST_CASE("native C ABI compiles one RE2 filter across chunks") {
   const std::string input = "alpha,SP\nalpine,RJ\nbeta,MG\ngamma,SP\n";
   const std::string pattern = "^(?:SP|RJ)$";

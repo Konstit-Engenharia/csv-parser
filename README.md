@@ -122,12 +122,14 @@ on stderr. `--json` cannot be combined with `--output-delimiter`.
 
 The CLI uses one process and exposes the serial file, parser, projection, and filter fields as flags. It does not expose
 `workerCount`. Run `csv count --help` or `csv lines --help` for the complete list. Friendly filter flags use
-`column=value`. Repeat `--where-in` for each accepted value. Different filter clauses combine with AND. CLI filter values
-are strings; use the TypeScript API for `workerCount` and binary `Buffer` or `Uint8Array` values.
+`column=value`. Repeat `--where-in` or `--where-noin` for each value. Different filter clauses combine with AND. CLI
+filter values are strings; use the TypeScript API for `workerCount` and binary `Buffer` or `Uint8Array` values.
 
 ```sh
 csv count data.csv --delimiter ';' --where-eq 2=SP
+csv count data.csv --where-neq 2=SP
 csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
+csv count data.csv --where-noin 2=SP --where-noin 2=RJ
 csv count data.csv --where-regex '1=/^A/i'
 csv lines data.csv --where-in 2=SP --where-in 2=RJ --limit 25
 csv lines data.csv --columns 0,1 --json --limit 25
@@ -189,7 +191,8 @@ Supported helpers:
 - `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
 - `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
-All row and count APIs support `equals`, `in`, `startsWith`, and `regex`. Create regex filters with `csv.re()`:
+All row and count APIs support `equals`, `in`, `notNequals`, `notIn`, `startsWith`, and `regex`. `notNequals` means not
+equal, and `notIn` means not in the supplied values. Create regex filters with `csv.re()`:
 
 ```ts
 const selected = csv.rows('data.csv', {

@@ -63,6 +63,8 @@ export type CsvShardingOptions = Omit<CsvFileOptions, 'compression'> & {
 export type CsvWherePredicate =
   | CsvWhereEqualsFilter
   | CsvWhereInFilter
+  | CsvWhereNotInFilter
+  | CsvWhereNotNequalsFilter
   | CsvWhereRegexFilter
   | CsvWhereStartsWithFilter;
 
@@ -82,6 +84,16 @@ export interface CsvInFilter {
   values: readonly CsvFieldValue[];
 }
 
+export interface CsvNotNequalsFilter {
+  column: number;
+  notNequals: CsvFieldValue;
+}
+
+export interface CsvNotInFilter {
+  column: number;
+  notIn: readonly CsvFieldValue[];
+}
+
 export interface CsvStartsWithFilter {
   column: number;
   prefix: CsvFieldValue;
@@ -92,7 +104,13 @@ export interface CsvRegexFilter {
   regex: CsvRegex;
 }
 
-export type CsvNativeFilter = CsvEqualsFilter | CsvInFilter | CsvRegexFilter | CsvStartsWithFilter;
+export type CsvNativeFilter =
+  | CsvEqualsFilter
+  | CsvInFilter
+  | CsvNotInFilter
+  | CsvNotNequalsFilter
+  | CsvRegexFilter
+  | CsvStartsWithFilter;
 
 export interface CsvWhereEqualsFilter {
   column: number;
@@ -103,6 +121,10 @@ export interface CsvWhereInFilter {
   column: number;
   in: readonly CsvFieldValue[];
 }
+
+export type CsvWhereNotNequalsFilter = CsvNotNequalsFilter;
+
+export type CsvWhereNotInFilter = CsvNotInFilter;
 
 export interface CsvWhereStartsWithFilter {
   column: number;

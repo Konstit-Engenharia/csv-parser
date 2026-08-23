@@ -27,6 +27,16 @@ interface WorkerInFilterMessage {
   values: Uint8Array[];
 }
 
+interface WorkerNotNequalsFilterMessage {
+  column: number;
+  notNequals: Uint8Array;
+}
+
+interface WorkerNotInFilterMessage {
+  column: number;
+  notIn: Uint8Array[];
+}
+
 interface WorkerStartsWithFilterMessage {
   column: number;
   prefix: Uint8Array;
@@ -40,6 +50,8 @@ interface WorkerRegexFilterMessage {
 type WorkerFilterMessage =
   | WorkerEqualsFilterMessage
   | WorkerInFilterMessage
+  | WorkerNotInFilterMessage
+  | WorkerNotNequalsFilterMessage
   | WorkerRegexFilterMessage
   | WorkerStartsWithFilterMessage;
 
@@ -193,6 +205,21 @@ function normalizePredicate(predicate: CsvWherePredicate): WorkerFilterMessage {
     return {
       column: normalizeFilterColumn(predicate.column),
       values: predicate.in.map((value) => normalizeFieldValue(value)),
+    };
+  }
+  if ('notNequals' in predicate) {
+    return {
+      column: normalizeFilterColumn(predicate.column),
+      notNequals: normalizeFieldValue(predicate.notNequals),
+    };
+  }
+  if ('notIn' in predicate) {
+    if (predicate.notIn.length === 0) {
+      throw new RangeError('filter values must not be empty');
+    }
+    return {
+      column: normalizeFilterColumn(predicate.column),
+      notIn: predicate.notIn.map((value) => normalizeFieldValue(value)),
     };
   }
   if ('startsWith' in predicate) {

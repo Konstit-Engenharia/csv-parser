@@ -289,6 +289,16 @@ describe('csv CLI', () => {
       name: 'in',
     },
     {
+      expected: '2\n',
+      filter: { column: 2, notNequals: 'SP' },
+      name: 'notNequals',
+    },
+    {
+      expected: '1\n',
+      filter: { column: 2, notIn: ['SP', 'RJ'] },
+      name: 'notIn',
+    },
+    {
       expected: '1\n',
       filter: { column: 1, startsWith: 'B' },
       name: 'startsWith',
@@ -342,6 +352,16 @@ describe('csv CLI', () => {
       arguments: ['--where-in', '2=SP', '--where-in', '2=RJ'],
       expected: '3\n',
       name: 'grouped IN',
+    },
+    {
+      arguments: ['--where-neq', '2=SP'],
+      expected: '2\n',
+      name: 'inequality',
+    },
+    {
+      arguments: ['--where-noin', '2=SP', '--where-noin', '2=RJ'],
+      expected: '1\n',
+      name: 'grouped NOT IN',
     },
     {
       arguments: ['--where-prefix', '1=B'],
@@ -678,6 +698,8 @@ describe('csv CLI', () => {
         '--where',
         '--where-eq',
         '--where-in',
+        '--where-neq',
+        '--where-noin',
         '--where-prefix',
         '--where-regex',
       ]
@@ -874,6 +896,11 @@ describe('csv CLI', () => {
       name: 'an empty in filter',
     },
     {
+      arguments: ['--where', '{"column":2,"notIn":[]}'],
+      message: '--where.notIn must be a non-empty string array',
+      name: 'an empty notIn filter',
+    },
+    {
       arguments: ['--where', '{"column":2,"equals":"SP","extra":true}'],
       message: '--where contains unknown property: extra',
       name: 'an unknown filter property',
@@ -1063,6 +1090,8 @@ const countOptionNames = {
   '--where': true,
   '--where-eq': true,
   '--where-in': true,
+  '--where-neq': true,
+  '--where-noin': true,
   '--where-prefix': true,
   '--where-regex': true,
   '--zip-entry': true,

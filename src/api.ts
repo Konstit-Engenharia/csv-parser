@@ -354,7 +354,7 @@ export function withRowViews(
  * Count rows without materializing them.
  *
  * Full filter support exists here because count has native fast paths for
- * `where.equals`, `where.in`, `where.startsWith`, and `where.regex`.
+ * `where.equals`, `where.in`, `where.notNequals`, `where.notIn`, `where.startsWith`, and `where.regex`.
  */
 export async function count(path: string, options: CsvCountOptions = {}): Promise<number> {
   if ((options.workerCount ?? 1) > 1) {
@@ -830,6 +830,12 @@ function toNativeFilter(predicate: CsvWherePredicate): CsvNativeFilter {
   }
   if ('in' in predicate) {
     return { column: predicate.column, values: predicate.in };
+  }
+  if ('notNequals' in predicate) {
+    return predicate;
+  }
+  if ('notIn' in predicate) {
+    return predicate;
   }
   if ('startsWith' in predicate) {
     return { column: predicate.column, prefix: predicate.startsWith };

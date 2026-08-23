@@ -39,6 +39,8 @@ enum class row_filter_kind : uint8_t {
   in = 2,
   starts_with = 3,
   regex = 4,
+  neq = 5,
+  noin = 6,
 };
 
 struct row_filter {
@@ -903,7 +905,8 @@ private:
 
   void prepare_in_filter(const row_filter& filter, in_filter_cache& cache) {
     constexpr size_t hash_filter_threshold = 8;
-    if (!filter.enabled || filter.kind != row_filter_kind::in || filter.value_count < hash_filter_threshold) {
+    if (!filter.enabled || (filter.kind != row_filter_kind::in && filter.kind != row_filter_kind::noin) ||
+        filter.value_count < hash_filter_threshold) {
       cache.use_set = false;
       return;
     }
@@ -1645,6 +1648,10 @@ private:
       return field_equals_filter(filter.value, filter.value_len);
     case row_filter_kind::in:
       return field_in_filter(filter, in_filter_caches_[filter_index]);
+    case row_filter_kind::neq:
+      return !field_equals_filter(filter.value, filter.value_len);
+    case row_filter_kind::noin:
+      return !field_in_filter(filter, in_filter_caches_[filter_index]);
     case row_filter_kind::starts_with:
       return field_starts_with_filter(filter);
     case row_filter_kind::regex: {
@@ -2012,7 +2019,7 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
     const uint32_t value_count = descriptors[descriptor_offset + 3];
 
     if (raw_kind < static_cast<uint32_t>(row_filter_kind::equals) ||
-        raw_kind > static_cast<uint32_t>(row_filter_kind::regex)) {
+        raw_kind > static_cast<uint32_t>(row_filter_kind::noin)) {
       parser.set_error("filter kind is invalid");
       return false;
     }
@@ -2025,8 +2032,8 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
     }
 
     const auto kind = static_cast<row_filter_kind>(raw_kind);
-    if (kind != row_filter_kind::in && value_count != 1) {
-      parser.set_error("equals, starts-with, and regex filters require exactly one value");
+    if (kind != row_filter_kind::in && kind != row_filter_kind::noin && value_count != 1) {
+      parser.set_error("equals, neq, starts-with, and regex filters require exactly one value");
       return false;
     }
     if (kind == row_filter_kind::regex) {
@@ -2048,7 +2055,7 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
         .kind = kind,
         .column = column,
     };
-    if (kind == row_filter_kind::in) {
+    if (kind == row_filter_kind::in || kind == row_filter_kind::noin) {
       filter.values_data = values_data;
       filter.value_offsets = value_offsets + first_value_index;
       filter.value_count = value_count;

@@ -16,6 +16,8 @@ describe('NativeCsvParser multiple native filters', () => {
       { column: 2, value: 'SP' },
       { column: 1, values: ['A', ''] },
       { column: 0, prefix: Buffer.from('x') },
+      { column: 3, notNequals: 'RJ' },
+      { column: 4, notIn: ['', 'MG'] },
     ]);
 
     expect(Array.from(normalized.descriptors)).toEqual([
@@ -31,11 +33,19 @@ describe('NativeCsvParser multiple native filters', () => {
       0,
       3,
       1,
+      5,
+      3,
+      4,
+      1,
+      6,
+      4,
+      5,
+      2,
     ]);
-    expect(Buffer.from(normalized.valuesData.subarray(0, normalized.valuesDataLength)).toString()).toBe('SPAx');
-    expect(Array.from(normalized.valueOffsets)).toEqual([0, 2, 3, 3, 4]);
-    expect(normalized.filterCount).toBe(3);
-    expect(normalized.valueCount).toBe(4);
+    expect(Buffer.from(normalized.valuesData.subarray(0, normalized.valuesDataLength)).toString()).toBe('SPAxRJMG');
+    expect(Array.from(normalized.valueOffsets)).toEqual([0, 2, 3, 3, 4, 6, 6, 8]);
+    expect(normalized.filterCount).toBe(5);
+    expect(normalized.valueCount).toBe(7);
   });
 
   test('counts rows that match every filter across chunks', () => {
@@ -77,6 +87,23 @@ describe('NativeCsvParser multiple native filters', () => {
     expect(rows).toEqual([['SP', 'Ana']]);
   });
 
+  test('counts notNequals and notIn filters across chunks', () => {
+    const filters = [
+      { column: 1, notNequals: 'SP' },
+      { column: 1, notIn: ['RJ', 'SC', 'PR', 'RS', 'BA', 'AM', 'PA', 'AC'] },
+    ] satisfies readonly CsvNativeFilter[];
+    const input = Buffer.from('id;uf\n1;SP\n2;RJ\n3;MG\n4\n');
+    using parser = new NativeCsvParser({ delimiter: ';' });
+
+    let count = 0;
+    for (let offset = 0; offset < input.byteLength; ++offset) {
+      count += parser.writeCountWhereAll(input.subarray(offset, offset + 1), filters);
+    }
+    count += parser.endCountWhereAll(filters);
+
+    expect(count).toBe(2);
+  });
+
   test('treats an empty native filter list as no filter', () => {
     using parser = new NativeCsvParser();
     const input = readCsvFixture('native/projected-rows.csv');
@@ -85,6 +112,7 @@ describe('NativeCsvParser multiple native filters', () => {
 
   test('rejects invalid multiple-filter options', () => {
     expect(() => normalizeNativeFilters([{ column: 0, values: [] }])).toThrow('filter values must not be empty');
+    expect(() => normalizeNativeFilters([{ column: 0, notIn: [] }])).toThrow('filter values must not be empty');
     expect(() => normalizeNativeFilters(Array.from({ length: 2025 }, () => ({ column: 0, value: 'x' })))).toThrow(
       'filter count out of range: 2025',
     );

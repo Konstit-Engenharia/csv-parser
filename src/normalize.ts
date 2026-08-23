@@ -24,6 +24,8 @@ const NATIVE_FILTER_EQUALS = 1;
 const NATIVE_FILTER_IN = 2;
 const NATIVE_FILTER_STARTS_WITH = 3;
 const NATIVE_FILTER_REGEX = 4;
+const NATIVE_FILTER_NEQ = 5;
+const NATIVE_FILTER_NOIN = 6;
 export const MAX_REGEX_FILTER_COUNT = 32;
 const MAX_REGEX_PATTERN_BYTES = 4_096;
 
@@ -329,6 +331,15 @@ export function normalizeNativeFilters(filters: readonly CsvNativeFilter[] | und
     } else if ('values' in filter) {
       kind = NATIVE_FILTER_IN;
       filterValues = filter.values;
+      if (filterValues.length === 0) {
+        throw new RangeError('filter values must not be empty');
+      }
+    } else if ('notNequals' in filter) {
+      kind = NATIVE_FILTER_NEQ;
+      filterValues = [filter.notNequals];
+    } else if ('notIn' in filter) {
+      kind = NATIVE_FILTER_NOIN;
+      filterValues = filter.notIn;
       if (filterValues.length === 0) {
         throw new RangeError('filter values must not be empty');
       }
