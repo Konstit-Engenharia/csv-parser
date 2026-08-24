@@ -68,7 +68,7 @@ describe('coverage input boundaries', () => {
     expect(encodingCode('utf8')).toBe(0);
     expect(encodingCode('iso-8859-1')).toBe(1);
     expect(() => encodingCode('nope' as never)).toThrow();
-    expect(normalizeChunk(new Uint8Array(0)).byteLength).toBe(1);
+    expect(normalizeChunk(new Uint8Array(0)).byteLength).toBe(0);
     expect(normalizeFixedColumnsCount(undefined, 'x')).toBeUndefined();
     expect(normalizeColumns(undefined)).toBe(normalizeColumns([]));
     expect(() => normalizeFixedColumnsCount(0, 'x')).toThrow();
@@ -80,6 +80,7 @@ describe('coverage input boundaries', () => {
     expect(normalizeInFilter({ column: 0, values: ['', 'a'] }).offsets).toEqual(new Uint32Array([0, 0, 1]));
     expect(normalizeStartsWithFilter({ column: 0, prefix: '' }).valueLength).toBe(0);
     expect(new TextDecoder().decode(normalizeRegex({ source: '\\u{1f600}', flags: 'u' }))).toContain('x{1f600}');
+    validateRegex({ source: '', flags: '' });
     validateRegex({ source: 'a+', flags: '' });
     expect(() => normalizeRegex({ source: 'a', flags: 'g' })).toThrow();
     expect(() => normalizeRegex({ source: 'a', flags: 'uu' })).toThrow();

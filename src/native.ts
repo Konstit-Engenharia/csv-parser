@@ -17,7 +17,10 @@ export { toArrayBuffer } from 'bun:ffi';
 
 export type NativePointer = Pointer | bigint;
 
-export const EMPTY_BUFFER = new Uint8Array(1);
+// Keep storage behind the zero-length view so FFI receives a stable buffer object while buffer_length reports zero.
+const EMPTY_BUFFER_STORAGE = new Uint8Array(1);
+export const EMPTY_BUFFER = EMPTY_BUFFER_STORAGE.subarray(0, 0);
+// Native projection and filter-offset APIs require a non-null pointer even when their element count is zero.
 export const EMPTY_U32 = new Uint32Array(1);
 export const DEFAULT_CHUNK_SIZE = 1024 * 1024;
 
@@ -43,7 +46,7 @@ const CSV_SYMBOLS = {
   // C signature:
   // void* csv_parser_write_batch(void* parser, const uint8_t* data, uint64_t len, bool final);
   csv_parser_write_batch: {
-    args: ['ptr', 'buffer', 'u64', 'bool'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool'],
     returns: 'ptr',
   },
   // C signature:
@@ -55,7 +58,7 @@ const CSV_SYMBOLS = {
   // C signature:
   // void* csv_parser_write_strict_batch(void* parser, const uint8_t* data, uint64_t len, bool final);
   csv_parser_write_strict_batch: {
-    args: ['ptr', 'buffer', 'u64', 'bool'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool'],
     returns: 'ptr',
   },
   // C signature:
@@ -68,7 +71,7 @@ const CSV_SYMBOLS = {
   // void* csv_parser_write_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
   //                                    uint32_t fixed_columns);
   csv_parser_write_fixed_batch: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool', 'u32'],
     returns: 'ptr',
   },
   // C signature:
@@ -81,7 +84,7 @@ const CSV_SYMBOLS = {
   // void* csv_parser_write_strict_fixed_batch(void* parser, const uint8_t* data, uint64_t len, bool final,
   //                                           uint32_t fixed_columns);
   csv_parser_write_strict_fixed_batch: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'u32'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool', 'u32'],
     returns: 'ptr',
   },
   // C signature:
@@ -97,7 +100,7 @@ const CSV_SYMBOLS = {
   //                                        uint32_t filter_column, const uint8_t* filter_value,
   //                                        uint64_t filter_value_len);
   csv_parser_write_projected_batch: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'bool', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'u64'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool', 'bool', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'buffer_length'],
     returns: 'ptr',
   },
   // C signature:
@@ -106,7 +109,7 @@ const CSV_SYMBOLS = {
   //                                         bool has_filter, uint32_t filter_column,
   //                                         const uint8_t* filter_value, uint64_t filter_value_len);
   csv_parser_finish_projected_batch: {
-    args: ['ptr', 'bool', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'u64'],
+    args: ['ptr', 'bool', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'buffer_length'],
     returns: 'ptr',
   },
   // C signature:
@@ -116,7 +119,21 @@ const CSV_SYMBOLS = {
   //     const uint32_t* filter_descriptors, uint64_t filter_count, const uint8_t* values_data,
   //     uint64_t values_data_len, const uint32_t* value_offsets, uint64_t total_value_count);
   csv_parser_write_projected_batch_where_all: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'bool', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    args: [
+      'ptr',
+      'buffer',
+      'buffer_length',
+      'bool',
+      'bool',
+      'buffer',
+      'u64',
+      'buffer',
+      'u64',
+      'buffer',
+      'buffer_length',
+      'buffer',
+      'u64',
+    ],
     returns: 'ptr',
   },
   // C signature:
@@ -126,7 +143,7 @@ const CSV_SYMBOLS = {
   //     const uint8_t* values_data, uint64_t values_data_len, const uint32_t* value_offsets,
   //     uint64_t total_value_count);
   csv_parser_finish_projected_batch_where_all: {
-    args: ['ptr', 'bool', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    args: ['ptr', 'bool', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'buffer_length', 'buffer', 'u64'],
     returns: 'ptr',
   },
   // C signature:
@@ -174,25 +191,25 @@ const CSV_SYMBOLS = {
   // C signature:
   // uint64_t csv_batch_count_where_equals(void* batch, uint32_t column, const uint8_t* value, uint64_t value_len);
   csv_batch_count_where_equals: {
-    args: ['ptr', 'u32', 'buffer', 'u64'],
+    args: ['ptr', 'u32', 'buffer', 'buffer_length'],
     returns: 'u64',
   },
   // C signature:
   // uint64_t csv_parser_write_count(void* parser, const uint8_t* data, uint64_t len, bool final);
   csv_parser_write_count: {
-    args: ['ptr', 'buffer', 'u64', 'bool'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool'],
     returns: 'u64',
   },
   // C signature:
   // uint64_t csv_parser_count_trusted_newlines(const uint8_t* data, uint64_t len);
   csv_parser_count_trusted_newlines: {
-    args: ['buffer', 'u64'],
+    args: ['buffer', 'buffer_length'],
     returns: 'u64',
   },
   // C signature:
   // const char* csv_regex_validate(const uint8_t* pattern, uint64_t pattern_len);
   csv_regex_validate: {
-    args: ['buffer', 'u64'],
+    args: ['buffer', 'buffer_length'],
     returns: 'cstring',
   },
   // C signature:
@@ -231,7 +248,7 @@ const CSV_SYMBOLS = {
   //     const uint32_t* filter_descriptors, uint64_t filter_count, const uint8_t* values_data,
   //     uint64_t values_data_len, const uint32_t* value_offsets, uint64_t total_value_count);
   csv_parser_write_count_where_all: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool', 'buffer', 'u64', 'buffer', 'buffer_length', 'buffer', 'u64'],
     returns: 'u64',
   },
   // C signature:
@@ -240,7 +257,7 @@ const CSV_SYMBOLS = {
   //     const uint8_t* values_data, uint64_t values_data_len, const uint32_t* value_offsets,
   //     uint64_t total_value_count);
   csv_parser_finish_count_where_all: {
-    args: ['ptr', 'buffer', 'u64', 'buffer', 'u64', 'buffer', 'u64'],
+    args: ['ptr', 'buffer', 'u64', 'buffer', 'buffer_length', 'buffer', 'u64'],
     returns: 'u64',
   },
   // C signature:
@@ -248,14 +265,14 @@ const CSV_SYMBOLS = {
   //                                              uint32_t filter_column, const uint8_t* filter_value,
   //                                              uint64_t filter_value_len);
   csv_parser_write_count_where_equals: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'u64'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool', 'u32', 'buffer', 'buffer_length'],
     returns: 'u64',
   },
   // C signature:
   // uint64_t csv_parser_finish_count_where_equals(void* parser, uint32_t filter_column,
   //                                               const uint8_t* filter_value, uint64_t filter_value_len);
   csv_parser_finish_count_where_equals: {
-    args: ['ptr', 'u32', 'buffer', 'u64'],
+    args: ['ptr', 'u32', 'buffer', 'buffer_length'],
     returns: 'u64',
   },
   // C signature:
@@ -264,7 +281,7 @@ const CSV_SYMBOLS = {
   //                                          uint64_t values_data_len, const uint32_t* value_offsets,
   //                                          uint64_t value_count);
   csv_parser_write_count_where_in: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'u64', 'buffer', 'u64'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool', 'u32', 'buffer', 'buffer_length', 'buffer', 'u64'],
     returns: 'u64',
   },
   // C signature:
@@ -272,7 +289,7 @@ const CSV_SYMBOLS = {
   //                                           const uint8_t* values_data, uint64_t values_data_len,
   //                                           const uint32_t* value_offsets, uint64_t value_count);
   csv_parser_finish_count_where_in: {
-    args: ['ptr', 'u32', 'buffer', 'u64', 'buffer', 'u64'],
+    args: ['ptr', 'u32', 'buffer', 'buffer_length', 'buffer', 'u64'],
     returns: 'u64',
   },
   // C signature:
@@ -280,21 +297,21 @@ const CSV_SYMBOLS = {
   //                                                   bool final, uint32_t filter_column,
   //                                                   const uint8_t* filter_value, uint64_t filter_value_len);
   csv_parser_write_count_where_starts_with: {
-    args: ['ptr', 'buffer', 'u64', 'bool', 'u32', 'buffer', 'u64'],
+    args: ['ptr', 'buffer', 'buffer_length', 'bool', 'u32', 'buffer', 'buffer_length'],
     returns: 'u64',
   },
   // C signature:
   // uint64_t csv_parser_finish_count_where_starts_with(void* parser, uint32_t filter_column,
   //                                                    const uint8_t* filter_value, uint64_t filter_value_len);
   csv_parser_finish_count_where_starts_with: {
-    args: ['ptr', 'u32', 'buffer', 'u64'],
+    args: ['ptr', 'u32', 'buffer', 'buffer_length'],
     returns: 'u64',
   },
   // C signature:
   // void* csv_zip_reader_create(const char* path, const uint8_t* entry_name, uint64_t entry_name_len,
   //                             uint64_t maximum_output_size, uint32_t maximum_compression_ratio);
   csv_zip_reader_create: {
-    args: ['cstring', 'buffer', 'u64', 'u64', 'u32'],
+    args: ['cstring', 'buffer', 'buffer_length', 'u64', 'u32'],
     returns: 'ptr',
   },
   // C signature:
@@ -306,7 +323,7 @@ const CSV_SYMBOLS = {
   // C signature:
   // uint64_t csv_zip_reader_read(void* reader, uint8_t* output, uint64_t output_capacity);
   csv_zip_reader_read: {
-    args: ['ptr', 'buffer', 'u64'],
+    args: ['ptr', 'buffer', 'buffer_length'],
     returns: 'u64',
   },
   // C signature:

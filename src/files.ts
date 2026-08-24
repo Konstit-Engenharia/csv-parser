@@ -44,7 +44,7 @@ export function countTrustedNewlineRows(buffer: NodeJS.TypedArray | DataView): n
   }
   const input = normalizeChunk(buffer);
   return u64ToSafeNumber(
-    native.symbols.csv_parser_count_trusted_newlines(input, BigInt(input.byteLength)),
+    native.symbols.csv_parser_count_trusted_newlines(input, input),
     'CSV newline row count',
   );
 }

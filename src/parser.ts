@@ -79,21 +79,21 @@ export class NativeCsvParser {
       ? native.symbols.csv_parser_write_strict_fixed_batch(
         handle,
         input,
-        BigInt(input.byteLength),
+        input,
         final,
         this.#fixedColumns,
       )
       : this.#strict
-      ? native.symbols.csv_parser_write_strict_batch(handle, input, BigInt(input.byteLength), final)
+      ? native.symbols.csv_parser_write_strict_batch(handle, input, input, final)
       : this.#fixedColumns !== undefined
       ? native.symbols.csv_parser_write_fixed_batch(
         handle,
         input,
-        BigInt(input.byteLength),
+        input,
         final,
         this.#fixedColumns,
       )
-      : native.symbols.csv_parser_write_batch(handle, input, BigInt(input.byteLength), final);
+      : native.symbols.csv_parser_write_batch(handle, input, input, final);
     if (batch === null) {
       throw new Error(`native CSV parser failed: ${this.#lastError()}`);
     }
@@ -120,7 +120,7 @@ export class NativeCsvParser {
       ? native.symbols.csv_parser_write_projected_batch(
         handle,
         input,
-        BigInt(input.byteLength),
+        input,
         final,
         options.selectedColumns !== undefined,
         columns,
@@ -128,12 +128,12 @@ export class NativeCsvParser {
         filter.enabled,
         filter.column,
         filter.value,
-        BigInt(filter.valueLength),
+        filter.value,
       )
       : native.symbols.csv_parser_write_projected_batch_where_all(
         handle,
         input,
-        BigInt(input.byteLength),
+        input,
         final,
         options.selectedColumns !== undefined,
         columns,
@@ -141,7 +141,7 @@ export class NativeCsvParser {
         filters.descriptors,
         BigInt(filters.filterCount),
         filters.valuesData,
-        BigInt(filters.valuesDataLength),
+        filters.valuesData,
         filters.valueOffsets,
         BigInt(filters.valueCount),
       );
@@ -189,7 +189,7 @@ export class NativeCsvParser {
         filter.enabled,
         filter.column,
         filter.value,
-        BigInt(filter.valueLength),
+        filter.value,
       )
       : native.symbols.csv_parser_finish_projected_batch_where_all(
         this.#requireHandle(),
@@ -199,7 +199,7 @@ export class NativeCsvParser {
         filters.descriptors,
         BigInt(filters.filterCount),
         filters.valuesData,
-        BigInt(filters.valuesDataLength),
+        filters.valuesData,
         filters.valueOffsets,
         BigInt(filters.valueCount),
       );
@@ -218,7 +218,7 @@ export class NativeCsvParser {
     const handle = this.#requireHandle();
     const input = normalizeChunk(chunk);
     return u64ToSafeNumber(
-      native.symbols.csv_parser_write_count(handle, input, BigInt(input.byteLength), final),
+      native.symbols.csv_parser_write_count(handle, input, input, final),
       'CSV parsed row count',
     );
   }
@@ -241,11 +241,11 @@ export class NativeCsvParser {
       native.symbols.csv_parser_write_count_where_equals(
         handle,
         input,
-        BigInt(input.byteLength),
+        input,
         final,
         normalized.column,
         normalized.value,
-        BigInt(normalized.valueLength),
+        normalized.value,
       ),
       'CSV filtered row count',
     );
@@ -259,7 +259,7 @@ export class NativeCsvParser {
         this.#requireHandle(),
         normalized.column,
         normalized.value,
-        BigInt(normalized.valueLength),
+        normalized.value,
       ),
       'CSV filtered row count',
     );
@@ -278,11 +278,11 @@ export class NativeCsvParser {
       native.symbols.csv_parser_write_count_where_in(
         handle,
         input,
-        BigInt(input.byteLength),
+        input,
         final,
         normalized.column,
         normalized.valuesData,
-        BigInt(normalized.valuesDataLength),
+        normalized.valuesData,
         normalized.offsets,
         BigInt(normalized.valueCount),
       ),
@@ -298,7 +298,7 @@ export class NativeCsvParser {
         this.#requireHandle(),
         normalized.column,
         normalized.valuesData,
-        BigInt(normalized.valuesDataLength),
+        normalized.valuesData,
         normalized.offsets,
         BigInt(normalized.valueCount),
       ),
@@ -319,11 +319,11 @@ export class NativeCsvParser {
       native.symbols.csv_parser_write_count_where_starts_with(
         handle,
         input,
-        BigInt(input.byteLength),
+        input,
         final,
         normalized.column,
         normalized.value,
-        BigInt(normalized.valueLength),
+        normalized.value,
       ),
       'CSV filtered row count',
     );
@@ -337,7 +337,7 @@ export class NativeCsvParser {
         this.#requireHandle(),
         normalized.column,
         normalized.value,
-        BigInt(normalized.valueLength),
+        normalized.value,
       ),
       'CSV filtered row count',
     );
@@ -359,12 +359,12 @@ export class NativeCsvParser {
     const count = native.symbols.csv_parser_write_count_where_all(
       handle,
       input,
-      BigInt(input.byteLength),
+      input,
       final,
       normalized.descriptors,
       BigInt(normalized.filterCount),
       normalized.valuesData,
-      BigInt(normalized.valuesDataLength),
+      normalized.valuesData,
       normalized.valueOffsets,
       BigInt(normalized.valueCount),
     );
@@ -380,7 +380,7 @@ export class NativeCsvParser {
       normalized.descriptors,
       BigInt(normalized.filterCount),
       normalized.valuesData,
-      BigInt(normalized.valuesDataLength),
+      normalized.valuesData,
       normalized.valueOffsets,
       BigInt(normalized.valueCount),
     );

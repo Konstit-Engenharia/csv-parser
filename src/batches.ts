@@ -410,12 +410,13 @@ export class NativeCsvBatch {
   countWhereEquals(columnIndex: number, value: string | Buffer | Uint8Array): number {
     normalizeFilterColumn(columnIndex);
     const encoded = typeof value === 'string' ? Buffer.from(value) : value;
+    const input = encoded.byteLength === 0 ? EMPTY_BUFFER : encoded;
     return u64ToSafeNumber(
       native.symbols.csv_batch_count_where_equals(
         this.#requireHandle(),
         columnIndex,
-        encoded.byteLength === 0 ? EMPTY_BUFFER : encoded,
-        BigInt(encoded.byteLength),
+        input,
+        input,
       ),
       'CSV batch filtered row count',
     );

@@ -11,6 +11,22 @@ import {
 import { readCsvFixture } from './fixtures.ts';
 
 describe('NativeCsvParser core parsing', () => {
+  test('ignores zero-length chunks in every batch mode', () => {
+    const empty = new Uint8Array(new ArrayBuffer(1), 0, 0);
+    const modes = [
+      {},
+      { strict: true },
+      { fixedColumns: 1 },
+      { fixedColumns: 1, strict: true },
+    ] as const;
+
+    for (const options of modes) {
+      using parser = new NativeCsvParser(options);
+      expect(parser.write(empty)).toEqual([]);
+      expect(parser.write(Buffer.from('value\n'), true)).toEqual([['value']]);
+    }
+  });
+
   test('parses utf8 csv with quotes across chunks', () => {
     using parser = new NativeCsvParser();
     const input = readCsvFixture('native/utf8-quotes-across-chunks.csv');

@@ -7,6 +7,58 @@ import { NativeCsvParser } from '../src/index.ts';
 import { readCsvFixture } from './fixtures.ts';
 
 describe('NativeCsvParser native filters', () => {
+  test('preserves empty filter values across FFI calls', () => {
+    const input = Buffer.from('a;\nb;x\n');
+    const empty = new Uint8Array(new ArrayBuffer(1), 0, 0);
+
+    {
+      using parser = new NativeCsvParser({ delimiter: ';' });
+      let count = parser.writeCountWhereEquals(empty, { column: 1, value: '' });
+      count += parser.writeCountWhereEquals(input, { column: 1, value: '' });
+      count += parser.endCountWhereEquals({ column: 1, value: '' });
+      expect(count).toBe(1);
+    }
+
+    {
+      using parser = new NativeCsvParser({ delimiter: ';' });
+      let count = parser.writeCountWhereIn(input, { column: 1, values: [''] });
+      count += parser.endCountWhereIn({ column: 1, values: [''] });
+      expect(count).toBe(1);
+    }
+
+    {
+      using parser = new NativeCsvParser({ delimiter: ';' });
+      let count = parser.writeCountWhereStartsWith(input, { column: 1, prefix: '' });
+      count += parser.endCountWhereStartsWith({ column: 1, prefix: '' });
+      expect(count).toBe(2);
+    }
+
+    {
+      using parser = new NativeCsvParser({ delimiter: ';' });
+      const filters = [{ column: 1, value: '' }] as const;
+      let count = parser.writeCountWhereAll(input, filters);
+      count += parser.endCountWhereAll(filters);
+      expect(count).toBe(1);
+    }
+
+    {
+      using parser = new NativeCsvParser({ delimiter: ';' });
+      const options = { equalsFilter: { column: 1, value: '' }, selectedColumns: [0] } as const;
+      const rows: string[][] = [];
+      using batch = parser.writeProjectedBatch(input, options);
+      rows.push(...batch.rows());
+      using finalBatch = parser.endProjectedBatch(options);
+      rows.push(...finalBatch.rows());
+      expect(rows).toEqual([['a']]);
+    }
+
+    {
+      using parser = new NativeCsvParser({ delimiter: ';' });
+      using batch = parser.writeBatch(input, true);
+      expect(batch.countWhereEquals(1, '')).toBe(1);
+    }
+  });
+
   test('projects and filters inside native parser', () => {
     using parser = new NativeCsvParser({ delimiter: ';' });
     const rows: string[][] = [];

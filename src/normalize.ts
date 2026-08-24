@@ -145,8 +145,7 @@ export function normalizeRegex(regex: CsvRegexInput): Uint8Array {
 
 export function validateRegex(regex: CsvRegexInput): void {
   const pattern = normalizeRegex(regex);
-  const patternLength = pattern === EMPTY_BUFFER ? 0 : pattern.byteLength;
-  const error = native.symbols.csv_regex_validate(pattern, BigInt(patternLength));
+  const error = native.symbols.csv_regex_validate(pattern, pattern);
   if (error !== null && error.length > 0) {
     throw new SyntaxError(error);
   }

@@ -2356,7 +2356,7 @@ CSV_EXPORT uint64_t csv_batch_count_where_equals(void* batch, uint32_t column, c
     const size_t start = typed->field_offsets[field_index];
     const size_t end = typed->field_offsets[field_index + 1];
     const size_t len = end - start;
-    if (len == needle_len && std::memcmp(typed->data.data() + start, value, len) == 0) {
+    if (len == needle_len && (len == 0 || std::memcmp(typed->data.data() + start, value, len) == 0)) {
       ++count;
     }
   }

@@ -41,7 +41,7 @@ class NativeZipReader {
     const handle = native.symbols.csv_zip_reader_create(
       Buffer.from(`${path}\0`),
       entry,
-      BigInt(entry.byteLength),
+      entry,
       BigInt(maximumOutputSize),
       maximumCompressionRatio,
     );
@@ -64,7 +64,7 @@ class NativeZipReader {
 
   read(output: Uint8Array): number {
     return u64ToSafeNumber(
-      native.symbols.csv_zip_reader_read(this.#requireHandle(), output, BigInt(output.byteLength)),
+      native.symbols.csv_zip_reader_read(this.#requireHandle(), output, output),
       'ZIP decompressed chunk length',
     );
   }
