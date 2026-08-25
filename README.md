@@ -476,6 +476,13 @@ configuration.
 
 Full-file benchmarks against `corpus/large/example.csv` are long CPU-bound runs. Run them separately when comparing numbers.
 
+Compare `csv.rows()` with `csv-parser` after `iconv-lite` decodes ISO-8859-1 input. The benchmark uses `hyperfine -r 2`,
+materializes every field, and reports the row count from each command. `hyperfine` must be available on `PATH`.
+
+```sh
+bun run bench:csv-parser:example
+```
+
 Small correctness/performance smoke:
 
 ```sh

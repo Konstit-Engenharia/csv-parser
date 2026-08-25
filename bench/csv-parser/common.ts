@@ -54,7 +54,7 @@ export function materializeFileWithCsvParser(
   file: string,
   chunkSize: number,
   delimiter: string,
-  encoding?: 'latin1',
+  encoding?: 'iso88591' | 'latin1',
 ): Promise<CsvParserMaterializeStats> {
   return new Promise((resolve, reject) => {
     let rows = 0;
@@ -69,8 +69,11 @@ export function materializeFileWithCsvParser(
     stream
       .pipe(csvParser({ headers: false, separator: delimiter }))
       .on('data', (row: unknown) => {
-        ++rows;
         const values = Array.isArray(row) ? row : Object.values(row as Record<string, string>);
+        if (values[5] !== '02' || values[19] === 'EX') {
+          return;
+        }
+        ++rows;
         cells += values.length;
         for (const value of values) {
           chars += String(value).length;

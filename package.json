@@ -54,7 +54,7 @@
     "test:native:sanitize": "bun scripts/test-native-sanitizers.ts",
     "hooks:install": "git config core.hooksPath .githooks",
     "bench:native-csv-parser": "bun run bench -- csv.bench.ts",
-    "bench:csv-parser:example": "bun run bench -- csv-parser/example-file.bench.ts",
+    "bench:csv-parser:example": "bun run build:native && hyperfine -r 2 --show-output --command-name '@konstit/csv csv.rows() iso88591' 'bun bench/csv-parser/example-file.ts konstit-csv' --command-name 'iconv-lite iso88591 + csv-parser' 'bun bench/csv-parser/example-file.ts csv-parser'",
     "bench:csv-parser:worker-materialize": "bun run bench -- csv-parser/example-file-worker-materialize.bench.ts",
     "bench:csv-parser:guard": "bun run build:native && bun bench/csv-parser/regression-guard.ts",
     "bench:csv-parser:synthetic:latin1": "bun run bench -- csv-parser/synthetic-latin1.bench.ts",
