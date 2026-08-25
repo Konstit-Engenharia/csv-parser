@@ -8,6 +8,7 @@ import {
 } from './native-target.ts';
 
 const requiredNativeSymbols = [
+  'csv_runtime_supports_avx2',
   'csv_parser_write_projected_batch_where_all',
   'csv_parser_finish_projected_batch_where_all',
   'csv_parser_write_count_where_all',

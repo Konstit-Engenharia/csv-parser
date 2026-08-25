@@ -138,6 +138,27 @@ describe('coverage input boundaries', () => {
       expect(parseCsvBuffer(Buffer.from('a,b\n1,2\n'))).toHaveLength(2);
       expect(() => requireBunRuntime()).not.toThrow();
       expect(() => requireBunRuntime({ bunVersion: undefined })).toThrow('requires Bun');
+      expect(() =>
+        requireBunRuntime({
+          architecture: 'x64',
+          avx2Supported: false,
+          bunVersion: process.versions.bun,
+        })
+      ).toThrow('requires AVX2');
+      expect(() =>
+        requireBunRuntime({
+          architecture: 'x64',
+          avx2Supported: true,
+          bunVersion: process.versions.bun,
+        })
+      ).not.toThrow();
+      expect(() =>
+        requireBunRuntime({
+          architecture: 'arm64',
+          avx2Supported: false,
+          bunVersion: process.versions.bun,
+        })
+      ).not.toThrow();
       expect(await countCsvFile(path)).toBe(2);
       expect(await countCsvFile(noNewline, { strict: true })).toBe(2);
       const serial: unknown[] = [];

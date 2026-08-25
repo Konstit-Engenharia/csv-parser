@@ -26,6 +26,12 @@ export const DEFAULT_CHUNK_SIZE = 1024 * 1024;
 
 const CSV_SYMBOLS = {
   // C signature:
+  // int csv_runtime_supports_avx2();
+  csv_runtime_supports_avx2: {
+    args: [],
+    returns: 'int',
+  },
+  // C signature:
   // void* csv_parser_create(int encoding, uint8_t delimiter);
   csv_parser_create: {
     args: ['int', 'u8'],

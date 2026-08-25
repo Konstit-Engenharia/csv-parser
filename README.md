@@ -98,6 +98,23 @@ for await (
 
 In this repo, `corpus/large/example.csv` is semicolon-delimited. Pass `delimiter: ';'` for examples and benchmarks that read it.
 
+### Large corpus files
+
+The files in `corpus/large/` are too large to commit to this repository. Download and prepare them with Bun. The script
+requires `unzip` and skips files that already exist:
+
+```sh
+bun scripts/download-large-corpus.ts
+```
+
+- `example.csv` is an approximately 6 GB ISO-8859-1-encoded Brazilian government data dump after extraction. Download
+  it from [Arquivos Receita](https://arquivos.receitafederal.gov.br/public.php/dav/files/gn672Ad4CF8N6TK/Dados/Cadastros/CNPJ/2026-08/Estabelecimentos0.zip).
+- `formatted_addresses_tagged.random.tsv.gz` is part of the libpostal training data and remains compressed for the
+  benchmarks. Download it from the
+  [Internet Archive](https://archive.org/download/libpostal-parser-training-data-20170304/formatted_addresses_tagged.random.tsv.gz).
+
+For manual downloads, place both files in `corpus/large/` before running benchmarks or examples that use them.
+
 ## Library API
 
 Import the `csv` namespace for file-oriented helpers:
@@ -444,13 +461,24 @@ bun run example:api:shards
 
 Example environment variables:
 
-- `CSV_EXAMPLE_FILE` or `CSV_BENCH_FILE`
-- `CSV_EXAMPLE_DELIMITER` or `CSV_BENCH_DELIMITER`
-- `CSV_EXAMPLE_CHUNK_SIZE` or `CSV_BENCH_CHUNK_SIZE`
-- `CSV_EXAMPLE_COLUMNS`
-- `CSV_EXAMPLE_LIMIT` or `CSV_PRINT_ROWS`
-- `CSV_EXAMPLE_FILTER_COLUMN`
-- `CSV_EXAMPLE_FILTER_VALUE`
+- `CSV_EXAMPLE_FILE`: Input file for examples. It defaults to `CSV_BENCH_FILE`, then
+  `corpus/large/example.csv`.
+- `CSV_BENCH_FILE`: Input file for benchmarks. It also provides the example input when `CSV_EXAMPLE_FILE` is not set.
+- `CSV_EXAMPLE_DELIMITER`: Field delimiter for examples. It defaults to `CSV_BENCH_DELIMITER`, then `;`.
+- `CSV_BENCH_DELIMITER`: Field delimiter for benchmarks. It also provides the example delimiter when
+  `CSV_EXAMPLE_DELIMITER` is not set.
+- `CSV_EXAMPLE_CHUNK_SIZE`: Number of bytes read per chunk by examples. It defaults to `CSV_BENCH_CHUNK_SIZE`, then
+  8 MiB.
+- `CSV_BENCH_CHUNK_SIZE`: Number of bytes read per chunk by benchmarks. It also provides the example chunk size when
+  `CSV_EXAMPLE_CHUNK_SIZE` is not set.
+- `CSV_EXAMPLE_COLUMNS`: Comma-separated, zero-based column indexes selected by examples. The default is `0,1,2`.
+- `CSV_EXAMPLE_LIMIT`: Maximum number of rows printed by examples. It defaults to `CSV_PRINT_ROWS`, then `10`. This
+  limits output, but some examples can still parse more rows.
+- `CSV_PRINT_ROWS`: Fallback output limit used when `CSV_EXAMPLE_LIMIT` is not set.
+- `CSV_EXAMPLE_FILTER_COLUMN`: Zero-based column index used by examples with a filter. It defaults to the first selected
+  column, usually `0`.
+- `CSV_EXAMPLE_FILTER_VALUE`: Match value used by examples with a filter. If it is not set, those examples do not apply
+  the optional filter.
 
 ## Validation
 
@@ -474,14 +502,28 @@ commits. A version increase publishes the committed package after all checks pas
 commit to be `HEAD` and the worktree to be clean. Configure authentication for the registry through Bun's npm
 configuration.
 
-Full-file benchmarks against `corpus/large/example.csv` are long CPU-bound runs. Run them separately when comparing numbers.
+### Full-file filtered materialization benchmark
 
-Compare `csv.rows()` with `csv-parser` after `iconv-lite` decodes ISO-8859-1 input. The benchmark uses `hyperfine -r 2`,
-materializes every field, and reports the row count from each command. `hyperfine` must be available on `PATH`.
+This benchmark compares `csv.rows()` with `csv-parser` after `iconv-lite` decodes ISO-8859-1 input. Both commands parse
+the complete `corpus/large/example.csv` file, apply equivalent column filters, and materialize every field in each
+matching row. `@konstit/csv` applies the filters in native code; the `csv-parser` pipeline applies them to its
+materialized JavaScript rows.
 
 ```sh
 bun run bench:csv-parser:example
 ```
+
+In the recorded `hyperfine -r 2` result, both commands produced 11,516,955 rows, 345,508,650 cells, and 1,808,786,228
+characters from the 6,780,467,695-byte corpus:
+
+| Implementation                   | Mean time |  Throughput |  Relative result |
+| -------------------------------- | --------: | ----------: | ---------------: |
+| `@konstit/csv` with `csv.rows()` |  45.223 s | 143.0 MiB/s | **2.32× faster** |
+| `iconv-lite` + `csv-parser`      | 104.835 s |  61.7 MiB/s |         Baseline |
+
+For this workload, `@konstit/csv` was 2.32× faster and completed in 56.9% less time. This result contains only two runs
+on one machine, so use it as a measured workload result, not a universal performance guarantee. Full-file benchmarks
+are long CPU-bound runs. Run them separately when comparing numbers. `hyperfine` must be available on `PATH`.
 
 Small correctness/performance smoke:
 

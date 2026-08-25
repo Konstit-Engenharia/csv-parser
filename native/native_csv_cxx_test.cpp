@@ -11,6 +11,7 @@
 #include <vector>
 
 extern "C" {
+int csv_runtime_supports_avx2();
 void* csv_parser_create(int encoding, uint8_t delimiter);
 void csv_parser_destroy(void* parser);
 void* csv_parser_write_batch(void* parser, const uint8_t* data, uint64_t len, bool final);
@@ -203,6 +204,14 @@ void fuzz_count_mode(std::string_view input) {
 }
 
 } // namespace
+
+TEST_CASE("native C ABI reports AVX2 support") {
+#if defined(__x86_64__)
+  REQUIRE(csv_runtime_supports_avx2() == 1);
+#else
+  REQUIRE(csv_runtime_supports_avx2() == 0);
+#endif
+}
 
 TEST_CASE("native C ABI counts chunked quoted rows") {
   void* parser = csv_parser_create(0, ';');
