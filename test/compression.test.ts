@@ -66,6 +66,14 @@ beforeAll(async () => {
     createZip([{ data: source, method: 0, name: 'input.tsv' }]),
   );
   await Bun.write(
+    join(temporaryDirectory, 'single-file.zip'),
+    createZip([
+      { data: Buffer.alloc(0), method: 0, name: 'nested/' },
+      { data: source, method: 8, name: 'nested/input.tsv' },
+    ]),
+  );
+  await Bun.write(join(temporaryDirectory, 'empty.zip'), createZip([]));
+  await Bun.write(
     join(temporaryDirectory, 'corrupt.zip'),
     createZip([{ crc32: (Bun.hash.crc32(source) ^ 1) >>> 0, data: source, method: 8, name: 'input.tsv' }]),
   );
@@ -254,6 +262,30 @@ describe('compressed CSV file streams', () => {
         delimiter: ';',
       }),
     ).toBe(4);
+  });
+
+  test('selects the only file in a ZIP when entry is \'*\'', async () => {
+    expect(
+      await csv.count(join(temporaryDirectory, 'single-file.zip'), {
+        chunkSize: 3,
+        compression: { entry: '*', format: 'zip' },
+        delimiter: ';',
+      }),
+    ).toBe(4);
+  });
+
+  test('rejects entry \'*\' unless the ZIP contains exactly one file', async () => {
+    const options = {
+      compression: { entry: '*', format: 'zip' } as const,
+      delimiter: ';' as const,
+    };
+
+    expect((await rejectedError(csv.count(join(temporaryDirectory, 'input.zip'), options))).message).toContain(
+      'entry \'*\' requires exactly one file',
+    );
+    expect((await rejectedError(csv.count(join(temporaryDirectory, 'empty.zip'), options))).message).toContain(
+      'entry \'*\' requires exactly one file',
+    );
   });
 
   test('rejects invalid ZIP archives and configured limits', async () => {

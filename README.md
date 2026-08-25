@@ -218,10 +218,11 @@ Signature and extension mismatches fail. A `.deflate` file without a zlib wrappe
 Compressed input does not support worker pools, parallel operations, or CSV byte-offset sharding.
 
 ZIP input uses `compression: { format: 'zip', entry: 'path/in/archive.csv' }`. The selected stored or DEFLATE entry
-is decoded in bounded native chunks with zlib-ng AVX2 or NEON acceleration. Entry names must match exactly. Encrypted
-entries and compression methods other than stored and DEFLATE fail. The defaults limit output to 64 GiB and the
-declared compression ratio to 1000. Use `maxDecompressedBytes` and `maxCompressionRatio` to set lower application
-limits or to permit a larger trusted entry.
+is decoded in bounded native chunks with zlib-ng AVX2 or NEON acceleration. Entry names must match exactly. Use
+`entry: '*'` to select the file when the archive contains exactly one file; directory entries are ignored. Archives
+with zero or multiple files fail in this mode. Encrypted entries and compression methods other than stored and
+DEFLATE fail. The defaults limit output to 64 GiB and the declared compression ratio to 1000. Use
+`maxDecompressedBytes` and `maxCompressionRatio` to set lower application limits or to permit a larger trusted entry.
 
 Serial file operations also accept `delimiter: 'auto'`. Detection probes at most 64 KiB of decompressed data and
 ignores separators inside quoted fields. It checks comma, tab, semicolon, pipe, colon, caret, and tilde. The `.csv`,

@@ -269,6 +269,7 @@ private:
       return fail("ZIP central directory entry count is invalid");
     }
 
+    const bool select_only_file = entry_name_ == "*";
     bool found = false;
     uint64_t cursor = central_directory_offset;
     for (uint64_t entry_index = 0; entry_index < entry_count; ++entry_index) {
@@ -293,10 +294,15 @@ private:
       if (!read_exact_at(cursor + central_directory_header_size, name.data(), name.size())) {
         return false;
       }
-      const bool matches =
-          name.size() == entry_name_.size() && std::memcmp(name.data(), entry_name_.data(), name.size()) == 0;
+      const bool is_file = !name.empty() && name.back() != '/';
+      const bool matches = select_only_file ? is_file
+                                            : name.size() == entry_name_.size() &&
+                                                  std::memcmp(name.data(), entry_name_.data(), name.size()) == 0;
       if (matches) {
         if (found) {
+          if (select_only_file) {
+            return fail("ZIP entry '*' requires exactly one file in the archive");
+          }
           return fail("ZIP contains duplicate entries with the requested name");
         }
         std::vector<uint8_t> extra(extra_size);
@@ -306,12 +312,18 @@ private:
         if (!parse_entry_metadata(header, extra)) {
           return false;
         }
+        if (select_only_file) {
+          entry_name_.assign(reinterpret_cast<const char*>(name.data()), name.size());
+        }
         found = true;
       }
       cursor = next_cursor;
     }
 
     if (!found) {
+      if (select_only_file) {
+        return fail("ZIP entry '*' requires exactly one file in the archive");
+      }
       return fail("requested ZIP entry was not found");
     }
     central_directory_offset_ = central_directory_offset;
