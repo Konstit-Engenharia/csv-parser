@@ -18,7 +18,7 @@ export function createZip(entries: readonly TestZipEntry[]): Uint8Array {
     const name = Buffer.from(entry.name);
     const data = Buffer.from(entry.data);
     const compressed = entry.method === 8 ? deflateRawSync(data) : data;
-    const checksum = entry.crc32 ?? crc32(data);
+    const checksum = entry.crc32 ?? Bun.hash.crc32(data);
     const flags = (entry.flags ?? 0) | (entry.dataDescriptor === true ? 1 << 3 : 0);
     const localHeader = Buffer.alloc(30);
     localHeader.writeUInt32LE(0x04034b50, 0);
@@ -65,15 +65,4 @@ export function createZip(entries: readonly TestZipEntry[]): Uint8Array {
   endRecord.writeUInt32LE(centralDirectory.byteLength, 12);
   endRecord.writeUInt32LE(localOffset, 16);
   return Buffer.concat([...localParts, centralDirectory, endRecord]);
-}
-
-export function crc32(data: Uint8Array): number {
-  let crc = 0xffff_ffff;
-  for (const byte of data) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; ++bit) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb8_8320 : 0);
-    }
-  }
-  return (crc ^ 0xffff_ffff) >>> 0;
 }

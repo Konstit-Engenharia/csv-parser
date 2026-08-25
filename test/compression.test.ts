@@ -30,10 +30,7 @@ import {
   parseCsvFile,
   parseCsvFileProjected,
 } from '../src/index.ts';
-import {
-  crc32,
-  createZip,
-} from './zip-fixture.ts';
+import { createZip } from './zip-fixture.ts';
 
 const source = Buffer.from('id;name;state\n1;"Ana\nMaria";SP\n2;Bia;RJ\n3;Caio;SP\n');
 const expectedRows = [
@@ -70,7 +67,7 @@ beforeAll(async () => {
   );
   await Bun.write(
     join(temporaryDirectory, 'corrupt.zip'),
-    createZip([{ crc32: (crc32(source) ^ 1) >>> 0, data: source, method: 8, name: 'input.tsv' }]),
+    createZip([{ crc32: (Bun.hash.crc32(source) ^ 1) >>> 0, data: source, method: 8, name: 'input.tsv' }]),
   );
   await Bun.write(
     join(temporaryDirectory, 'duplicate.zip'),
