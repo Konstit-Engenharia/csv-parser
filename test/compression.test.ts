@@ -219,9 +219,9 @@ describe('compressed CSV file streams', () => {
       ['3', 'SP'],
     ]);
     expect(await countCsvFile(path, { compression: 'gzip', delimiter: ';' })).toBe(4);
-    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: { column: 2, equals: 'SP' } })).toBe(2);
-    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: { column: 2, in: ['SP', 'RJ'] } })).toBe(3);
-    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: { column: 1, startsWith: 'B' } })).toBe(1);
+    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: csv.column(2).equals('SP') })).toBe(2);
+    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: csv.column(2).isOneOf(['SP', 'RJ']) })).toBe(3);
+    expect(await csv.count(path, { compression: 'gzip', delimiter: ';', where: csv.column(1).startsWith('B') })).toBe(1);
   });
 
   test('propagates decompression errors', async () => {

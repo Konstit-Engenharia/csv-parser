@@ -7,7 +7,11 @@ import {
   type CsvNativeFilter,
   NativeCsvParser,
 } from '../src/index.ts';
-import { normalizeNativeFilters } from '../src/normalize.ts';
+import {
+  type CsvNativeFilterProgramEntry,
+  normalizeNativeFilterProgram,
+  normalizeNativeFilters,
+} from '../src/normalize.ts';
 import { readCsvFixture } from './fixtures.ts';
 
 describe('NativeCsvParser multiple native filters', () => {
@@ -46,6 +50,48 @@ describe('NativeCsvParser multiple native filters', () => {
     expect(Array.from(normalized.valueOffsets)).toEqual([0, 2, 3, 3, 4, 6, 6, 8]);
     expect(normalized.filterCount).toBe(5);
     expect(normalized.valueCount).toBe(7);
+  });
+
+  test('packs nested Boolean operators into postfix descriptors', () => {
+    const normalized = normalizeNativeFilterProgram([
+      { column: 2, value: 'SP' },
+      { column: 2, value: 'RJ' },
+      { operandCount: 2, operator: 'any' },
+      { column: 1, prefix: 'A' },
+      { operandCount: 1, operator: 'not' },
+      { operandCount: 2, operator: 'all' },
+    ]);
+
+    expect(Array.from(normalized.descriptors)).toEqual([
+      1,
+      2,
+      0,
+      1,
+      1,
+      2,
+      1,
+      1,
+      8,
+      2,
+      0,
+      0,
+      3,
+      1,
+      2,
+      1,
+      9,
+      1,
+      0,
+      0,
+      7,
+      2,
+      0,
+      0,
+    ]);
+    expect(Buffer.from(normalized.valuesData).toString()).toBe('SPRJA');
+    expect(Array.from(normalized.valueOffsets)).toEqual([0, 2, 4, 5]);
+    expect(normalized.filterCount).toBe(6);
+    expect(normalized.valueCount).toBe(3);
   });
 
   test('counts rows that match every filter across chunks', () => {
@@ -124,5 +170,18 @@ describe('NativeCsvParser multiple native filters', () => {
         filters: [],
       })
     ).toThrow('use equalsFilter or filters, not both');
+
+    const normalizeProgram = (program: readonly unknown[]) =>
+      normalizeNativeFilterProgram(program as readonly CsvNativeFilterProgramEntry[]);
+    expect(() => normalizeProgram([])).toThrow('filter program must contain at least one predicate');
+    expect(() => normalizeProgram([{ operandCount: 2, operator: 'any' }])).toThrow(
+      'filter any does not have 2 operands',
+    );
+    expect(() => normalizeProgram([{ column: 0, value: 'x' }, { operandCount: 2, operator: 'not' }])).toThrow(
+      'filter not operand count must be 1',
+    );
+    expect(() => normalizeProgram([{ column: 0, value: 'x' }, { column: 1, value: 'y' }])).toThrow(
+      'filter program leaves 2 results',
+    );
   });
 });

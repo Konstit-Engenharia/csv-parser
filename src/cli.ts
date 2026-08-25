@@ -3,8 +3,6 @@
 import { parseArgs } from 'node:util';
 import { csv } from './api.js';
 import {
-  MAX_FILTER_COUNT,
-  MAX_REGEX_FILTER_COUNT,
   normalizeColumns,
   normalizeFilterColumn,
   normalizeFixedColumnsCount,
@@ -16,9 +14,8 @@ import type {
   CsvCountOptions,
   CsvDelimiter,
   CsvEncoding,
+  CsvFilter,
   CsvRowsOptions,
-  CsvWhereFilter,
-  CsvWherePredicate,
 } from './types.js';
 
 const help = `Usage: csv <command>
@@ -66,11 +63,11 @@ Friendly filter options (repeatable):
   --where-regex <column=/re/flags> Match an RE2-compatible JavaScript regex
 
 Advanced filter option:
-  --where <json>                   Advanced CsvWhereFilter JSON
+  --where <json>                   Advanced filter JSON
 
-All filter clauses use AND. Repeated --where-in and --where-noin clauses for
-the same column form one filter. Quote values that contain spaces or shell characters.
-Regex flags can be i, m, s, and u.
+Friendly filter clauses use AND. Repeated --where-in and --where-noin clauses for
+the same column form one filter. Advanced JSON can nest all, any, and not.
+Quote values that contain spaces or shell characters. Regex flags can be i, m, s, and u.
 
 Compatibility:
   Strict mode cannot use filter options.
@@ -121,12 +118,12 @@ Friendly filter options (repeatable):
   --where-regex <column=/re/flags> Match an RE2-compatible JavaScript regex
 
 Advanced filter option:
-  --where <json>                   Advanced CsvWhereFilter JSON
+  --where <json>                   Advanced filter JSON
 
-Filters use original input column indexes. All filter clauses use AND.
+Filters use original input column indexes. Friendly filter clauses use AND.
 Repeated --where-in and --where-noin clauses for the same column form one filter.
-Quote values that contain spaces or shell characters. Regex flags can be
-i, m, s, and u.
+Advanced JSON can nest all, any, and not. Quote values that contain spaces or
+shell characters. Regex flags can be i, m, s, and u.
 
 CSV output is normalized and can differ from the input quoting, delimiter, and
 record endings. With --json, stdout contains only NDJSON string arrays. A quoted
@@ -185,6 +182,7 @@ const linesOptionDefinitions = {
 const compressionFormats = new Set(['auto', 'gzip', 'deflate', 'deflate-raw', 'brotli', 'zstd']);
 const encodings = new Set(['utf8', 'latin1', 'iso88591', 'iso-8859-1']);
 const MAX_CHUNK_SIZE = 64 * 1024 * 1024;
+const MAX_FILTER_NESTING = 128;
 const OUTPUT_BUFFER_SIZE = 64 * 1024;
 
 async function run(arguments_: readonly string[]): Promise<number> {
@@ -590,25 +588,20 @@ function parseWhereOptions(values: {
   readonly 'where-noin'?: readonly string[];
   readonly 'where-prefix'?: readonly string[];
   readonly 'where-regex'?: readonly string[];
-}): CsvWhereFilter | undefined {
-  const predicates: CsvWherePredicate[] = [];
+}): CsvFilter | undefined {
+  const filters: CsvFilter[] = [];
   if (values.where !== undefined) {
-    const jsonFilter = parseWhereJson(values.where);
-    if ('all' in jsonFilter) {
-      predicates.push(...jsonFilter.all);
-    } else {
-      predicates.push(jsonFilter);
-    }
+    filters.push(parseWhereJson(values.where));
   }
 
   for (const expression of values['where-eq'] ?? []) {
     const { column, value } = parseColumnValue(expression, '--where-eq');
-    predicates.push({ column, equals: value });
+    filters.push(csv.column(column).equals(value));
   }
 
   for (const expression of values['where-neq'] ?? []) {
     const { column, value } = parseColumnValue(expression, '--where-neq');
-    predicates.push({ column, notEquals: value });
+    filters.push(csv.column(column).doesNotEqual(value));
   }
 
   const inValuesByColumn = new Map<number, string[]>();
@@ -622,7 +615,7 @@ function parseWhereOptions(values: {
     }
   }
   for (const [column, inValues,] of inValuesByColumn) {
-    predicates.push({ column, in: inValues });
+    filters.push(csv.column(column).isOneOf(inValues));
   }
 
   const notInValuesByColumn = new Map<number, string[]>();
@@ -636,23 +629,22 @@ function parseWhereOptions(values: {
     }
   }
   for (const [column, notInValues,] of notInValuesByColumn) {
-    predicates.push({ column, notIn: notInValues });
+    filters.push(csv.column(column).isNoneOf(notInValues));
   }
 
   for (const expression of values['where-prefix'] ?? []) {
     const { column, value } = parseColumnValue(expression, '--where-prefix');
-    predicates.push({ column, startsWith: value });
+    filters.push(csv.column(column).startsWith(value));
   }
   for (const expression of values['where-regex'] ?? []) {
-    predicates.push(parseRegexExpression(expression));
+    filters.push(parseRegexExpression(expression));
   }
 
-  if (predicates.length === 0) {
+  const first = filters[0];
+  if (first === undefined) {
     return undefined;
   }
-  validatePredicateLimits(predicates);
-  const firstPredicate = predicates[0];
-  return predicates.length === 1 && firstPredicate !== undefined ? firstPredicate : { all: predicates };
+  return filters.length === 1 ? first : csv.all(first, ...filters.slice(1));
 }
 
 function parseColumnValue(expression: string, option: string): { column: number; value: string; } {
@@ -665,7 +657,7 @@ function parseColumnValue(expression: string, option: string): { column: number;
   return { column, value: expression.slice(separator + 1) };
 }
 
-function parseRegexExpression(expression: string): CsvWherePredicate {
+function parseRegexExpression(expression: string): CsvFilter {
   const { column, value } = parseColumnValue(expression, '--where-regex');
   const closingSlash = value.lastIndexOf('/');
   if (!value.startsWith('/') || closingSlash === 0) {
@@ -673,42 +665,59 @@ function parseRegexExpression(expression: string): CsvWherePredicate {
   }
   const source = value.slice(1, closingSlash);
   const flags = value.slice(closingSlash + 1);
-  return { column, regex: csv.re(new RegExp(source, flags)) };
+  return csv.column(column).hasMatch(new RegExp(source, flags));
 }
 
-function parseWhereJson(value: string): CsvWhereFilter {
+function parseWhereJson(value: string): CsvFilter {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch (error) {
     throw new Error(`--where must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (!isObject(parsed)) {
-    throw new Error('--where must be a JSON object');
-  }
-  if ('all' in parsed) {
-    requireExactKeys(parsed, ['all'], '--where');
-    if (!Array.isArray(parsed['all']) || parsed['all'].length === 0) {
-      throw new Error('--where.all must be a non-empty array');
-    }
-    const predicates = parsed['all'].map((predicate, index) => parseWherePredicate(predicate, `--where.all[${String(index)}]`));
-    validatePredicateLimits(predicates);
-    return { all: predicates };
-  }
-  return parseWherePredicate(parsed, '--where');
+  return parseWhereFilter(parsed, '--where');
 }
 
-function validatePredicateLimits(predicates: readonly CsvWherePredicate[]): void {
-  if (predicates.length > MAX_FILTER_COUNT) {
-    throw new Error(`filter count out of range: ${String(predicates.length)}`);
+function parseWhereFilter(value: unknown, label: string, depth = 0): CsvFilter {
+  if (depth > MAX_FILTER_NESTING) {
+    throw new Error(`--where nesting exceeds ${MAX_FILTER_NESTING}`);
   }
-  const regexFilterCount = predicates.filter((predicate) => 'regex' in predicate).length;
-  if (regexFilterCount > MAX_REGEX_FILTER_COUNT) {
-    throw new Error(`regex filter count out of range: ${String(regexFilterCount)}`);
+  if (!isObject(value)) {
+    throw new Error(`${label} must be a JSON object`);
   }
+  if ('all' in value) {
+    requireExactKeys(value, ['all'], label);
+    return parseWhereGroup(value['all'], `${label}.all`, csv.all, depth);
+  }
+  if ('any' in value) {
+    requireExactKeys(value, ['any'], label);
+    return parseWhereGroup(value['any'], `${label}.any`, csv.any, depth);
+  }
+  if ('not' in value) {
+    requireExactKeys(value, ['not'], label);
+    return csv.not(parseWhereFilter(value['not'], `${label}.not`, depth + 1));
+  }
+  return parseWherePredicate(value, label);
 }
 
-function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {
+function parseWhereGroup(
+  value: unknown,
+  label: string,
+  combine: (first: CsvFilter, ...rest: readonly CsvFilter[]) => CsvFilter,
+  depth: number,
+): CsvFilter {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${label} must be a non-empty array`);
+  }
+  const filters = value.map((filter, index) => parseWhereFilter(filter, `${label}[${String(index)}]`, depth + 1));
+  const first = filters[0];
+  if (first === undefined) {
+    throw new Error(`${label} must be a non-empty array`);
+  }
+  return combine(first, ...filters.slice(1));
+}
+
+function parseWherePredicate(value: unknown, label: string): CsvFilter {
   if (!isObject(value)) {
     throw new Error(`${label} must be an object`);
   }
@@ -720,35 +729,33 @@ function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {
 
   if ('equals' in value) {
     requireExactKeys(value, ['column', 'equals'], label);
-    return { column, equals: requireString(value['equals'], `${label}.equals`) };
+    return csv.column(column).equals(requireString(value['equals'], `${label}.equals`));
   }
   if ('in' in value) {
     requireExactKeys(value, ['column', 'in'], label);
     if (!Array.isArray(value['in']) || value['in'].length === 0) {
       throw new Error(`${label}.in must be a non-empty string array`);
     }
-    return {
-      column,
-      in: value['in'].map((item, index) => requireString(item, `${label}.in[${String(index)}]`)),
-    };
+    return csv.column(column).isOneOf(
+      value['in'].map((item, index) => requireString(item, `${label}.in[${String(index)}]`)),
+    );
   }
   if ('notEquals' in value) {
     requireExactKeys(value, ['column', 'notEquals'], label);
-    return { column, notEquals: requireString(value['notEquals'], `${label}.notEquals`) };
+    return csv.column(column).doesNotEqual(requireString(value['notEquals'], `${label}.notEquals`));
   }
   if ('notIn' in value) {
     requireExactKeys(value, ['column', 'notIn'], label);
     if (!Array.isArray(value['notIn']) || value['notIn'].length === 0) {
       throw new Error(`${label}.notIn must be a non-empty string array`);
     }
-    return {
-      column,
-      notIn: value['notIn'].map((item, index) => requireString(item, `${label}.notIn[${String(index)}]`)),
-    };
+    return csv.column(column).isNoneOf(
+      value['notIn'].map((item, index) => requireString(item, `${label}.notIn[${String(index)}]`)),
+    );
   }
   if ('startsWith' in value) {
     requireExactKeys(value, ['column', 'startsWith'], label);
-    return { column, startsWith: requireString(value['startsWith'], `${label}.startsWith`) };
+    return csv.column(column).startsWith(requireString(value['startsWith'], `${label}.startsWith`));
   }
   if ('regex' in value) {
     requireExactKeys(value, ['column', 'regex'], label);
@@ -760,7 +767,7 @@ function parseWherePredicate(value: unknown, label: string): CsvWherePredicate {
     const flags = value['regex']['flags'] === undefined
       ? ''
       : requireString(value['regex']['flags'], `${label}.regex.flags`);
-    return { column, regex: csv.re(new RegExp(source, flags)) };
+    return csv.column(column).hasMatch(new RegExp(source, flags));
   }
   throw new Error(`${label} must contain equals, in, notEquals, notIn, startsWith, or regex`);
 }

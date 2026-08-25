@@ -26,8 +26,20 @@ const NATIVE_FILTER_STARTS_WITH = 3;
 const NATIVE_FILTER_REGEX = 4;
 const NATIVE_FILTER_NEQ = 5;
 const NATIVE_FILTER_NOIN = 6;
+const NATIVE_FILTER_ALL = 7;
+const NATIVE_FILTER_ANY = 8;
+const NATIVE_FILTER_NOT = 9;
 export const MAX_REGEX_FILTER_COUNT = 32;
+export const MAX_FILTER_PROGRAM_LENGTH = 4_096;
 const MAX_REGEX_PATTERN_BYTES = 4_096;
+
+// Boolean entries form a postfix program. Their descriptor is [kind, operand count, 0, 0].
+export interface CsvNativeFilterOperator {
+  readonly operandCount: number;
+  readonly operator: 'all' | 'any' | 'not';
+}
+
+export type CsvNativeFilterProgramEntry = CsvNativeFilter | CsvNativeFilterOperator;
 
 export function encodingCode(encoding: CsvEncoding = 'utf8'): number {
   const normalized = encoding.toLowerCase();
@@ -395,4 +407,96 @@ export function normalizeNativeFilters(filters: readonly CsvNativeFilter[] | und
     valueOffsets,
     valueCount,
   };
+}
+
+export function normalizeNativeFilterProgram(program: readonly CsvNativeFilterProgramEntry[]): {
+  descriptors: Uint32Array;
+  filterCount: number;
+  valuesData: Uint8Array;
+  valuesDataLength: number;
+  valueOffsets: Uint32Array;
+  valueCount: number;
+} {
+  if (program.length === 0) {
+    throw new RangeError('filter program must contain at least one predicate');
+  }
+  if (program.length > MAX_FILTER_PROGRAM_LENGTH) {
+    throw new RangeError(`filter program length out of range: ${program.length}`);
+  }
+
+  const predicates: CsvNativeFilter[] = [];
+  let stackDepth = 0;
+  for (let index = 0; index < program.length; ++index) {
+    const entry = program[index];
+    if (entry === undefined) {
+      throw new TypeError(`filter program entry missing at index ${index}`);
+    }
+    if (!isNativeFilterOperator(entry)) {
+      predicates.push(entry);
+      ++stackDepth;
+      continue;
+    }
+
+    const { operandCount, operator } = entry;
+    if (!Number.isInteger(operandCount) || operandCount < 1) {
+      throw new RangeError(`filter ${operator} operand count out of range: ${operandCount}`);
+    }
+    if (operator === 'not' && operandCount !== 1) {
+      throw new RangeError(`filter not operand count must be 1: ${operandCount}`);
+    }
+    if (operandCount > stackDepth) {
+      throw new RangeError(`filter ${operator} does not have ${operandCount} operands`);
+    }
+    stackDepth -= operandCount - 1;
+  }
+  if (stackDepth !== 1) {
+    throw new Error(`filter program leaves ${stackDepth} results`);
+  }
+
+  const normalized = normalizeNativeFilters(predicates);
+  const descriptors = new Uint32Array(program.length * NATIVE_FILTER_DESCRIPTOR_LENGTH);
+  let predicateIndex = 0;
+  for (let programIndex = 0; programIndex < program.length; ++programIndex) {
+    const entry = program[programIndex];
+    if (entry === undefined) {
+      throw new TypeError(`filter program entry missing at index ${programIndex}`);
+    }
+    const descriptorIndex = programIndex * NATIVE_FILTER_DESCRIPTOR_LENGTH;
+    if (isNativeFilterOperator(entry)) {
+      descriptors[descriptorIndex] = nativeFilterOperatorCode(entry.operator);
+      descriptors[descriptorIndex + 1] = entry.operandCount;
+      continue;
+    }
+
+    const predicateDescriptorIndex = predicateIndex * NATIVE_FILTER_DESCRIPTOR_LENGTH;
+    descriptors.set(
+      normalized.descriptors.subarray(
+        predicateDescriptorIndex,
+        predicateDescriptorIndex + NATIVE_FILTER_DESCRIPTOR_LENGTH,
+      ),
+      descriptorIndex,
+    );
+    ++predicateIndex;
+  }
+
+  return {
+    ...normalized,
+    descriptors,
+    filterCount: program.length,
+  };
+}
+
+function isNativeFilterOperator(entry: CsvNativeFilterProgramEntry): entry is CsvNativeFilterOperator {
+  return 'operator' in entry;
+}
+
+function nativeFilterOperatorCode(operator: CsvNativeFilterOperator['operator']): number {
+  switch (operator) {
+    case 'all':
+      return NATIVE_FILTER_ALL;
+    case 'any':
+      return NATIVE_FILTER_ANY;
+    case 'not':
+      return NATIVE_FILTER_NOT;
+  }
 }

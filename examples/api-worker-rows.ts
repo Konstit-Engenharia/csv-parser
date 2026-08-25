@@ -25,7 +25,7 @@ const rowBatches = csv.rows(FILE, {
   columns: COLUMNS,
   delimiter: DELIMITER,
   workerCount: WORKERS,
-  where: FILTER_VALUE === undefined ? undefined : { column: FILTER_COLUMN, equals: FILTER_VALUE },
+  where: FILTER_VALUE === undefined ? undefined : csv.column(FILTER_COLUMN).equals(FILTER_VALUE),
 });
 
 let printed = 0;

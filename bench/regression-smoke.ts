@@ -20,6 +20,7 @@ const guardMultiplier = Number(process.env['CSV_BENCH_GUARD_MULTIPLIER'] ?? '1')
 const ROWS = baseline.rows;
 const EXPECTED_ROWS = ROWS + 1;
 const HOT_ROWS = ROWS / 10;
+const HOT_FILTER = csv.column(3).equals('hot');
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
   if (actual !== expected) {
@@ -102,7 +103,7 @@ await measureMedian('count file', async () => {
 });
 
 await measureMedian('count where equals', async () => {
-  const count = await csv.count(csvPath, { chunkSize: 4_096, where: { column: 3, equals: 'hot' } });
+  const count = await csv.count(csvPath, { chunkSize: 4_096, where: HOT_FILTER });
   assertEqual(count, HOT_ROWS, 'csv.count filtered row count');
 });
 

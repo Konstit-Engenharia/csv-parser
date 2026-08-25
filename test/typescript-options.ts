@@ -23,7 +23,7 @@ const projectedRowsOptions = {
   chunkSize: 64 * 1024,
   columns,
   delimiter: ';',
-  where: { column: 2, equals: 'SP' },
+  where: csv.column(2).equals('SP'),
 } satisfies CsvRowsOptions<typeof columns>;
 
 const projectedTopLevelRows: AsyncGenerator<[string, string][], void> = csv.rows(path, projectedRowsOptions);
@@ -56,24 +56,19 @@ const strictCountOptions = {
 const startsWithCountOptions = {
   chunkSize: 64 * 1024,
   delimiter: ';',
-  where: { column: 1, startsWith: 'A' },
+  where: csv.column(1).startsWith('A'),
 } satisfies CsvCountOptions;
 
 const regexCountOptions = {
   chunkSize: 64 * 1024,
   delimiter: ';',
-  where: { column: 1, regex: csv.re(/^A/u) },
+  where: csv.column(1).hasMatch(/^A/u),
 } satisfies CsvCountOptions;
 
 const multipleFilterRowsOptions = {
   columns,
   delimiter: ';',
-  where: {
-    all: [
-      { column: 1, startsWith: 'A' },
-      { column: 2, in: ['SP', 'RJ'] },
-    ],
-  },
+  where: csv.all(csv.column(1).startsWith('A'), csv.column(2).isOneOf(['SP', 'RJ'])),
 } satisfies CsvRowsOptions<typeof columns>;
 
 void csv.rows(path, strictRowsOptions);
@@ -118,15 +113,15 @@ const invalidStrictCountWorkers = { strict: true, workerCount: 2 } satisfies Csv
 void invalidStrictCountWorkers;
 
 // @ts-expect-error strict count supports no filters
-const invalidStrictCountWhere = { strict: true, where: { column: 1, in: ['SP'] } } satisfies CsvCountOptions;
+const invalidStrictCountWhere = { strict: true, where: csv.column(1).isOneOf(['SP']) } satisfies CsvCountOptions;
 void invalidStrictCountWhere;
 
 // @ts-expect-error strict count supports no filters
-const invalidStrictCountEquals = { strict: true, where: { column: 1, equals: 'SP' } } satisfies CsvCountOptions;
+const invalidStrictCountEquals = { strict: true, where: csv.column(1).equals('SP') } satisfies CsvCountOptions;
 void invalidStrictCountEquals;
 
 // @ts-expect-error strict rows support no filters
-const invalidStrictRowsWhere = { strict: true, where: { column: 1, equals: 'SP' } } satisfies CsvRowsOptions;
+const invalidStrictRowsWhere = { strict: true, where: csv.column(1).equals('SP') } satisfies CsvRowsOptions;
 void invalidStrictRowsWhere;
 
 // @ts-expect-error columns and selectedColumns are mutually exclusive
@@ -134,7 +129,7 @@ const invalidColumnAliases = { columns, selectedColumns: columns } satisfies Csv
 void invalidColumnAliases;
 
 // @ts-expect-error option factories preserve strict/filter constraints
-defineRowsOptions({ strict: true, where: { column: 1, equals: 'SP' } });
+defineRowsOptions({ strict: true, where: csv.column(1).equals('SP') });
 
 // @ts-expect-error row views do not support workers
 const invalidRowViewOptions = { columns, workerCount: 2 } satisfies CsvRowViewsOptions<typeof columns>;
@@ -145,5 +140,5 @@ const invalidStrictColumnarOptions = { columns, strict: true } satisfies CsvColu
 void invalidStrictColumnarOptions;
 
 // @ts-expect-error strict columnar batches do not support filters
-const invalidStrictFilteredColumnar = { strict: true, where: { column: 1, equals: 'SP' } } satisfies CsvColumnarBatchOptions;
+const invalidStrictFilteredColumnar = { strict: true, where: csv.column(1).equals('SP') } satisfies CsvColumnarBatchOptions;
 void invalidStrictFilteredColumnar;

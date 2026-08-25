@@ -26,7 +26,7 @@ const options = {
   delimiter: DELIMITER,
   // Filters always address a physical source column, even when that column is
   // absent from the projected output.
-  where: FILTER_VALUE === undefined ? undefined : { column: FILTER_COLUMN, equals: FILTER_VALUE },
+  where: FILTER_VALUE === undefined ? undefined : csv.column(FILTER_COLUMN).equals(FILTER_VALUE),
 };
 
 // Every yielded value is the set of rows materialized from a parsed batch.

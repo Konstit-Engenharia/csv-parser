@@ -3,46 +3,8 @@ import { NativeCsvParser } from '../parser.js';
 import type {
   CsvColumns,
   CsvEncoding,
-  CsvRegex,
 } from '../types.js';
-
-interface WorkerEqualsFilter {
-  column: number;
-  value: Uint8Array;
-}
-
-interface WorkerInFilter {
-  column: number;
-  values: Uint8Array[];
-}
-
-interface WorkerNotEqualsFilter {
-  column: number;
-  notEquals: Uint8Array;
-}
-
-interface WorkerNotInFilter {
-  column: number;
-  notIn: Uint8Array[];
-}
-
-interface WorkerStartsWithFilter {
-  column: number;
-  prefix: Uint8Array;
-}
-
-interface WorkerRegexFilter {
-  column: number;
-  regex: CsvRegex;
-}
-
-type WorkerFilter =
-  | WorkerEqualsFilter
-  | WorkerInFilter
-  | WorkerNotInFilter
-  | WorkerNotEqualsFilter
-  | WorkerRegexFilter
-  | WorkerStartsWithFilter;
+import type { WorkerFilterProgramEntry } from '../worker-filter.js';
 
 interface WorkerRowsMessage {
   chunkSize: number;
@@ -55,7 +17,7 @@ interface WorkerRowsMessage {
   };
   shardIndex: number;
   path: string;
-  filters?: WorkerFilter[];
+  filterProgram?: WorkerFilterProgramEntry[];
 }
 
 interface WorkerRowsBatchMessage {
@@ -159,11 +121,8 @@ function materializeRows(
 }
 
 function writeRowsBatch(parser: NativeCsvParser, chunk: Buffer, message: WorkerRowsMessage) {
-  if (message.filters !== undefined) {
-    return parser.writeProjectedBatch(chunk, {
-      filters: message.filters,
-      selectedColumns: message.selectedColumns,
-    });
+  if (message.filterProgram !== undefined) {
+    return parser.writeProjectedBatchWhere(chunk, message.selectedColumns, message.filterProgram);
   }
   if (message.selectedColumns !== undefined) {
     return parser.writeProjectedBatch(chunk, {
@@ -174,11 +133,8 @@ function writeRowsBatch(parser: NativeCsvParser, chunk: Buffer, message: WorkerR
 }
 
 function finishRowsBatch(parser: NativeCsvParser, message: WorkerRowsMessage) {
-  if (message.filters !== undefined) {
-    return parser.endProjectedBatch({
-      filters: message.filters,
-      selectedColumns: message.selectedColumns,
-    });
+  if (message.filterProgram !== undefined) {
+    return parser.endProjectedBatchWhere(message.selectedColumns, message.filterProgram);
   }
   if (message.selectedColumns !== undefined) {
     return parser.endProjectedBatch({
@@ -189,5 +145,5 @@ function finishRowsBatch(parser: NativeCsvParser, message: WorkerRowsMessage) {
 }
 
 function usesProjectedMaterialization(message: WorkerRowsMessage): boolean {
-  return message.filters !== undefined || message.selectedColumns !== undefined;
+  return message.filterProgram !== undefined || message.selectedColumns !== undefined;
 }

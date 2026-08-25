@@ -5,6 +5,7 @@ import {
 } from 'bun:test';
 import {
   csv,
+  type CsvFilter,
   type CsvNativeFilter,
   type CsvRegex,
   NativeCsvParser,
@@ -24,6 +25,11 @@ describe('native RE2 filters', () => {
     expect(() => csv.re(/SP/g)).toThrow('unsupported regular expression flags: g');
     expect(() => csv.re(/(?=SP)/)).toThrow('invalid perl operator');
     expect(() => csv.re(new RegExp('a'.repeat(4_097)))).toThrow('regular expression exceeds 4096 UTF-8 bytes');
+    expect(() => csv.column(0).hasMatch(/SP/g)).toThrow('unsupported regular expression flags: g');
+    expect(() => csv.column(0).hasMatch(/(?=SP)/)).toThrow('invalid perl operator');
+    expect(() => csv.column(0).hasMatch(new RegExp('a'.repeat(4_097)))).toThrow(
+      'regular expression exceeds 4096 UTF-8 bytes',
+    );
   });
 
   test('propagates native validation errors for forged regex descriptors', () => {
@@ -38,18 +44,18 @@ describe('native RE2 filters', () => {
   test('uses search semantics and preserves supported flags', async () => {
     const path = csvFixturePath('api/unquoted-people-sp-filter.csv');
 
-    expect(await csv.count(path, { delimiter: ';', where: { column: 1, regex: csv.re(/ao/) } })).toBe(1);
-    expect(await csv.count(path, { delimiter: ';', where: { column: 2, regex: csv.re(/^sp$/i) } })).toBe(2);
+    expect(await csv.count(path, { delimiter: ';', where: csv.column(1).hasMatch(/ao/) })).toBe(1);
+    expect(await csv.count(path, { delimiter: ';', where: csv.column(2).hasMatch(/^sp$/i) })).toBe(2);
     expect(
       await csv.count(csvFixturePath('api/quoted-people-multiline-state.csv'), {
         delimiter: ';',
-        where: { column: 2, regex: csv.re(/^S.P$/s) },
+        where: csv.column(2).hasMatch(/^S.P$/s),
       }),
     ).toBe(1);
 
     expect(
       await csv.parse(Buffer.from('.\nx\n'), {
-        where: { column: 0, regex: csv.re(/\u002e/u) },
+        where: csv.column(0).hasMatch(/\u002e/u),
       }),
     ).toEqual([['.']]);
   });
@@ -73,13 +79,13 @@ describe('native RE2 filters', () => {
 
   test('supports regex filters in worker count, rows, and reusable pools', async () => {
     const path = csvFixturePath('api/quoted-people-sp-filter.csv');
-    const stateRegex = csv.re(/^(?:SP|RJ)$/);
+    const stateFilter = csv.column(2).hasMatch(/^(?:SP|RJ)$/);
 
     expect(
       await csv.count(path, {
         delimiter: ';',
         workerCount: 2,
-        where: { column: 2, regex: stateRegex },
+        where: stateFilter,
       }),
     ).toBe(3);
 
@@ -89,7 +95,7 @@ describe('native RE2 filters', () => {
         columns: [0, 1] as const,
         delimiter: ';',
         workerCount: 2,
-        where: { column: 1, regex: csv.re(/^b/i) },
+        where: csv.column(1).hasMatch(/^b/i),
       })
     ) {
       rows.push(...batch);
@@ -100,7 +106,7 @@ describe('native RE2 filters', () => {
       columns: [0, 1] as const,
       delimiter: ';',
       workerCount: 2,
-      where: { column: 2, regex: stateRegex },
+      where: stateFilter,
     });
     expect(await pool.count()).toBe(3);
     const pooledRows: string[][] = [];
@@ -113,6 +119,13 @@ describe('native RE2 filters', () => {
   test('limits native regex filters per operation', () => {
     const regex = csv.re(/x/);
     expect(() => normalizeNativeFilters(Array.from({ length: 33 }, () => ({ column: 0, regex })))).toThrow(
+      'regex filter count out of range: 33',
+    );
+  });
+
+  test('limits composed regex filters when the filter is constructed', () => {
+    const combine = csv.all as unknown as (...filters: CsvFilter[]) => CsvFilter;
+    expect(() => combine(...Array.from({ length: 33 }, () => csv.column(0).hasMatch(/x/)))).toThrow(
       'regex filter count out of range: 33',
     );
   });

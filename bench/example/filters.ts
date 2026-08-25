@@ -13,13 +13,15 @@ import {
   SELECTED_COLUMNS,
 } from './config.ts';
 
+const FILTER_EQUALS = csv.column(FILTER_COLUMN).equals(FILTER_VALUE);
+
 export const filterCases = [
   ['native count', () => countCsvFile(FILE, { chunkSize: CHUNK_SIZE, delimiter: DELIMITER })],
   ['native filter equals', () =>
     csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
-      where: { column: FILTER_COLUMN, equals: FILTER_VALUE },
+      where: FILTER_EQUALS,
     })],
   ['native projected filter equals', () => countNativeProjectedFilteredRows()],
 ] as const satisfies readonly ExampleBenchCase[];

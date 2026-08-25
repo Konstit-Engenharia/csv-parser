@@ -10,9 +10,15 @@ import {
   findCsvSafeSplitOffsets as findCsvSafeSplitOffsetsNative,
 } from './files.js';
 import {
-  normalizeColumns,
-  validateRegex,
-} from './normalize.js';
+  all,
+  any,
+  column,
+  nativeFilterProgramFor,
+  not,
+  re,
+} from './filter.js';
+import { normalizeColumns } from './normalize.js';
+import type { CsvNativeFilterProgramEntry } from './normalize.js';
 import { NativeCsvParser } from './parser.js';
 import {
   rejectStrictSchemaUnsupported,
@@ -27,21 +33,18 @@ import type {
   CsvColumns,
   CsvCountOptions,
   CsvFileOptions,
-  CsvNativeFilter,
+  CsvFilter,
   CsvParallelCountOptions,
   CsvParallelRowsOptions,
   CsvParseOptions,
   CsvParserOptions,
   CsvProjectedRow,
-  CsvRegex,
   CsvRowsOptions,
   CsvRowView,
   CsvRowViewCallback,
   CsvRowViewsOptions,
   CsvShard,
   CsvShardingOptions,
-  CsvWhereFilter,
-  CsvWherePredicate,
   CsvWorkerPoolOptions,
 } from './types.js';
 import { parallelCount } from './worker-count.js';
@@ -354,7 +357,7 @@ export function withRowViews(
  * Count rows without materializing them.
  *
  * Full filter support exists here because count has native fast paths for
- * `where.equals`, `where.in`, `where.notEquals`, `where.notIn`, `where.startsWith`, and `where.regex`.
+ * filters created with `csv.column()` and grouped with `csv.all()`, `csv.any()`, and `csv.not()`.
  */
 export async function count(path: string, options: CsvCountOptions = {}): Promise<number> {
   if ((options.workerCount ?? 1) > 1) {
@@ -423,19 +426,11 @@ export function workerPool(path: string, options: CsvWorkerPoolOptions): CsvWork
   return createWorkerPool(path, options);
 }
 
-export function re(pattern: RegExp): CsvRegex {
-  if (!(pattern instanceof RegExp)) {
-    throw new TypeError('csv.re() requires a RegExp');
-  }
-  const regex = {
-    flags: pattern.flags,
-    source: pattern.source,
-  };
-  validateRegex(regex);
-  return Object.freeze(regex) as CsvRegex;
-}
-
 export const csv = {
+  all,
+  any,
+  column,
+  not,
   re,
   workerPool,
   parse,
@@ -500,18 +495,11 @@ function writeRowsBatch(
   parser: NativeCsvParser,
   chunk: NodeJS.TypedArray | DataView,
   options: CsvApiFileOptions,
-  filters: readonly CsvNativeFilter[] | undefined,
+  filters: readonly CsvNativeFilterProgramEntry[] | undefined,
   final = false,
 ): NativeCsvBatch {
   if (filters !== undefined) {
-    return parser.writeProjectedBatch(
-      chunk,
-      {
-        selectedColumns: selectedColumns(options),
-        filters,
-      },
-      final,
-    );
+    return parser.writeProjectedBatchWhere(chunk, selectedColumns(options), filters, final);
   }
   return parser.writeBatch(chunk, final);
 }
@@ -520,12 +508,12 @@ function writeMaterializeBatch(
   parser: NativeCsvParser,
   chunk: NodeJS.TypedArray | DataView,
   options: CsvApiFileOptions,
-  filters: readonly CsvNativeFilter[] | undefined,
+  filters: readonly CsvNativeFilterProgramEntry[] | undefined,
   final = false,
 ): NativeCsvBatch {
   const columns = selectedColumns(options);
   if (filters !== undefined) {
-    return parser.writeProjectedBatch(chunk, { selectedColumns: columns, filters }, final);
+    return parser.writeProjectedBatchWhere(chunk, columns, filters, final);
   }
   if (options.strict !== true && columns !== undefined) {
     return parser.writeProjectedBatch(chunk, { selectedColumns: columns }, final);
@@ -537,12 +525,12 @@ function writeColumnarBatch(
   parser: NativeCsvParser,
   chunk: NodeJS.TypedArray | DataView,
   options: CsvApiFileOptions,
-  filters: readonly CsvNativeFilter[] | undefined,
+  filters: readonly CsvNativeFilterProgramEntry[] | undefined,
   final = false,
 ): NativeCsvBatch {
   const columns = selectedColumns(options);
   if (filters !== undefined) {
-    return parser.writeProjectedBatch(chunk, { selectedColumns: columns, filters }, final);
+    return parser.writeProjectedBatchWhere(chunk, columns, filters, final);
   }
   if (columns !== undefined) {
     return parser.writeProjectedBatch(chunk, { selectedColumns: columns }, final);
@@ -553,10 +541,10 @@ function writeColumnarBatch(
 function finishRowsBatch(
   parser: NativeCsvParser,
   options: CsvApiFileOptions,
-  filters: readonly CsvNativeFilter[] | undefined,
+  filters: readonly CsvNativeFilterProgramEntry[] | undefined,
 ): NativeCsvBatch {
   if (filters !== undefined) {
-    return parser.endProjectedBatch({ selectedColumns: selectedColumns(options), filters });
+    return parser.endProjectedBatchWhere(selectedColumns(options), filters);
   }
   return parser.endBatch();
 }
@@ -564,11 +552,11 @@ function finishRowsBatch(
 function finishMaterializeBatch(
   parser: NativeCsvParser,
   options: CsvApiFileOptions,
-  filters: readonly CsvNativeFilter[] | undefined,
+  filters: readonly CsvNativeFilterProgramEntry[] | undefined,
 ): NativeCsvBatch {
   const columns = selectedColumns(options);
   if (filters !== undefined) {
-    return parser.endProjectedBatch({ selectedColumns: columns, filters });
+    return parser.endProjectedBatchWhere(columns, filters);
   }
   if (options.strict !== true && columns !== undefined) {
     return parser.endProjectedBatch({ selectedColumns: columns });
@@ -579,11 +567,11 @@ function finishMaterializeBatch(
 function finishColumnarBatch(
   parser: NativeCsvParser,
   options: CsvApiFileOptions,
-  filters: readonly CsvNativeFilter[] | undefined,
+  filters: readonly CsvNativeFilterProgramEntry[] | undefined,
 ): NativeCsvBatch {
   const columns = selectedColumns(options);
   if (filters !== undefined) {
-    return parser.endProjectedBatch({ selectedColumns: columns, filters });
+    return parser.endProjectedBatchWhere(columns, filters);
   }
   if (columns !== undefined) {
     return parser.endProjectedBatch({ selectedColumns: columns });
@@ -798,47 +786,21 @@ class ScopedCsvColumnarBatchView<TSelectedColumns extends CsvColumns | undefined
 function writeCount(
   parser: NativeCsvParser,
   chunk: NodeJS.TypedArray | DataView,
-  filters: readonly CsvNativeFilter[] | undefined,
+  filters: readonly CsvNativeFilterProgramEntry[] | undefined,
 ): number {
   if (filters === undefined) {
     return parser.writeCount(chunk);
   }
-  return parser.writeCountWhereAll(chunk, filters);
+  return parser.writeCountWhere(chunk, filters);
 }
 
-function finishCount(parser: NativeCsvParser, filters: readonly CsvNativeFilter[] | undefined): number {
+function finishCount(parser: NativeCsvParser, filters: readonly CsvNativeFilterProgramEntry[] | undefined): number {
   if (filters === undefined) {
     return parser.endCount();
   }
-  return parser.endCountWhereAll(filters);
+  return parser.endCountWhere(filters);
 }
 
-function toNativeFilters(where: CsvWhereFilter | undefined): readonly CsvNativeFilter[] | undefined {
-  if (where === undefined) {
-    return undefined;
-  }
-  const predicates = 'all' in where ? where.all : [where];
-  if (predicates.length === 0) {
-    throw new Error('where.all must contain at least one filter');
-  }
-  return predicates.map(toNativeFilter);
-}
-
-function toNativeFilter(predicate: CsvWherePredicate): CsvNativeFilter {
-  if ('equals' in predicate) {
-    return { column: predicate.column, value: predicate.equals };
-  }
-  if ('in' in predicate) {
-    return { column: predicate.column, values: predicate.in };
-  }
-  if ('notEquals' in predicate) {
-    return predicate;
-  }
-  if ('notIn' in predicate) {
-    return predicate;
-  }
-  if ('startsWith' in predicate) {
-    return { column: predicate.column, prefix: predicate.startsWith };
-  }
-  return { column: predicate.column, regex: predicate.regex };
+function toNativeFilters(where: CsvFilter | undefined): readonly CsvNativeFilterProgramEntry[] | undefined {
+  return nativeFilterProgramFor(where);
 }

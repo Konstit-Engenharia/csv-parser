@@ -144,11 +144,14 @@ csv lines corpus/large/example.csv --delimiter ';' --limit 10
 csv lines corpus/large/example.csv --delimiter ';' --columns 0,1,2 --limit 100 > sample.csv
 ```
 
-For generated or advanced filters, `--where <json>` keeps the `CsvWhereFilter` API shape:
+For generated or advanced CLI filters, `--where <json>` accepts a CLI-only serializable filter shape. This JSON shape
+is separate from the TypeScript filter API:
 
 ```sh
-csv count data.csv --where '{"all":[{"column":2,"in":["SP","RJ"]},{"column":1,"startsWith":"A"}]}'
+csv count data.csv --where '{"all":[{"any":[{"column":2,"equals":"SP"},{"column":2,"equals":"RJ"}]},{"not":{"column":1,"startsWith":"B"}}]}'
 ```
+
+CLI JSON filters can nest `all`, `any`, and `not`. Friendly filter flags still combine with AND.
 
 ## High-Level API
 
@@ -162,13 +165,11 @@ const rows = await csv.count('data.csv', { delimiter: ';' });
 const selected = csv.rows('data.csv', {
   delimiter: ';',
   columns: [0, 2],
-  where: {
-    all: [
-      { column: 2, in: ['SP', 'RJ'] },
-      { column: 1, startsWith: 'A' },
-      { column: 3, regex: csv.re(/^[0-9]{5}-[0-9]{3}$/) },
-    ],
-  },
+  where: csv.all(
+    csv.column(2).isOneOf(['SP', 'RJ']),
+    csv.column(1).startsWith('A'),
+    csv.column(3).hasMatch(/^[0-9]{5}-[0-9]{3}$/),
+  ),
 });
 
 const compressed = csv.rows('data.csv.gz', {
@@ -193,23 +194,51 @@ Supported helpers:
 - `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
 - `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
-All row and count APIs support `equals`, `in`, `notEquals`, `notIn`, `startsWith`, and `regex`. `notEquals` means not
-equal, and `notIn` means not in the supplied values. Create regex filters with `csv.re()`:
+Filters select a zero-based physical column first. Each condition method returns a complete, validated, immutable filter.
+The selected column is reusable, and one filter can be reused across row, count, and worker APIs:
+
+```ts
+const state = csv.column(2);
+const isSP = state.equals('SP');
+const isSouthEast = state.isOneOf(['SP', 'RJ']);
+
+await csv.count('data.csv', { where: isSP });
+await csv.count('data.csv', { where: isSouthEast, workerCount: 4 });
+```
+
+The condition methods are `equals`, `doesNotEqual`, `isOneOf`, `isNoneOf`, `startsWith`, and `hasMatch`. Binary
+`Buffer` and `Uint8Array` operands are copied during construction so later caller mutation cannot change a filter.
+If a row does not contain the selected column, it does not match, including for `doesNotEqual` and `isNoneOf`.
+Use `hasMatch()` for regular expressions:
 
 ```ts
 const selected = csv.rows('data.csv', {
-  where: { column: 1, regex: csv.re(/^ana$/iu) },
+  where: csv.column(1).hasMatch(/^ana$/iu),
 });
 ```
 
 Regex filters use statically linked RE2 and search the field. Use `^` and `$` for a full-field match. The supported flags
 are `i`, `m`, `s`, and `u`. Unicode matching is enabled by default; `u` documents the JavaScript pattern intent. The
-`g`, `d`, `y`, and `v` flags are rejected. RE2 does not support lookaround or backreferences. `csv.re()` converts
+`g`, `d`, `y`, and `v` flags are rejected. RE2 does not support lookaround or backreferences. `hasMatch()` converts
 JavaScript Unicode escapes and escaped `/` characters, then validates the RE2 expression immediately. A compiled
 pattern is limited to 4096 UTF-8 bytes, and one operation can use at most 32 regex filters.
 
-Use `where: { all: [...] }` to require multiple
-predicates. Every predicate in `all` must match the same row. At least one predicate is required.
+Use `csv.all()` when every child must match, `csv.any()` when at least one child must match, and `csv.not()` to negate
+one child. Groups can be nested. `all` and `any` require at least one filter:
+
+```ts
+const filter = csv.all(
+  csv.any(
+    csv.column(2).equals('SP'),
+    csv.column(2).equals('RJ'),
+  ),
+  csv.not(csv.column(1).startsWith('B')),
+);
+```
+
+Boolean groups are evaluated by the native parser. A predicate for a missing column has an unknown result. `csv.not()`
+keeps that result unknown, so a missing column does not become a match. `csv.any()` still matches when another child is
+true.
 
 Serial file operations accept `compression: 'auto' | 'gzip' | 'deflate' | 'deflate-raw' | 'brotli' | 'zstd'`.
 Decompression streams into the parser and does not buffer the complete file. `auto` reads at most four prefix bytes and
@@ -275,7 +304,7 @@ const columns = [0, 2] as const;
 const rowOptions = defineRowsOptions({
   columns,
   delimiter: ';',
-  where: { column: 1, equals: 'SP' },
+  where: csv.column(1).equals('SP'),
 });
 
 const countOptions = defineCountOptions({
@@ -294,7 +323,8 @@ workers. `columns` and the legacy `selectedColumns` alias are mutually exclusive
 options supported by its native path.
 
 Column indexes are integers from `0` through `2024`. A projection may contain at most 2024 columns and must not repeat
-an index; invalid selections fail before parsing begins.
+an index. A filter can contain at most 2024 predicates and 4096 total predicates and Boolean operators. Invalid values
+fail before parsing begins.
 
 ## Batch API
 

@@ -20,11 +20,18 @@ const FILTER_VALUES = (Bun.env['CSV_BENCH_FILTER_VALUES'] ?? 'SP,RJ')
   .filter((value) => value.length > 0);
 const FILTER_PREFIX = Bun.env['CSV_BENCH_FILTER_PREFIX'] ?? 'S';
 const FILTER_REGEX = new RegExp(Bun.env['CSV_BENCH_FILTER_REGEX'] ?? '^(?:SP|RJ)$', 'u');
-const NATIVE_FILTER_REGEX = csv.re(FILTER_REGEX);
 const SECOND_FILTER_COLUMN = Number(Bun.env['CSV_BENCH_SECOND_FILTER_COLUMN'] ?? 1);
 const SECOND_FILTER_PREFIX = Bun.env['CSV_BENCH_SECOND_FILTER_PREFIX'] ?? 'A';
 const SELECTED_COLUMNS = [FILTER_COLUMN];
 const MULTIPLE_FILTER_COLUMNS = [FILTER_COLUMN, SECOND_FILTER_COLUMN];
+const filterColumn = csv.column(FILTER_COLUMN);
+const nativeFilterIn = filterColumn.isOneOf(FILTER_VALUES);
+const nativeFilterStartsWith = filterColumn.startsWith(FILTER_PREFIX);
+const nativeFilterRegex = filterColumn.hasMatch(FILTER_REGEX);
+const nativeMultipleFilters = csv.all(
+  nativeFilterIn,
+  csv.column(SECOND_FILTER_COLUMN).startsWith(SECOND_FILTER_PREFIX),
+);
 const bytes = statSync(FILE).size;
 
 const filterSet = new Set(FILTER_VALUES);
@@ -37,7 +44,7 @@ const cases = [
     csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
-      where: { column: FILTER_COLUMN, in: FILTER_VALUES },
+      where: nativeFilterIn,
     })],
   ['js materialized selected column startsWith', () => countJsMaterializedSelectedStartsWith()],
   ['js projected selected column startsWith', () => countJsProjectedStartsWith()],
@@ -45,7 +52,7 @@ const cases = [
     csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
-      where: { column: FILTER_COLUMN, startsWith: FILTER_PREFIX },
+      where: nativeFilterStartsWith,
     })],
   ['js materialized selected column regex', () => countJsMaterializedSelectedRegex()],
   ['js projected selected column regex', () => countJsProjectedRegex()],
@@ -53,19 +60,14 @@ const cases = [
     csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
-      where: { column: FILTER_COLUMN, regex: NATIVE_FILTER_REGEX },
+      where: nativeFilterRegex,
     })],
   ['js projected multiple filters', () => countJsProjectedMultipleFilters()],
   ['native multiple filters', () =>
     csv.count(FILE, {
       chunkSize: CHUNK_SIZE,
       delimiter: DELIMITER,
-      where: {
-        all: [
-          { column: FILTER_COLUMN, in: FILTER_VALUES },
-          { column: SECOND_FILTER_COLUMN, startsWith: SECOND_FILTER_PREFIX },
-        ],
-      },
+      where: nativeMultipleFilters,
     })],
 ] as const;
 

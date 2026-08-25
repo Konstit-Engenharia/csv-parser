@@ -4,6 +4,7 @@ import {
   test,
 } from 'bun:test';
 import {
+  csv,
   parallelCount,
   parallelRows,
   workerPool,
@@ -97,8 +98,9 @@ describe('worker API coverage', () => {
 
     expect(await parallelCount(emptyPath, { workerCount: 2 })).toBe(0);
     expect(await collectRows(parallelRows(emptyPath, { workerCount: 2 }))).toEqual([]);
-    expect((await rejectedError(collectRows(parallelRows(emptyPath, { workerCount: 2, where: { all: [] } })))).message)
-      .toContain('where.all must contain at least one filter');
+    const emptyFilter = csv.column(0).equals('missing');
+    expect(await parallelCount(emptyPath, { workerCount: 2, where: emptyFilter })).toBe(0);
+    expect(await collectRows(parallelRows(emptyPath, { workerCount: 2, where: emptyFilter }))).toEqual([]);
 
     const pool = workerPool(emptyPath, { workerCount: 2 });
     expect(pool.closed).toBe(false);
@@ -111,18 +113,6 @@ describe('worker API coverage', () => {
 
   test('validates direct and pooled worker options before parsing', async () => {
     const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
-    const emptyNotIn = { column: 0, notIn: [] } as const;
-
-    expect((await rejectedError(parallelCount(path, { workerCount: 2, where: emptyNotIn }))).message).toContain(
-      'filter values must not be empty',
-    );
-    expect(
-      (await rejectedError(collectRows(parallelRows(path, { workerCount: 2, where: emptyNotIn })))).message,
-    ).toContain('filter values must not be empty');
-
-    using pool = workerPool(path, { workerCount: 2, where: emptyNotIn });
-    expect((await rejectedError(pool.count())).message).toContain('filter values must not be empty');
-    expect((await rejectedError(collectRows(pool.rows()))).message).toContain('filter values must not be empty');
 
     const conflictingColumns = {
       columns: [0],
@@ -150,7 +140,9 @@ describe('worker API coverage', () => {
 
   test('accepts binary filter values through direct and pooled workers', async () => {
     const path = csvFixturePath('api/unquoted-one-person-no-header.csv');
-    const where = { column: 0, equals: Buffer.from('1') } as const;
+    const value = Buffer.from('1');
+    const where = csv.column(0).equals(value);
+    value.fill(0);
 
     expect(await parallelCount(path, { delimiter: ';', workerCount: 2, where })).toBe(1);
     expect(await collectRows(parallelRows(path, { delimiter: ';', workerCount: 2, where }))).toEqual([

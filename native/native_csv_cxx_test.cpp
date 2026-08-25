@@ -724,6 +724,39 @@ TEST_CASE("native C ABI evaluates neq and noin filters") {
   csv_parser_destroy(parser);
 }
 
+TEST_CASE("native C ABI evaluates nested Boolean filter programs") {
+  const std::string input = "a,SP\nb,RJ\nc,MG\nd\n";
+  const std::string values = "SPb";
+  const uint32_t value_offsets[] = {0, 2, 3};
+  const uint32_t any_filters[] = {
+      1, 1, 0, 1, // column 1 equals "SP"
+      3, 0, 1, 1, // column 0 starts with "b"
+      8, 2, 0, 0, // any of the previous two results
+  };
+  const uint32_t not_any_filters[] = {
+      1, 1, 0, 1, // column 1 equals "SP"
+      3, 0, 1, 1, // column 0 starts with "b"
+      8, 2, 0, 0, // any of the previous two results
+      9, 1, 0, 0, // negate the any result
+  };
+
+  void* parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  REQUIRE(csv_parser_write_count_where_all(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true,
+                                           any_filters, 3, reinterpret_cast<const uint8_t*>(values.data()),
+                                           values.size(), value_offsets, 2) == 2);
+  REQUIRE(std::string_view(csv_parser_last_error(parser)).empty());
+  csv_parser_destroy(parser);
+
+  parser = csv_parser_create(0, ',');
+  REQUIRE(parser != nullptr);
+  REQUIRE(csv_parser_write_count_where_all(parser, reinterpret_cast<const uint8_t*>(input.data()), input.size(), true,
+                                           not_any_filters, 4, reinterpret_cast<const uint8_t*>(values.data()),
+                                           values.size(), value_offsets, 2) == 1);
+  REQUIRE(std::string_view(csv_parser_last_error(parser)).empty());
+  csv_parser_destroy(parser);
+}
+
 TEST_CASE("native C ABI compiles one RE2 filter across chunks") {
   const std::string input = "alpha,SP\nalpine,RJ\nbeta,MG\ngamma,SP\n";
   const std::string pattern = "^(?:SP|RJ)$";
@@ -838,11 +871,49 @@ TEST_CASE("native C ABI validates AND filter descriptors") {
     csv_parser_destroy(parser);
   }
 
-  SECTION("filter count") {
+  SECTION("filter program length") {
     void* parser = csv_parser_create(0, ',');
     REQUIRE(parser != nullptr);
-    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, nullptr, 2025, value, 1, offsets, 1) == 0);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, nullptr, 4097, value, 1, offsets, 1) == 0);
+    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("4096") != std::string_view::npos);
+    csv_parser_destroy(parser);
+  }
+
+  SECTION("leaf filter count") {
+    std::vector<uint32_t> filters(2025 * 4);
+    std::vector<uint32_t> value_offsets(2026, 0);
+    for (uint32_t index = 0; index < 2025; ++index) {
+      const size_t descriptor = static_cast<size_t>(index) * 4;
+      filters[descriptor] = 1;
+      filters[descriptor + 1] = 0;
+      filters[descriptor + 2] = index;
+      filters[descriptor + 3] = 1;
+    }
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, filters.data(), 2025, nullptr, 0,
+                                             value_offsets.data(), 2025) == 0);
     REQUIRE(std::string_view(csv_parser_last_error(parser)).find("2024") != std::string_view::npos);
+    csv_parser_destroy(parser);
+  }
+
+  SECTION("Boolean operand stack") {
+    const uint32_t filters[] = {8, 2, 0, 0};
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, filters, 1, nullptr, 0, offsets, 0) == 0);
+    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("Boolean") != std::string_view::npos);
+    csv_parser_destroy(parser);
+  }
+
+  SECTION("Boolean final stack") {
+    const uint32_t filters[] = {
+        1, 0, 0, 1, 1, 0, 0, 1, 9, 1, 0, 0,
+    };
+    void* parser = csv_parser_create(0, ',');
+    REQUIRE(parser != nullptr);
+    REQUIRE(csv_parser_write_count_where_all(parser, nullptr, 0, true, filters, 3, value, 1, offsets, 1) == 0);
+    REQUIRE(std::string_view(csv_parser_last_error(parser)).find("one result") != std::string_view::npos);
     csv_parser_destroy(parser);
   }
 }

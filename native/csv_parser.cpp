@@ -41,7 +41,20 @@ enum class row_filter_kind : uint8_t {
   regex = 4,
   neq = 5,
   noin = 6,
+  all_of = 7,
+  any_of = 8,
+  negate = 9,
 };
+
+enum class filter_truth : uint8_t {
+  unknown,
+  false_value,
+  true_value,
+};
+
+bool is_boolean_operator(row_filter_kind kind) {
+  return kind == row_filter_kind::all_of || kind == row_filter_kind::any_of || kind == row_filter_kind::negate;
+}
 
 struct row_filter {
   bool enabled = false;
@@ -83,6 +96,7 @@ constexpr size_t npos = std::numeric_limits<size_t>::max();
 constexpr uint32_t max_column_index = 2024;
 constexpr uint64_t max_projection_length = 2024;
 constexpr uint64_t max_filter_count = 2024;
+constexpr uint64_t max_filter_program_length = 4096;
 constexpr uint64_t max_regex_filter_count = 32;
 constexpr size_t max_regex_pattern_size = 4096;
 constexpr int64_t max_regex_memory = 1 << 20;
@@ -719,6 +733,8 @@ public:
     current_column_ = 0;
     row_filter_seen_.clear();
     row_filter_matched_.clear();
+    filter_truth_stack_.clear();
+    has_boolean_operators_ = false;
     emitted_rows_ = 0;
     field_in_arena_ = false;
     complete_quoted_field_has_escape_ = false;
@@ -809,6 +825,8 @@ private:
     if (filter_count != 0) {
       filters_.assign(filters, filters + filter_count);
     }
+    has_boolean_operators_ = std::any_of(filters_.begin(), filters_.end(),
+                                         [](const row_filter& filter) { return is_boolean_operator(filter.kind); });
     prepare_in_filters();
     if (!prepare_regex_filters()) {
       return false;
@@ -817,6 +835,9 @@ private:
     if (row_filter_seen_.size() != filter_count) {
       row_filter_seen_.assign(filter_count, false);
       row_filter_matched_.assign(filter_count, false);
+    }
+    if (filter_truth_stack_.size() < filter_count) {
+      filter_truth_stack_.resize(filter_count);
     }
     selected_column_counts_.clear();
     selected_column_outputs_.clear();
@@ -853,11 +874,18 @@ private:
 
     uint32_t max_column = 0;
     for (const auto& filter : filters_) {
+      if (is_boolean_operator(filter.kind)) {
+        continue;
+      }
       max_column = std::max(max_column, filter.column);
     }
     first_filter_by_column_.assign(static_cast<size_t>(max_column) + 1, std::numeric_limits<uint32_t>::max());
     next_filter_.resize(filters_.size());
     for (size_t index = 0; index < filters_.size(); ++index) {
+      if (is_boolean_operator(filters_[index].kind)) {
+        next_filter_[index] = std::numeric_limits<uint32_t>::max();
+        continue;
+      }
       const uint32_t filter_index = checked_u32(index);
       const uint32_t column = filters_[index].column;
       next_filter_[index] = first_filter_by_column_[column];
@@ -1632,13 +1660,67 @@ private:
     }
   }
 
-  bool row_matches_filters() const {
+  bool row_matches_filters() {
+    if (has_boolean_operators_) {
+      return evaluate_filter_program() == filter_truth::true_value;
+    }
     for (size_t index = 0; index < filters_.size(); ++index) {
       if (!row_filter_seen_[index] || !row_filter_matched_[index]) {
         return false;
       }
     }
     return true;
+  }
+
+  filter_truth evaluate_filter_program() {
+    size_t depth = 0;
+    for (size_t index = 0; index < filters_.size(); ++index) {
+      const auto kind = filters_[index].kind;
+      if (!is_boolean_operator(kind)) {
+        filter_truth_stack_[depth++] = !row_filter_seen_[index]     ? filter_truth::unknown
+                                       : row_filter_matched_[index] ? filter_truth::true_value
+                                                                    : filter_truth::false_value;
+        continue;
+      }
+
+      const size_t operand_count = filters_[index].column;
+      const size_t first_operand = depth - operand_count;
+      if (kind == row_filter_kind::negate) {
+        auto& value = filter_truth_stack_[first_operand];
+        if (value == filter_truth::true_value) {
+          value = filter_truth::false_value;
+        } else if (value == filter_truth::false_value) {
+          value = filter_truth::true_value;
+        }
+        depth = first_operand + 1;
+        continue;
+      }
+
+      filter_truth result = kind == row_filter_kind::all_of ? filter_truth::true_value : filter_truth::false_value;
+      for (size_t operand = first_operand; operand < depth; ++operand) {
+        const auto value = filter_truth_stack_[operand];
+        if (kind == row_filter_kind::all_of) {
+          if (value == filter_truth::false_value) {
+            result = filter_truth::false_value;
+            break;
+          }
+          if (value == filter_truth::unknown) {
+            result = filter_truth::unknown;
+          }
+          continue;
+        }
+        if (value == filter_truth::true_value) {
+          result = filter_truth::true_value;
+          break;
+        }
+        if (value == filter_truth::unknown) {
+          result = filter_truth::unknown;
+        }
+      }
+      filter_truth_stack_[first_operand] = result;
+      depth = first_operand + 1;
+    }
+    return filter_truth_stack_[0];
   }
 
   bool field_matches_filter(size_t filter_index) const {
@@ -1661,6 +1743,10 @@ private:
     }
     case row_filter_kind::none:
       return true;
+    case row_filter_kind::all_of:
+    case row_filter_kind::any_of:
+    case row_filter_kind::negate:
+      return false;
     }
     return false;
   }
@@ -1890,6 +1976,8 @@ private:
   uint32_t current_column_ = 0;
   std::vector<bool> row_filter_seen_;
   std::vector<bool> row_filter_matched_;
+  std::vector<filter_truth> filter_truth_stack_;
+  bool has_boolean_operators_ = false;
   bool field_in_arena_ = false;
   mutable bool complete_quoted_field_has_escape_ = false;
   bool allow_direct_projection_ = false;
@@ -1959,8 +2047,8 @@ bool valid_projection(csv_parser& parser, const uint32_t* selected_columns, uint
 bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t filter_count,
                        const uint8_t* values_data, uint64_t values_data_len, const uint32_t* value_offsets,
                        uint64_t total_value_count, std::vector<row_filter>& filters) {
-  if (filter_count > max_filter_count) {
-    parser.set_error("filter count exceeds maximum of 2024");
+  if (filter_count > max_filter_program_length) {
+    parser.set_error("filter program length exceeds maximum of 4096");
     return false;
   }
   if (filter_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max() / 4)) {
@@ -2010,7 +2098,10 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
 
   filters.clear();
   filters.reserve(static_cast<size_t>(filter_count));
+  uint64_t leaf_filter_count = 0;
   uint64_t regex_filter_count = 0;
+  size_t expression_stack_depth = 0;
+  bool has_boolean_operators = false;
   for (size_t index = 0; index < static_cast<size_t>(filter_count); ++index) {
     const size_t descriptor_offset = index * 4;
     const uint32_t raw_kind = descriptors[descriptor_offset];
@@ -2019,10 +2110,35 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
     const uint32_t value_count = descriptors[descriptor_offset + 3];
 
     if (raw_kind < static_cast<uint32_t>(row_filter_kind::equals) ||
-        raw_kind > static_cast<uint32_t>(row_filter_kind::noin)) {
+        raw_kind > static_cast<uint32_t>(row_filter_kind::negate)) {
       parser.set_error("filter kind is invalid");
       return false;
     }
+
+    const auto kind = static_cast<row_filter_kind>(raw_kind);
+    if (is_boolean_operator(kind)) {
+      // Boolean descriptors form a postfix program and store their arity in the column slot.
+      has_boolean_operators = true;
+      if (first_value_index != 0 || value_count != 0 || column == 0 ||
+          (kind == row_filter_kind::negate && column != 1) || column > expression_stack_depth) {
+        parser.set_error("filter Boolean operator is invalid");
+        return false;
+      }
+      expression_stack_depth -= static_cast<size_t>(column) - 1;
+      filters.push_back(row_filter{
+          .enabled = true,
+          .kind = kind,
+          .column = column,
+      });
+      continue;
+    }
+
+    ++leaf_filter_count;
+    if (leaf_filter_count > max_filter_count) {
+      parser.set_error("filter count exceeds maximum of 2024");
+      return false;
+    }
+    ++expression_stack_depth;
     if (!valid_column_index(parser, column)) {
       return false;
     }
@@ -2030,8 +2146,6 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
       parser.set_error("filter descriptor value range is invalid");
       return false;
     }
-
-    const auto kind = static_cast<row_filter_kind>(raw_kind);
     if (kind != row_filter_kind::in && kind != row_filter_kind::noin && value_count != 1) {
       parser.set_error("equals, neq, starts-with, and regex filters require exactly one value");
       return false;
@@ -2066,6 +2180,10 @@ bool build_row_filters(csv_parser& parser, const uint32_t* descriptors, uint64_t
       filter.value_len = end - start;
     }
     filters.push_back(filter);
+  }
+  if (has_boolean_operators && expression_stack_depth != 1) {
+    parser.set_error("filter Boolean program must produce one result");
+    return false;
   }
   return true;
 }

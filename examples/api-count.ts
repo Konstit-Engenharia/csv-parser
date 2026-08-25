@@ -8,7 +8,7 @@ import {
 } from './config.ts';
 
 /**
- * Count all rows, then demonstrate the three native filter shapes supported by
+ * Count all rows, then demonstrate three native filter conditions supported by
  * `count()`. Counting does not materialize row arrays, so it is the preferred
  * API when only the cardinality is needed.
  */
@@ -23,23 +23,24 @@ console.log({
 });
 
 if (FILTER_VALUE !== undefined) {
+  const filterColumn = csv.column(FILTER_COLUMN);
   console.log({
     // Filter columns are zero-based physical indexes in the source CSV.
     equals: await csv.count(FILE, {
       ...baseOptions,
-      where: { column: FILTER_COLUMN, equals: FILTER_VALUE },
+      where: filterColumn.equals(FILTER_VALUE),
     }),
     // Prefix matching compares encoded field bytes without allocating a
     // JavaScript string for every candidate row.
     startsWith: await csv.count(FILE, {
       ...baseOptions,
-      where: { column: FILTER_COLUMN, startsWith: FILTER_VALUE },
+      where: filterColumn.startsWith(FILTER_VALUE),
     }),
-    // `in` matches several exact values in one scan. This one-element input
+    // `isOneOf` matches several exact values in one scan. This one-element input
     // intentionally makes its result directly comparable to `equals`.
-    in: await csv.count(FILE, {
+    isOneOf: await csv.count(FILE, {
       ...baseOptions,
-      where: { column: FILTER_COLUMN, in: [FILTER_VALUE] },
+      where: filterColumn.isOneOf([FILTER_VALUE]),
     }),
   });
 }

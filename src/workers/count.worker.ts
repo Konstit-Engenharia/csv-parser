@@ -1,48 +1,8 @@
 import { createReadStream } from 'node:fs';
 import { DEFAULT_CHUNK_SIZE } from '../native.js';
 import { NativeCsvParser } from '../parser.js';
-import type {
-  CsvEncoding,
-  CsvRegex,
-} from '../types.js';
-
-interface WorkerEqualsFilterMessage {
-  column: number;
-  value: Uint8Array;
-}
-
-interface WorkerInFilterMessage {
-  column: number;
-  values: Uint8Array[];
-}
-
-interface WorkerNotEqualsFilterMessage {
-  column: number;
-  notEquals: Uint8Array;
-}
-
-interface WorkerNotInFilterMessage {
-  column: number;
-  notIn: Uint8Array[];
-}
-
-interface WorkerStartsWithFilterMessage {
-  column: number;
-  prefix: Uint8Array;
-}
-
-interface WorkerRegexFilterMessage {
-  column: number;
-  regex: CsvRegex;
-}
-
-type WorkerFilterMessage =
-  | WorkerEqualsFilterMessage
-  | WorkerInFilterMessage
-  | WorkerNotInFilterMessage
-  | WorkerNotEqualsFilterMessage
-  | WorkerRegexFilterMessage
-  | WorkerStartsWithFilterMessage;
+import type { CsvEncoding } from '../types.js';
+import type { WorkerFilterProgramEntry } from '../worker-filter.js';
 
 interface WorkerCountMessage {
   chunkSize?: number;
@@ -54,7 +14,7 @@ interface WorkerCountMessage {
     end: number;
   };
   shardIndex: number;
-  filters?: WorkerFilterMessage[];
+  filterProgram?: WorkerFilterProgramEntry[];
 }
 
 addEventListener('message', async (event: MessageEvent<WorkerCountMessage>) => {
@@ -89,25 +49,25 @@ async function countShard(message: WorkerCountMessage): Promise<number> {
         start: message.shard.start,
       })
     ) {
-      rows += writeCount(parser, chunk as Buffer, message.filters);
+      rows += writeCount(parser, chunk as Buffer, message.filterProgram);
     }
-    rows += finishCount(parser, message.filters);
+    rows += finishCount(parser, message.filterProgram);
     return rows;
   } finally {
     parser.close();
   }
 }
 
-function writeCount(parser: NativeCsvParser, chunk: Buffer, filters: WorkerFilterMessage[] | undefined): number {
-  if (filters === undefined) {
+function writeCount(parser: NativeCsvParser, chunk: Buffer, program: WorkerFilterProgramEntry[] | undefined): number {
+  if (program === undefined) {
     return parser.writeCount(chunk);
   }
-  return parser.writeCountWhereAll(chunk, filters);
+  return parser.writeCountWhere(chunk, program);
 }
 
-function finishCount(parser: NativeCsvParser, filters: WorkerFilterMessage[] | undefined): number {
-  if (filters === undefined) {
+function finishCount(parser: NativeCsvParser, program: WorkerFilterProgramEntry[] | undefined): number {
+  if (program === undefined) {
     return parser.endCount();
   }
-  return parser.endCountWhereAll(filters);
+  return parser.endCountWhere(program);
 }

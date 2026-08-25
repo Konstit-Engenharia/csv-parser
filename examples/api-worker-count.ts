@@ -22,7 +22,7 @@ const count = await csv.count(FILE, {
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   workerCount: WORKERS,
-  where: FILTER_VALUE === undefined ? undefined : { column: FILTER_COLUMN, equals: FILTER_VALUE },
+  where: FILTER_VALUE === undefined ? undefined : csv.column(FILTER_COLUMN).equals(FILTER_VALUE),
 });
 
 // Each worker returns a shard-local count. The main thread sums those values

@@ -83,7 +83,7 @@ describe('automatic delimiter detection', () => {
     }
 
     expect(rows).toEqual(tabRows);
-    expect(await csv.count(tabPath, { delimiter: 'auto', where: { column: 2, equals: 'br' } })).toBe(1);
+    expect(await csv.count(tabPath, { delimiter: 'auto', where: csv.column(2).equals('br') })).toBe(1);
     expect(await csv.count(join(temporaryDirectory, 'large.tsv'), { chunkSize: 1024, delimiter: 'auto' })).toBe(10_001);
   });
 
@@ -136,9 +136,9 @@ describe('automatic delimiter detection', () => {
       ['2', 'us'],
     ]);
     expect(await countCsvFile(semicolonPath, { delimiter: 'auto' })).toBe(3);
-    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: { column: 2, equals: 'br' } })).toBe(1);
-    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: { column: 2, in: ['br', 'us'] } })).toBe(2);
-    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: { column: 1, startsWith: 'A' } })).toBe(1);
+    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: csv.column(2).equals('br') })).toBe(1);
+    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: csv.column(2).isOneOf(['br', 'us']) })).toBe(2);
+    expect(await csv.count(semicolonPath, { delimiter: 'auto', where: csv.column(1).startsWith('A') })).toBe(1);
   });
 
   test('uses a confirmed extension hint to resolve a probe tie', async () => {

@@ -319,6 +319,36 @@ describe('csv CLI', () => {
       },
       name: 'AND',
     },
+    {
+      expected: '3\n',
+      filter: {
+        any: [
+          { column: 2, equals: 'SP' },
+          { column: 1, equals: 'Joao' },
+        ],
+      },
+      name: 'OR',
+    },
+    {
+      expected: '2\n',
+      filter: { not: { column: 2, equals: 'SP' } },
+      name: 'NOT',
+    },
+    {
+      expected: '2\n',
+      filter: {
+        all: [
+          {
+            any: [
+              { column: 2, equals: 'SP' },
+              { column: 2, equals: 'RJ' },
+            ],
+          },
+          { not: { column: 1, startsWith: 'B' } },
+        ],
+      },
+      name: 'nested Boolean',
+    },
   ] as const;
 
   for (const { expected, filter, name } of filterCases) {
@@ -708,7 +738,8 @@ describe('csv CLI', () => {
     }
     expect(stdout).toContain('--where-eq 2=SP');
     expect(stdout).toContain('--where-regex \'1=/^ana/i\'');
-    expect(stdout).toContain('All filter clauses use AND.');
+    expect(stdout).toContain('Friendly filter clauses use AND.');
+    expect(stdout).toContain('Advanced JSON can nest all, any, and not.');
     expect(stdout).toContain('Strict mode cannot use filter options.');
     expect(stdout).not.toContain('--worker-count');
     expect(result.stderr.toString()).toBe('');
@@ -889,6 +920,21 @@ describe('csv CLI', () => {
       arguments: ['--where', '{"all":[]}'],
       message: '--where.all must be a non-empty array',
       name: 'an empty AND filter',
+    },
+    {
+      arguments: ['--where', '{"any":[]}'],
+      message: '--where.any must be a non-empty array',
+      name: 'an empty OR filter',
+    },
+    {
+      arguments: ['--where', '{"not":[]}'],
+      message: '--where.not must be a JSON object',
+      name: 'an invalid NOT filter',
+    },
+    {
+      arguments: ['--where', JSON.stringify(nestedNotFilter(129))],
+      message: '--where nesting exceeds 128',
+      name: 'excessive filter nesting',
     },
     {
       arguments: ['--where', '{"column":2,"in":[]}'],
@@ -1096,6 +1142,14 @@ const countOptionNames = {
   '--where-regex': true,
   '--zip-entry': true,
 };
+
+function nestedNotFilter(depth: number): unknown {
+  let filter: unknown = { column: 0, equals: 'id' };
+  for (let index = 0; index < depth; ++index) {
+    filter = { not: filter };
+  }
+  return filter;
+}
 
 function expectUsageError(result: ReturnType<typeof runCli>, message: string, command = 'count'): void {
   expect(result.exitCode).toBe(2);

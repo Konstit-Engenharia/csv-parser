@@ -31,6 +31,7 @@ const SELECTED_COLUMNS = (Bun.env['CSV_BENCH_COLUMNS'] ?? '0,4,19')
   .filter((value) => Number.isInteger(value) && value >= 0);
 const FILTER_COLUMN = Number(Bun.env['CSV_BENCH_FILTER_COLUMN'] ?? 19);
 const FILTER_VALUE = Bun.env['CSV_BENCH_FILTER_VALUE'] ?? 'SP';
+const FILTER_EQUALS = csv.column(FILTER_COLUMN).equals(FILTER_VALUE);
 const bytes = statSync(FILE).size;
 
 Bun.gc(true);
@@ -76,7 +77,7 @@ async function runMode(mode: ProfileMode): Promise<number> {
       return csv.count(FILE, {
         chunkSize: CHUNK_SIZE,
         delimiter: DELIMITER,
-        where: { column: FILTER_COLUMN, equals: FILTER_VALUE },
+        where: FILTER_EQUALS,
       });
     case 'project-filter-equals-native':
       return countNativeProjectedFilteredRows();

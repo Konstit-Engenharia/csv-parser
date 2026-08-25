@@ -11,9 +11,11 @@ import {
   normalizeEqualsFilter,
   normalizeFixedColumnsCount,
   normalizeInFilter,
+  normalizeNativeFilterProgram,
   normalizeNativeFilters,
   normalizeStartsWithFilter,
 } from './normalize.js';
+import type { CsvNativeFilterProgramEntry } from './normalize.js';
 import type {
   CsvEqualsFilter,
   CsvInFilter,
@@ -209,6 +211,67 @@ export class NativeCsvParser {
     return new NativeCsvBatch(batch);
   }
 
+  writeProjectedBatchWhere(
+    chunk: NodeJS.TypedArray | DataView,
+    selectedColumns: readonly number[] | undefined,
+    program: readonly CsvNativeFilterProgramEntry[],
+    final = false,
+  ): NativeCsvBatch {
+    this.#rejectStrictUnsupported('projected batches');
+    if (chunk.byteLength === 0 && final) {
+      return this.endProjectedBatchWhere(selectedColumns, program);
+    }
+
+    const handle = this.#requireHandle();
+    const input = normalizeChunk(chunk);
+    const columns = normalizeColumns(selectedColumns);
+    const normalized = normalizeNativeFilterProgram(program);
+    const batch = native.symbols.csv_parser_write_projected_batch_where_all(
+      handle,
+      input,
+      input,
+      final,
+      selectedColumns !== undefined,
+      columns,
+      BigInt(selectedColumns?.length ?? 0),
+      normalized.descriptors,
+      BigInt(normalized.filterCount),
+      normalized.valuesData,
+      normalized.valuesData,
+      normalized.valueOffsets,
+      BigInt(normalized.valueCount),
+    );
+    if (batch === null) {
+      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
+    }
+    return new NativeCsvBatch(batch);
+  }
+
+  endProjectedBatchWhere(
+    selectedColumns: readonly number[] | undefined,
+    program: readonly CsvNativeFilterProgramEntry[],
+  ): NativeCsvBatch {
+    this.#rejectStrictUnsupported('projected batches');
+    const columns = normalizeColumns(selectedColumns);
+    const normalized = normalizeNativeFilterProgram(program);
+    const batch = native.symbols.csv_parser_finish_projected_batch_where_all(
+      this.#requireHandle(),
+      selectedColumns !== undefined,
+      columns,
+      BigInt(selectedColumns?.length ?? 0),
+      normalized.descriptors,
+      BigInt(normalized.filterCount),
+      normalized.valuesData,
+      normalized.valuesData,
+      normalized.valueOffsets,
+      BigInt(normalized.valueCount),
+    );
+    if (batch === null) {
+      throw new Error(`native CSV parser failed: ${this.#lastError()}`);
+    }
+    return new NativeCsvBatch(batch);
+  }
+
   writeCount(chunk: NodeJS.TypedArray | DataView, final = false): number {
     this.#rejectStrictUnsupported('count');
     if (chunk.byteLength === 0 && final) {
@@ -375,6 +438,51 @@ export class NativeCsvParser {
   endCountWhereAll(filters: readonly CsvNativeFilter[]): number {
     this.#rejectStrictUnsupported('count filters');
     const normalized = normalizeNativeFilters(filters);
+    const count = native.symbols.csv_parser_finish_count_where_all(
+      this.#requireHandle(),
+      normalized.descriptors,
+      BigInt(normalized.filterCount),
+      normalized.valuesData,
+      normalized.valuesData,
+      normalized.valueOffsets,
+      BigInt(normalized.valueCount),
+    );
+    this.#throwIfNativeError();
+    return u64ToSafeNumber(count, 'CSV filtered row count');
+  }
+
+  writeCountWhere(
+    chunk: NodeJS.TypedArray | DataView,
+    program: readonly CsvNativeFilterProgramEntry[],
+    final = false,
+  ): number {
+    this.#rejectStrictUnsupported('count filters');
+    if (chunk.byteLength === 0 && final) {
+      return this.endCountWhere(program);
+    }
+
+    const normalized = normalizeNativeFilterProgram(program);
+    const handle = this.#requireHandle();
+    const input = normalizeChunk(chunk);
+    const count = native.symbols.csv_parser_write_count_where_all(
+      handle,
+      input,
+      input,
+      final,
+      normalized.descriptors,
+      BigInt(normalized.filterCount),
+      normalized.valuesData,
+      normalized.valuesData,
+      normalized.valueOffsets,
+      BigInt(normalized.valueCount),
+    );
+    this.#throwIfNativeError();
+    return u64ToSafeNumber(count, 'CSV filtered row count');
+  }
+
+  endCountWhere(program: readonly CsvNativeFilterProgramEntry[]): number {
+    this.#rejectStrictUnsupported('count filters');
+    const normalized = normalizeNativeFilterProgram(program);
     const count = native.symbols.csv_parser_finish_count_where_all(
       this.#requireHandle(),
       normalized.descriptors,
