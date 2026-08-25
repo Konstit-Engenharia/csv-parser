@@ -4,6 +4,8 @@ import {
   COLUMNS,
   DELIMITER,
   FILE,
+  FILTER_COLUMN,
+  FILTER_VALUE,
   LIMIT,
 } from './config.ts';
 
@@ -17,37 +19,36 @@ import {
  */
 let printed = 0;
 
-await csv.withBatches(
-  FILE,
-  {
+for await (
+  using batch of csv.batches(FILE, {
     chunkSize: CHUNK_SIZE,
     delimiter: DELIMITER,
-  },
-  (batch) => {
-    // `withBatches()` closes each batch after this callback settles, including
-    // when the callback throws. The row view itself is reused as iteration
-    // advances, which keeps allocation pressure low on this hot path.
-    batch.forEachRow((row) => {
-      console.log({
-        // `rowIndex` is local to this batch, not a file-global row number.
-        rowIndex: row.rowIndex,
-        fieldCount: row.fieldCount,
-        // `pick()` accepts zero-based physical source-column indexes and only
-        // decodes the requested fields. A missing field becomes an empty string.
-        values: row.pick(COLUMNS),
-        // `bytes()` avoids UTF-8 decoding. It returns a borrowed view into the
-        // batch, so only inspect or copy it while this callback is active.
-        firstFieldBytes: row.bytes(COLUMNS[0] ?? 0)?.byteLength ?? 0,
-        // Ranges are half-open byte offsets [start, end) within batch data.
-        firstFieldRange: row.range(COLUMNS[0] ?? 0),
-      });
-      printed += 1;
-      if (printed >= LIMIT) {
-        // This is a short-lived CLI example, so a hard process exit is used to
-        // stop `forEachRow()` immediately. Long-running applications should use
-        // cooperative cancellation so their own cleanup can complete.
-        process.exit(0);
-      }
+    // High-level filters run before rows are exposed through the native batch.
+    where: FILTER_VALUE === undefined ? undefined : csv.column(FILTER_COLUMN).equals(FILTER_VALUE),
+  })
+) {
+  // The row view is reused as iteration advances. Copy data that must outlive
+  // this callback or the current batch.
+  batch.forEachRow((row) => {
+    if (printed >= LIMIT) {
+      return;
+    }
+    console.log({
+      // `rowIndex` is local to this batch, not a file-global row number.
+      rowIndex: row.rowIndex,
+      fieldCount: row.fieldCount,
+      // `pick()` accepts zero-based physical source-column indexes and only
+      // decodes the requested fields. A missing field becomes an empty string.
+      values: row.pick(COLUMNS),
+      // `bytes()` avoids UTF-8 decoding. It returns a borrowed view into the
+      // batch, so only inspect or copy it while this callback is active.
+      firstFieldBytes: row.bytes(COLUMNS[0] ?? 0)?.byteLength ?? 0,
+      // Ranges are half-open byte offsets [start, end) within batch data.
+      firstFieldRange: row.range(COLUMNS[0] ?? 0),
     });
-  },
-);
+    ++printed;
+  });
+  if (printed >= LIMIT) {
+    break;
+  }
+}

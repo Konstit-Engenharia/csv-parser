@@ -7,6 +7,8 @@ import {
   CHUNK_SIZE,
   DELIMITER,
   FILE,
+  FILTER_COLUMN,
+  FILTER_VALUE,
   LIMIT,
 } from './config.ts';
 
@@ -24,6 +26,7 @@ const projectedRowsOptions = defineRowsOptions({
   chunkSize: CHUNK_SIZE,
   columns,
   delimiter: DELIMITER,
+  where: FILTER_VALUE === undefined ? undefined : csv.column(FILTER_COLUMN).equals(FILTER_VALUE),
 });
 
 // Count options do not need a projection because count never materializes row

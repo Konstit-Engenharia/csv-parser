@@ -18,8 +18,8 @@ import {
  */
 const WORKERS = Number(Bun.env['CSV_WORKERS'] ?? 4);
 
-// Worker-row filtering currently supports equality. The physical filter column
-// does not have to appear in the selected output columns.
+// Worker rows support the same native filters and Boolean groups as serial
+// rows. The physical filter column does not have to appear in the projection.
 const rowBatches = csv.rows(FILE, {
   chunkSize: CHUNK_SIZE,
   columns: COLUMNS,

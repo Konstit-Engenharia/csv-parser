@@ -81,6 +81,8 @@
     "example:api:worker-pool": "bun examples/api-worker-pool.ts",
     "example:api:rows": "bun examples/api-rows.ts",
     "example:api:shards": "bun examples/api-shards.ts",
+    "example:api:strict-options": "bun examples/api-strict-options.ts",
+    "example:api:typed-options": "bun examples/api-typed-options.ts",
     "example:api:worker-rows": "bun examples/api-worker-rows.ts",
     "example:first-rows": "bun examples/print-first-rows.ts",
     "profile:cpu": "bun run build:native && mkdir -p profiles && bun --cpu-prof-md --cpu-prof-dir profiles bench/profile-runtime.ts",

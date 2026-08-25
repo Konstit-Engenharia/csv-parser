@@ -1,8 +1,24 @@
 # @konstit/csv
 
-Bun-native CSV parser using `bun:ffi` and the shared library built from `native/csv_parser.cpp`.
+A high-performance CSV toolkit for Bun, powered by a native C++ parser. Stream large and compressed files, select
+columns, apply composable filters, and process data in parallel without loading the complete dataset into memory.
 
-Use it when large CSV files need streaming rows, selected columns, simple filters, or low-allocation row access.
+## Features
+
+- Stream CSV files or parse in-memory buffers without loading a complete file into memory.
+- Read materialized rows, native batches, reusable row views, or columnar batch views.
+- Select and reorder zero-based input columns before materialization.
+- Filter inside the native parser with `equals`, `doesNotEqual`, `isOneOf`, `isNoneOf`, `startsWith`, and RE2 regular expressions.
+- Compose nested native filters with `csv.all()`, `csv.any()`, and `csv.not()`.
+- Process file shards in parallel with Bun workers or reuse workers through `csv.workerPool()`.
+- Find CSV-safe split offsets without breaking quoted records or embedded newlines.
+- Stream gzip, deflate, deflate-raw, Brotli, Zstandard, and ZIP input into serial APIs.
+- Select an exact ZIP entry or use `entry: '*'` when the archive contains exactly one file.
+- Detect comma, tab, semicolon, pipe, colon, caret, and tilde delimiters for serial file operations.
+- Decode UTF-8 and Latin-1 input and emit UTF-8 strings.
+- Validate strict quote syntax, fixed column counts, headers, and minimum data-row counts.
+- Use typed option helpers, immutable filters, and explicit resource disposal from TypeScript.
+- Run native C++20 parsing with AVX2 on x64 and NEON on ARM64.
 
 ## Setup
 
@@ -82,85 +98,14 @@ for await (
 
 In this repo, `corpus/large/example.csv` is semicolon-delimited. Pass `delimiter: ';'` for examples and benchmarks that read it.
 
-## CLI
-
-Count every CSV record in a file, including the header row:
-
-```sh
-bunx @konstit/csv count data.csv
-bunx @konstit/csv count data.csv --delimiter ';' --chunk-size 262144
-```
-
-With Bun 1.4 or newer, install the command globally and use its shorter form:
-
-```sh
-bun add --global @konstit/csv
-csv count data.csv
-```
-
-Stream parsed records as normalized UTF-8 CSV:
-
-```sh
-csv lines data.csv
-csv lines data.csv --limit 10
-csv lines data.csv --json --limit 10
-csv lines data.csv --columns 0,2 --where-eq 3=active --limit 10
-csv lines input.tsv --delimiter $'\t' --output-delimiter ',' > selected.csv
-```
-
-`--limit N` stops after matching output record `N`, numbered from 1. A quoted field can contain embedded newlines, but
-its enclosing record counts as one. The header counts only when it is emitted. Early stop validates only the consumed
-input prefix, so `--limit` cannot be combined with `--min-data-rows`. With `--strict`, a limit requires a fixed input
-delimiter and either an omitted chunk size or `--chunk-size 1`; the CLI uses one-byte chunks to avoid strict read-ahead.
-`--strict` with `--limit` cannot use `--compression`, including `auto`.
-
-`lines` writes normalized UTF-8 CSV, not the original source bytes. The default output uses commas, LF record endings,
-and standard quote escaping. Use `--output-delimiter` to select another safe ASCII delimiter. `--columns` selects the
-output fields and their order. Filters still use the original input column indexes.
-
-Use `--json` for newline-delimited JSON. Each output line is one array of strings, including the header when it is
-emitted. JSON output escapes embedded field newlines and quotes. Stdout contains only JSON records. Diagnostics remain
-on stderr. `--json` cannot be combined with `--output-delimiter`.
-
-The CLI uses one process and exposes the serial file, parser, projection, and filter fields as flags. It does not expose
-`workerCount`. Run `csv count --help` or `csv lines --help` for the complete list. Friendly filter flags use
-`column=value`. Repeat `--where-in` or `--where-noin` for each value. Different filter clauses combine with AND. CLI
-filter values are strings; use the TypeScript API for `workerCount` and binary `Buffer` or `Uint8Array` values.
-
-```sh
-csv count data.csv --delimiter ';' --where-eq 2=SP
-csv count data.csv --where-neq 2=SP
-csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
-csv count data.csv --where-noin 2=SP --where-noin 2=RJ
-csv count data.csv --where-regex '1=/^A/i'
-csv lines data.csv --where-in 2=SP --where-in 2=RJ --limit 25
-csv lines data.csv --columns 0,1 --json --limit 25
-```
-
-The large corpus file in this repository is semicolon-delimited:
-
-```sh
-csv lines corpus/large/example.csv --delimiter ';' --limit 10
-csv lines corpus/large/example.csv --delimiter ';' --columns 0,1,2 --limit 100 > sample.csv
-```
-
-For generated or advanced CLI filters, `--where <json>` accepts a CLI-only serializable filter shape. This JSON shape
-is separate from the TypeScript filter API:
-
-```sh
-csv count data.csv --where '{"all":[{"any":[{"column":2,"equals":"SP"},{"column":2,"equals":"RJ"}]},{"not":{"column":1,"startsWith":"B"}}]}'
-```
-
-CLI JSON filters can nest `all`, `any`, and `not`. Friendly filter flags still combine with AND.
-
-## High-Level API
+## Library API
 
 Import the `csv` namespace for file-oriented helpers:
 
 ```ts
 import { csv } from '@konstit/csv';
 
-const rows = await csv.count('data.csv', { delimiter: ';' });
+const rowCount = await csv.count('data.csv', { delimiter: ';' });
 
 const selected = csv.rows('data.csv', {
   delimiter: ';',
@@ -194,6 +139,8 @@ Supported helpers:
 - `csv.workerPool(path, options)` creates a reusable pool for repeated parallel operations.
 - `csv.findCsvSafeSplitOffsets(path, count, options)` and `csv.findCsvSafeShards(path, count, options)` split files at record boundaries.
 
+### Filters
+
 Filters select a zero-based physical column first. Each condition method returns a complete, validated, immutable filter.
 The selected column is reusable, and one filter can be reused across row, count, and worker APIs:
 
@@ -208,6 +155,7 @@ await csv.count('data.csv', { where: isSouthEast, workerCount: 4 });
 
 The condition methods are `equals`, `doesNotEqual`, `isOneOf`, `isNoneOf`, `startsWith`, and `hasMatch`. Binary
 `Buffer` and `Uint8Array` operands are copied during construction so later caller mutation cannot change a filter.
+The `where` option accepts only filters created by this API; TypeScript object-literal predicates are not supported.
 If a row does not contain the selected column, it does not match, including for `doesNotEqual` and `isNoneOf`.
 Use `hasMatch()` for regular expressions:
 
@@ -408,13 +356,90 @@ using batch = parser.writeBatch(Buffer.from('1;Ana\n'), true);
 console.log(batch.rows());
 ```
 
+## CLI
+
+Count every CSV record in a file, including the header row:
+
+```sh
+bunx @konstit/csv count data.csv
+bunx @konstit/csv count data.csv --delimiter ';' --chunk-size 262144
+```
+
+With Bun 1.4 or newer, install the command globally and use its shorter form:
+
+```sh
+bun add --global @konstit/csv
+csv count data.csv
+```
+
+Stream parsed records as normalized UTF-8 CSV:
+
+```sh
+csv lines data.csv
+csv lines data.csv --limit 10
+csv lines data.csv --json --limit 10
+csv lines data.csv --columns 0,2 --where-eq 3=active --limit 10
+csv lines input.tsv --delimiter $'\t' --output-delimiter ',' > selected.csv
+```
+
+`--limit N` stops after matching output record `N`, numbered from 1. A quoted field can contain embedded newlines, but
+its enclosing record counts as one. The header counts only when it is emitted. Early stop validates only the consumed
+input prefix, so `--limit` cannot be combined with `--min-data-rows`. With `--strict`, a limit requires a fixed input
+delimiter and either an omitted chunk size or `--chunk-size 1`; the CLI uses one-byte chunks to avoid strict read-ahead.
+`--strict` with `--limit` cannot use `--compression`, including `auto`.
+
+`lines` writes normalized UTF-8 CSV, not the original source bytes. The default output uses commas, LF record endings,
+and standard quote escaping. Use `--output-delimiter` to select another safe ASCII delimiter. `--columns` selects the
+output fields and their order. Filters still use the original input column indexes.
+
+Use `--json` for newline-delimited JSON. Each output line is one array of strings, including the header when it is
+emitted. JSON output escapes embedded field newlines and quotes. Stdout contains only JSON records. Diagnostics remain
+on stderr. `--json` cannot be combined with `--output-delimiter`.
+
+The CLI uses one process and exposes the serial file, parser, projection, and filter fields as flags. It does not expose
+`workerCount`. Run `csv count --help` or `csv lines --help` for the complete list. Friendly filter flags use
+`column=value`. Repeat `--where-in` or `--where-noin` for each value. Different filter clauses combine with AND. CLI
+filter values are strings; use the TypeScript API for `workerCount` and binary `Buffer` or `Uint8Array` values.
+
+```sh
+csv count data.csv --delimiter ';' --where-eq 2=SP
+csv count data.csv --where-neq 2=SP
+csv count data.csv --where-in 2=SP --where-in 2=RJ --where-prefix 1=A
+csv count data.csv --where-noin 2=SP --where-noin 2=RJ
+csv count data.csv --where-regex '1=/^A/i'
+csv lines data.csv --where-in 2=SP --where-in 2=RJ --limit 25
+csv lines data.csv --columns 0,1 --json --limit 25
+```
+
+The large corpus file in this repository is semicolon-delimited:
+
+```sh
+csv lines corpus/large/example.csv --delimiter ';' --limit 10
+csv lines corpus/large/example.csv --delimiter ';' --columns 0,1,2 --limit 100 > sample.csv
+```
+
+For generated or advanced CLI filters, `--where <json>` accepts a CLI-only serializable filter shape. This JSON shape
+is separate from the TypeScript filter API:
+
+```sh
+csv count data.csv --where '{"all":[{"any":[{"column":2,"equals":"SP"},{"column":2,"equals":"RJ"}]},{"not":{"column":1,"startsWith":"B"}}]}'
+```
+
+CLI JSON filters can nest `all`, `any`, and `not`. Friendly filter flags still combine with AND.
+
 ## Examples
 
 ```sh
-bun run example:api:rows
-bun run example:api:batches
-bun run example:api:count
 bun run example:first-rows
+bun run example:api:rows
+bun run example:api:count
+bun run example:api:batches
+bun run example:api:typed-options
+bun run example:api:strict-options
+bun run example:api:worker-count
+bun run example:api:worker-rows
+bun run example:api:worker-pool
+bun run example:api:shards
 ```
 
 Example environment variables:

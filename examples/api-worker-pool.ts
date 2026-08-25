@@ -3,6 +3,8 @@ import {
   CHUNK_SIZE,
   DELIMITER,
   FILE,
+  FILTER_COLUMN,
+  FILTER_VALUE,
 } from './config.ts';
 
 /**
@@ -19,6 +21,7 @@ using pool = csv.workerPool(FILE, {
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,
   workerCount: WORKERS,
+  where: FILTER_VALUE === undefined ? undefined : csv.column(FILTER_COLUMN).equals(FILTER_VALUE),
 });
 
 // The second call reuses the pool's record-safe shards and count workers. Pool

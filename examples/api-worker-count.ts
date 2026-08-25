@@ -16,8 +16,8 @@ import {
 // for the configured parallelism.
 const WORKERS = Number(Bun.env['CSV_WORKERS'] ?? 4);
 
-// Parallel count supports equals, starts-with, and membership filters; this
-// example uses equality.
+// The same immutable filter API works in serial calls, one-shot workers, and
+// reusable worker pools. Each worker evaluates it in the native parser.
 const count = await csv.count(FILE, {
   chunkSize: CHUNK_SIZE,
   delimiter: DELIMITER,

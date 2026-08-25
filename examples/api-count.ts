@@ -8,7 +8,7 @@ import {
 } from './config.ts';
 
 /**
- * Count all rows, then demonstrate three native filter conditions supported by
+ * Count all rows, then demonstrate native filter conditions supported by
  * `count()`. Counting does not materialize row arrays, so it is the preferred
  * API when only the cardinality is needed.
  */
@@ -24,11 +24,19 @@ console.log({
 
 if (FILTER_VALUE !== undefined) {
   const filterColumn = csv.column(FILTER_COLUMN);
+  const equals = filterColumn.equals(FILTER_VALUE);
+  const equalsOrEmpty = csv.any(equals, filterColumn.equals(''));
+  const composed = csv.all(equalsOrEmpty, csv.not(filterColumn.equals('')));
+
   console.log({
     // Filter columns are zero-based physical indexes in the source CSV.
     equals: await csv.count(FILE, {
       ...baseOptions,
-      where: filterColumn.equals(FILTER_VALUE),
+      where: equals,
+    }),
+    doesNotEqual: await csv.count(FILE, {
+      ...baseOptions,
+      where: filterColumn.doesNotEqual(FILTER_VALUE),
     }),
     // Prefix matching compares encoded field bytes without allocating a
     // JavaScript string for every candidate row.
@@ -42,5 +50,22 @@ if (FILTER_VALUE !== undefined) {
       ...baseOptions,
       where: filterColumn.isOneOf([FILTER_VALUE]),
     }),
+    isNoneOf: await csv.count(FILE, {
+      ...baseOptions,
+      where: filterColumn.isNoneOf([FILTER_VALUE]),
+    }),
+    hasMatch: await csv.count(FILE, {
+      ...baseOptions,
+      where: filterColumn.hasMatch(new RegExp(`^${escapeRegExp(FILTER_VALUE)}$`, 'u')),
+    }),
+    // Boolean groups are immutable and reusable across serial and worker APIs.
+    composed: await csv.count(FILE, {
+      ...baseOptions,
+      where: composed,
+    }),
   });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
