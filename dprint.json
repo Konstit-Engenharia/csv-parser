@@ -25,6 +25,10 @@
   "markdown": {},
   "toml": {},
   "excludes": [
+    "**/prebuilds",
+    "**/build",
+    "**/dist",
+    "**/builds",
     "**/.cache",
     "**/.vscode",
     "**/bin",
