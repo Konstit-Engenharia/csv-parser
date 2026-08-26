@@ -66,9 +66,10 @@ bun run verify:native-package
 
 This local route produces checksum metadata only. Release publication requires the attested workflow output.
 
-Normal CI verifies this manifest without rebuilding every tracked target. Package release jobs do not rebuild native
-code. Release publication also verifies that each committed binary was signed by the `Update prebuilds` workflow and
-that its attested source inputs match the release commit.
+Normal CI verifies and tests the tracked Linux prebuild without compiling native code. A separate `Native source`
+workflow builds and tests Linux x64 only when native source or build files change. Package release jobs do not rebuild
+native code. Release publication also verifies that each committed binary was signed by the `Update prebuilds` workflow
+and that its attested source inputs match the release commit.
 
 The supported native targets are Clang C++20 builds for macOS ARM64/x64 and Linux x64. ARM64 requires NEON, and x64
 requires AVX2. CPUs without those instruction sets are not supported. Target-specific configuration is available through

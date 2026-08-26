@@ -1,0 +1,83 @@
+name: Native source
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/native-source.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'docker/**'
+      - 'native/**'
+      - 'scripts/build-native*.ts'
+      - 'scripts/native-target.ts'
+      - 'scripts/test-native*.ts'
+      - 'toolchains/**'
+  pull_request:
+    paths:
+      - '.github/workflows/native-source.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'docker/**'
+      - 'native/**'
+      - 'scripts/build-native*.ts'
+      - 'scripts/native-target.ts'
+      - 'scripts/test-native*.ts'
+      - 'toolchains/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Linux source checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install native toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang cmake git ninja-build
+
+      - name: Cache FetchContent sources
+        uses: actions/cache@v4
+        with:
+          path: .cache/fetchcontent
+          key: native-source-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'toolchains/*.cmake') }}
+          restore-keys: |
+            native-source-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check native format
+        run: bun run fmt:native:check
+
+      - name: Build and test native C++
+        run: bun scripts/test-native.ts
+
+      - name: Test Bun API against source build
+        run: bun run test:source-native
+
+      - name: Native sanitizer fuzz
+        run: bun run test:native:sanitize
+
+      - name: Benchmark regression smoke
+        env:
+          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
+        run: bun bench/regression-smoke.ts
+
+      - name: csv-parser comparison guard
+        env:
+          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
+        run: bun bench/csv-parser/regression-guard.ts

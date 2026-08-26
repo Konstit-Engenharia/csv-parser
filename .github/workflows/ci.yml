@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    name: Bun native checks
+    name: Bun checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -19,17 +19,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-
-      - name: Install native toolchain
-        run: sudo apt-get update && sudo apt-get install -y clang cmake git ninja-build
-
-      - name: Cache FetchContent sources
-        uses: actions/cache@v4
-        with:
-          path: .cache/fetchcontent
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'toolchains/*.cmake') }}
-          restore-keys: |
-            fetchcontent-${{ runner.os }}-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -52,26 +41,11 @@ jobs:
       - name: Lint
         run: bun run lint
 
-      - name: Build native parser
-        run: bun run build:native
-
       - name: Test Bun API
-        env:
-          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
         run: bun run test
 
-      - name: Test native C++
-        run: bun scripts/test-native.ts
-
-      - name: Native sanitizer fuzz
-        run: bun run test:native:sanitize
-
       - name: Benchmark regression smoke
-        env:
-          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
         run: bun bench/regression-smoke.ts
 
       - name: csv-parser comparison guard
-        env:
-          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
         run: bun bench/csv-parser/regression-guard.ts
