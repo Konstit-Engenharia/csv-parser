@@ -92,9 +92,9 @@ native library not found. Run: bun run build:native
 Package assembly is separate from publication. `bun run build:package` verifies the committed native libraries, uses
 Bun's transpiler for runtime JavaScript, and uses TypeScript for declarations. It does not rebuild native code. The
 JavaScript and declarations are written to `dist/`. The `Package` workflow packs the tracked prebuilds once, attests the
-tarball, and smoke-tests that exact file on Linux x64 and macOS ARM64/x64. A published GitHub release publishes the same
-tested tarball through the protected `npm-publish` environment. Manual workflow runs build and test the artifact without
-publishing it.
+tarball, and smoke-tests that exact file on Linux x64 and macOS ARM64/x64. Run the workflow with a release tag to create a
+draft release, attach the tested tarball, publish the immutable release, and publish the same tarball through the protected
+`npm-publish` environment. Leave the release tag empty to build and test without publishing.
 
 ## Quick Start
 
