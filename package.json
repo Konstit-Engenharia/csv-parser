@@ -50,6 +50,7 @@
     "stage:native": "bun scripts/stage-native.ts",
     "prebuilds:linux": "bun run build:native:linux && bun scripts/stage-native.ts linux-x64",
     "verify:native-package": "bun scripts/verify-native-package.ts",
+    "release": "bun scripts/release.ts",
     "prepack": "bun run build:package",
     "test:source-native": "bun scripts/test-native-build-api.ts",
     "test:native": "bun run build:native && bun scripts/test-native.ts",

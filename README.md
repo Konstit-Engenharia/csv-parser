@@ -96,6 +96,23 @@ tarball, and smoke-tests that exact file on Linux x64 and macOS ARM64/x64. Run t
 draft release, attach the tested tarball, publish the immutable release, and publish the same tarball through the protected
 `npm-publish` environment. Leave the release tag empty to build and test without publishing.
 
+Commit project changes before starting a release, then run one command from a clean `main` branch:
+
+```sh
+bun run release 0.4.2
+```
+
+The release script updates `package.json`, validates the project, creates the release commit and annotated tag, pushes
+both atomically, starts the `Package` workflow, waits for it, and verifies the immutable GitHub release and npm version.
+Use the explicit native mode after the native source commit is already on `origin/main`:
+
+```sh
+bun run release 0.4.2 --update-prebuilds
+```
+
+Native mode runs the manual `Update prebuilds` workflow for all supported targets, downloads and verifies its tracked
+artifact, and commits the complete `prebuilds/` replacement before it continues with the normal release flow.
+
 ## Quick Start
 
 ```ts
