@@ -25,6 +25,8 @@ import {
 } from '../src/files.ts';
 import {
   findNativeLibraryPath,
+  nativeLibraryCandidates,
+  requireConfiguredNativeLibraryPath,
   requireNativeLibraryPath,
   requirePtr,
   u64ToSafeNumber,
@@ -231,8 +233,12 @@ describe('coverage input boundaries', () => {
   test('native numeric guards', () => {
     expect(requirePtr(1n)).toBe(1n);
     expect(() => requirePtr(null)).toThrow();
+    expect(nativeLibraryCandidates('/repo', 'linux-x64', 'so')[0]).toBe('/repo/prebuilds/linux-x64/libcsv_native.so');
     expect(findNativeLibraryPath(['/definitely/missing/native'])).toBeUndefined();
     expect(() => requireNativeLibraryPath(['/definitely/missing/native'])).toThrow('native library not found');
+    expect(requireConfiguredNativeLibraryPath(join(process.cwd(), 'package.json'))).toBe(join(process.cwd(), 'package.json'));
+    expect(() => requireConfiguredNativeLibraryPath('relative/library.so')).toThrow('must be an absolute path');
+    expect(() => requireConfiguredNativeLibraryPath('/definitely/missing/native')).toThrow('is not a file');
     expect(u64ToSafeNumber(3n, 'x')).toBe(3);
     expect(u64ToSafeNumber(3, 'x')).toBe(3);
     expect(() => u64ToSafeNumber(1n << 54n, 'x')).toThrow();

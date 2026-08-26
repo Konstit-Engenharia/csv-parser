@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "files": [
+      ".github/workflows/update-prebuilds.yml",
+      "CMakeLists.txt",
+      "CMakePresets.json",
+      "docker/linux-x64.Dockerfile",
+      "native/csv_parser.cpp",
+      "native/runtime.cpp",
+      "native/zip_reader.cpp",
+      "scripts/build-linux-native.ts",
+      "scripts/build-native-pgo.ts",
+      "scripts/build-native.ts",
+      "scripts/native-build-predicate.ts",
+      "scripts/native-target.ts",
+      "scripts/stage-native.ts",
+      "toolchains/darwin-arm64-clang.cmake",
+      "toolchains/darwin-x64-clang.cmake",
+      "toolchains/linux-x64-clang.cmake"
+    ],
+    "sha256": "2271470de9bcc0e7dbcb8bcdd6933672ace54cd8b5aff7f33c5e814a672a4bde"
+  },
+  "targets": [
+    {
+      "file": "darwin-arm64/libcsv_native.dylib",
+      "sha256": "25cc54aa11cf7dee871013e8bd28adbaebb3d9e85547af7067b8f1c49a11011f",
+      "size": 602080,
+      "target": "darwin-arm64"
+    },
+    {
+      "file": "darwin-x64/libcsv_native.dylib",
+      "sha256": "5d5ef1007e2cc7811750bd3e9d55ea7ca1605ce3617f350fb9552bce793cf481",
+      "size": 616520,
+      "target": "darwin-x64"
+    },
+    {
+      "file": "linux-x64/libcsv_native.so",
+      "sha256": "1a13c8a85f3732f383ff4b88741e34cd6fe204f13a5295a861657c94edee7c5b",
+      "size": 1062936,
+      "target": "linux-x64"
+    }
+  ]
+}

@@ -2,74 +2,146 @@ name: Package
 
 on:
   workflow_dispatch:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
 
 jobs:
-  native:
-    name: Native ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            artifact_paths: |
-              prebuilds/darwin-arm64
-              prebuilds/darwin-x64
-          - os: ubuntu-latest
-            artifact_paths: prebuilds/linux-x64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      - name: Install native toolchain
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y clang cmake git ninja-build
-          else
-            brew install cmake ninja
-          fi
-      - name: Cache FetchContent sources
-        uses: actions/cache@v4
-        with:
-          path: .cache/fetchcontent
-          key: package-fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'toolchains/*.cmake') }}
-          restore-keys: |
-            package-fetchcontent-${{ runner.os }}-
-      - run: bun install --frozen-lockfile
-      - run: bun run build:native
-      - run: bun run stage:native
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-${{ runner.os }}
-          path: ${{ matrix.artifact_paths }}
-          if-no-files-found: error
-
-  package:
+  assemble:
     name: Assemble package
-    needs: native
     runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    outputs:
+      sha256: ${{ steps.checksum.outputs.sha256 }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-      - run: bun install --frozen-lockfile
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: native-*
-          path: prebuilds
-          merge-multiple: true
-      - run: bun run verify:native-package
-      - id: pack
-        name: Pack verified artifact
+
+      - name: Validate release tag
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          package_version="$(bun -e 'process.stdout.write((await Bun.file("package.json").json()).version)')"
+          if [ "$RELEASE_TAG" != "v$package_version" ]; then
+            echo "release tag $RELEASE_TAG must equal package version tag v$package_version" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify committed prebuilds
+        run: bun run verify:native-package
+
+      - name: Verify native build attestations
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/verify-native-package.ts --verify-attestations
+
+      - name: Build distribution files
+        run: bun run build:dist
+
+      - name: Pack verified artifact once
         run: |
           mkdir -p artifacts
-          tarball="$(bun pm pack --destination artifacts --quiet | tail -n 1)"
-          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
-      - run: bun scripts/test-package.ts "${{ steps.pack.outputs.tarball }}"
-      - uses: actions/upload-artifact@v4
+          bun pm pack --filename artifacts/package.tgz --ignore-scripts
+
+      - id: checksum
+        name: Record artifact checksum
+        run: echo "sha256=$(shasum -a 256 artifacts/package.tgz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Attest package artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/package.tgz
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
         with:
           name: konstit-csv-package
-          path: artifacts/*.tgz
+          path: artifacts/package.tgz
           if-no-files-found: error
+
+  smoke:
+    name: Smoke ${{ matrix.target }}
+    needs: assemble
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: darwin-arm64
+            os: macos-latest
+          - target: darwin-x64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: konstit-csv-package
+          path: artifacts
+
+      - name: Verify artifact checksum
+        run: echo "${{ needs.assemble.outputs.sha256 }}  artifacts/package.tgz" | shasum -a 256 --check
+
+      - name: Smoke-test installed package
+        run: bun scripts/test-package.ts artifacts/package.tgz
+
+  publish:
+    name: Publish package
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs:
+      - assemble
+      - smoke
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Download tested package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: konstit-csv-package
+          path: artifacts
+
+      - name: Verify artifact checksum
+        run: echo "${{ needs.assemble.outputs.sha256 }}  artifacts/package.tgz" | shasum -a 256 --check
+
+      - name: Publish tested package artifact
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish artifacts/package.tgz --registry https://registry.npmjs.org/

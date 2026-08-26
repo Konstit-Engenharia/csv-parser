@@ -4,9 +4,13 @@ import {
   type Pointer,
   suffix,
 } from 'bun:ffi';
-import { existsSync } from 'node:fs';
+import {
+  existsSync,
+  statSync,
+} from 'node:fs';
 import {
   dirname,
+  isAbsolute,
   join,
   resolve,
 } from 'node:path';
@@ -357,17 +361,42 @@ export const native = loadNative();
 function loadNative(): Library<typeof CSV_SYMBOLS> {
   const root = dirname(dirname(fileURLToPath(import.meta.url)));
   const target = `${process.platform}-${process.arch}`;
-  const candidates = [
-    join(root, 'build', target, `libcsv_native.${suffix}`),
-    join(root, 'build', target, 'Release', `libcsv_native.${suffix}`),
-    join(root, 'prebuilds', target, `libcsv_native.${suffix}`),
-    join(root, 'build', `libcsv_native.${suffix}`),
-    join(root, 'build', 'Release', `libcsv_native.${suffix}`),
-    join(root, `libcsv_native.${suffix}`),
-  ];
-  const libraryPath = requireNativeLibraryPath(candidates);
+  const configuredPath = process.env['CSV_NATIVE_LIBRARY_PATH'];
+  const libraryPath = configuredPath === undefined
+    ? requireNativeLibraryPath(nativeLibraryCandidates(root, target, suffix))
+    : requireConfiguredNativeLibraryPath(configuredPath);
 
   return dlopen(resolve(libraryPath), CSV_SYMBOLS);
+}
+
+export function requireConfiguredNativeLibraryPath(configuredPath: string): string {
+  if (configuredPath.length === 0) {
+    throw new Error('CSV_NATIVE_LIBRARY_PATH must not be empty');
+  }
+  if (!isAbsolute(configuredPath)) {
+    throw new Error('CSV_NATIVE_LIBRARY_PATH must be an absolute path');
+  }
+  let isFile = false;
+  try {
+    isFile = statSync(configuredPath).isFile();
+  } catch {
+    // The actionable error below also covers an inaccessible path.
+  }
+  if (!isFile) {
+    throw new Error(`CSV_NATIVE_LIBRARY_PATH is not a file: ${configuredPath}`);
+  }
+  return configuredPath;
+}
+
+export function nativeLibraryCandidates(root: string, target: string, librarySuffix: string): readonly string[] {
+  return [
+    join(root, 'prebuilds', target, `libcsv_native.${librarySuffix}`),
+    join(root, 'build', target, `libcsv_native.${librarySuffix}`),
+    join(root, 'build', target, 'Release', `libcsv_native.${librarySuffix}`),
+    join(root, 'build', `libcsv_native.${librarySuffix}`),
+    join(root, 'build', 'Release', `libcsv_native.${librarySuffix}`),
+    join(root, `libcsv_native.${librarySuffix}`),
+  ];
 }
 
 export function findNativeLibraryPath(candidates: readonly string[]): string | undefined {

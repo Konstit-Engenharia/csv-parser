@@ -10,7 +10,11 @@ import {
   join,
   resolve,
 } from 'node:path';
-import { repoRoot } from './native-target.ts';
+import {
+  nativeLibraryFileName,
+  packagedNativeTargets,
+  repoRoot,
+} from './native-target.ts';
 
 const tarball = process.argv[2];
 if (tarball === undefined) {
@@ -107,7 +111,9 @@ async function verifyInstalledPackage(directory: string): Promise<void> {
     'dist/cli.js',
     'dist/workers/count.worker.js',
     'dist/workers/rows.worker.js',
-  ] as const;
+    'prebuilds/manifest.json',
+    ...packagedNativeTargets.map((target) => `prebuilds/${target}/${nativeLibraryFileName(target)}`),
+  ];
   const missingFile = requiredFiles.find((file) => !files.includes(file));
   if (missingFile !== undefined) {
     throw new Error(`installed package is missing ${missingFile}`);

@@ -40,6 +40,12 @@ jobs:
       - name: Check for duplicate dependencies
         run: bun dedupe --check
 
+      - name: Verify tracked native package
+        run: bun run verify:native-package
+
+      - name: Smoke tracked Linux prebuild
+        run: bun test test/native-parser-core.test.ts
+
       - name: Check format
         run: bunx dprint check
 
@@ -50,6 +56,8 @@ jobs:
         run: bun run build:native
 
       - name: Test Bun API
+        env:
+          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
         run: bun run test
 
       - name: Test native C++
@@ -59,7 +67,11 @@ jobs:
         run: bun run test:native:sanitize
 
       - name: Benchmark regression smoke
+        env:
+          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
         run: bun bench/regression-smoke.ts
 
       - name: csv-parser comparison guard
+        env:
+          CSV_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/build/linux-x64/libcsv_native.so
         run: bun bench/csv-parser/regression-guard.ts

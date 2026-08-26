@@ -38,9 +38,9 @@ unordered_dense sources during the first configure; native test configurations a
 The downloaded sources are reused from `.cache/fetchcontent/`.
 
 The native build writes architecture-specific outputs under `build/<platform>-<arch>/`. On macOS, `bun run build:native`
-builds both `darwin-arm64` and `darwin-x64`; at runtime the FFI loader picks the library matching `process.platform` and
-`process.arch`. Legacy fallback paths such as `build/libcsv_native.*` and root `libcsv_native.*` are still checked for
-local development.
+builds both `darwin-arm64` and `darwin-x64`. The FFI loader uses the tracked library under
+`prebuilds/<platform>-<arch>/` by default. Set `CSV_NATIVE_LIBRARY_PATH` to an absolute library path to test a specific
+local build. Target-specific and legacy build paths remain development fallbacks when no tracked prebuild exists.
 
 On macOS, build and stage the Linux x64 prebuild with Docker Desktop:
 
@@ -49,8 +49,26 @@ bun run prebuilds:linux
 ```
 
 The command caches an Ubuntu 24.04 image with Clang, CMake, and Ninja, mounts the repository at `/work`, builds the
-existing `linux-x64-release` preset, and stages `prebuilds/linux-x64/libcsv_native.so`. Release packaging continues to
-build Linux x64 natively on the Ubuntu CI runner.
+existing `linux-x64-release` preset, and stages `prebuilds/linux-x64/libcsv_native.so`.
+
+Tracked prebuilds are the native release inputs. Use the manual `Update prebuilds` workflow to rebuild and test all
+targets. The workflow records the runner and toolchain, signs each binary with a GitHub build attestation, and creates one
+`tracked-prebuilds-<commit>` artifact. Download that artifact, replace `prebuilds/`, and commit the result. Run this
+workflow once before the first release that uses this policy because the existing binaries have no build attestations.
+
+For a manual multi-host update without attestations, build and stage all targets, then record and verify the binaries and
+native source inputs:
+
+```sh
+bun scripts/verify-native-package.ts --update-manifest
+bun run verify:native-package
+```
+
+This local route produces checksum metadata only. Release publication requires the attested workflow output.
+
+Normal CI verifies this manifest without rebuilding every tracked target. Package release jobs do not rebuild native
+code. Release publication also verifies that each committed binary was signed by the `Update prebuilds` workflow and
+that its attested source inputs match the release commit.
 
 The supported native targets are Clang C++20 builds for macOS ARM64/x64 and Linux x64. ARM64 requires NEON, and x64
 requires AVX2. CPUs without those instruction sets are not supported. Target-specific configuration is available through
@@ -70,11 +88,12 @@ If no matching library exists, imports fail with:
 native library not found. Run: bun run build:native
 ```
 
-Package assembly is separate from publication. `bun run build:package` builds and stages the native libraries supported by
-the current host, uses Bun's transpiler for runtime JavaScript, and uses TypeScript for declarations. The JavaScript and
-declarations are written to `dist/`. The `Package` workflow builds target-specific native libraries on macOS and Linux,
-verifies every required target, creates the tarball, and installs that tarball in a clean smoke-test project. Publication
-must use this verified artifact; `prepack` rebuilds the package and rejects missing native libraries.
+Package assembly is separate from publication. `bun run build:package` verifies the committed native libraries, uses
+Bun's transpiler for runtime JavaScript, and uses TypeScript for declarations. It does not rebuild native code. The
+JavaScript and declarations are written to `dist/`. The `Package` workflow packs the tracked prebuilds once, attests the
+tarball, and smoke-tests that exact file on Linux x64 and macOS ARM64/x64. A published GitHub release publishes the same
+tested tarball through the protected `npm-publish` environment. Manual workflow runs build and test the artifact without
+publishing it.
 
 ## Quick Start
 
@@ -494,13 +513,9 @@ bun run hooks:install
 ```
 
 Before every push, the hook builds the host's native libraries and the Linux x64 library, checks TypeScript and C++
-formatting, runs the linters and type checker, and runs both the Bun and native test suites. Building Linux x64 requires
-Docker to be installed and running. Run the same checks manually with `bun run prepush`.
-
-If `KONSTIT_NPM_REGISTRY` contains a registry URL, the hook also compares the package versions in the local and remote
-commits. A version increase publishes the committed package after all checks pass. The publish step requires the pushed
-commit to be `HEAD` and the worktree to be clean. Configure authentication for the registry through Bun's npm
-configuration.
+formatting, runs the linters and type checker, runs the Bun test suite against the new host build, and runs the native
+test suite. Building Linux x64 requires Docker to be installed and running. Run the same checks manually with
+`bun run prepush`. The hook only validates the push. It does not publish packages.
 
 ### Full-file filtered materialization benchmark
 
